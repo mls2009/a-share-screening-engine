@@ -85,5 +85,5 @@ class FeatureBuilder:
                 symbol,
                 timeframe,
                 zone_date,
-                detect_zones(frame, zone_date),
+                detect_zones(frame, zone_date, timeframe=timeframe),
             )

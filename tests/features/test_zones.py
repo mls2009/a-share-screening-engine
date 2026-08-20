@@ -71,6 +71,35 @@ def test_detects_rising_trend_support_from_multiple_pivot_anchors() -> None:
     assert len(trend.anchors) >= 2
 
 
+def test_daily_trend_selection_returns_support_and_resistance_when_strict_fit_misses_one() -> None:
+    frame = _frame(
+        [13, 9, 14, 10, 13, 11, 12.5, 12, 12, 13, 13.2, 13.8, 13.5, 13.2, 13.8, 13.1],
+        lows={1: 8, 4: 9, 7: 10.5, 10: 12.5, 13: 12.8},
+        highs={2: 16, 5: 15, 8: 13, 11: 15, 14: 14.2},
+    )
+    as_of = date(2026, 1, 22)
+
+    strict = detect_zones(frame, as_of=as_of, pivot_order=1)
+    daily = detect_zones(
+        frame, as_of=as_of, timeframe=Timeframe.DAY, pivot_order=1
+    )
+    weekly = detect_zones(
+        frame, as_of=as_of, timeframe=Timeframe.WEEK, pivot_order=1
+    )
+
+    strict_trends = [zone for zone in strict if zone.geometry == "trend"]
+    daily_trends = [zone for zone in daily if zone.geometry == "trend"]
+    assert {zone.zone_kind for zone in strict_trends} != {"support", "resistance"}
+    assert {zone.zone_kind for zone in daily_trends} == {"support", "resistance"}
+    assert next(
+        zone.center_price for zone in daily_trends if zone.zone_kind == "support"
+    ) < frame.iloc[-1]["close"]
+    assert next(
+        zone.center_price for zone in daily_trends if zone.zone_kind == "resistance"
+    ) > frame.iloc[-1]["close"]
+    assert weekly == strict
+
+
 def test_zone_calculation_respects_explicit_as_of_without_future_leakage() -> None:
     frame = _frame(
         [12, 10.5, 12, 14.5, 12, 10.4, 12, 14.6, 12, 30],

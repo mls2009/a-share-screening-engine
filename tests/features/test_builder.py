@@ -108,7 +108,10 @@ def test_builder_persists_automatic_support_and_resistance_zones(tmp_path: Path)
     kinds = {
         row[0]
         for row in database.connection.execute(
-            "select distinct zone_kind from support_resistance_zones where timeframe = '1d'"
+            """
+            select distinct zone_kind from support_resistance_zones
+            where timeframe = '1d' and geometry = 'trend'
+            """
         ).fetchall()
     }
     assert kinds == {"support", "resistance"}

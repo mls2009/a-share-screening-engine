@@ -85,9 +85,117 @@ def _clusters(
     return [cluster for cluster in clusters if len(cluster) >= 2]
 
 
+def _fit_trend(
+    data: pd.DataFrame, positions: list[int], column: str
+) -> tuple[float, float, float, float]:
+    x = np.array(positions, dtype=float)
+    prices = np.array([float(data.iloc[position][column]) for position in positions])
+    slope, intercept = np.polyfit(x, prices, 1)
+    center = float(slope * (len(data) - 1) + intercept)
+    residual = float(np.mean(np.abs(prices - (slope * x + intercept))))
+    return float(slope), float(intercept), center, residual
+
+
+def _daily_trend_zone(
+    data: pd.DataFrame,
+    as_of: date,
+    kind: str,
+    column: str,
+    positions: list[int],
+    latest_close: float,
+    tolerance: float,
+    rule_version: str,
+) -> PriceZone | None:
+    recent = positions[-12:]
+    if len(recent) < 2:
+        return None
+    candidates = []
+    for size in range(2, min(5, len(recent)) + 1):
+        for start in range(len(recent) - size + 1):
+            selected = recent[start : start + size]
+            slope, intercept, center, residual = _fit_trend(
+                data, selected, column
+            )
+            role_valid = center < latest_close if kind == "support" else center > latest_close
+            candidates.append(
+                (selected, slope, intercept, center, residual, role_valid)
+            )
+
+    confirmed = [item for item in candidates if item[5] and item[4] <= tolerance]
+    role_valid = [item for item in candidates if item[5]]
+    if confirmed:
+        chosen = min(
+            confirmed,
+            key=lambda item: (
+                -len(item[0]),
+                item[4] / tolerance,
+                -item[0][-1],
+                abs(item[3] - latest_close),
+            ),
+        )
+    elif role_valid:
+        chosen = min(
+            role_valid,
+            key=lambda item: (
+                item[4] / tolerance,
+                -len(item[0]),
+                -item[0][-1],
+                abs(item[3] - latest_close),
+            ),
+        )
+    else:
+        chosen = min(
+            candidates,
+            key=lambda item: (item[4] / tolerance, -len(item[0]), -item[0][-1]),
+        )
+
+    selected, slope, intercept, center, residual, is_role_valid = chosen
+    if is_role_valid:
+        anchors = tuple(
+            (
+                pd.Timestamp(data.iloc[position]["timestamp"]).date(),
+                float(data.iloc[position][column]),
+            )
+            for position in selected
+        )
+    else:
+        shifted_center = (
+            latest_close - tolerance if kind == "support" else latest_close + tolerance
+        )
+        intercept += shifted_center - center
+        center = shifted_center
+        first, last = selected[0], selected[-1]
+        anchors = tuple(
+            (
+                pd.Timestamp(data.iloc[position]["timestamp"]).date(),
+                float(slope * position + intercept),
+            )
+            for position in (first, last)
+        )
+    strength = max(
+        0.1,
+        min(1.0, len(selected) / 5 * (1 - min(residual / tolerance, 0.9))),
+    )
+    return PriceZone(
+        as_of_date=as_of,
+        zone_kind=kind,
+        geometry="trend",
+        lower_price=center - tolerance,
+        center_price=center,
+        upper_price=center + tolerance,
+        slope=slope,
+        intercept=intercept,
+        anchors=anchors,
+        strength=strength,
+        touches=len(selected),
+        rule_version=rule_version,
+    )
+
+
 def detect_zones(
     bars: pd.DataFrame,
     as_of: date,
+    timeframe: Timeframe | None = None,
     pivot_order: int = 2,
     rule_version: str = "v1",
 ) -> list[PriceZone]:
@@ -149,13 +257,24 @@ def detect_zones(
         ("support", "low", low_positions),
         ("resistance", "high", high_positions),
     ):
+        if timeframe == Timeframe.DAY:
+            zone = _daily_trend_zone(
+                data,
+                as_of,
+                kind,
+                column,
+                positions,
+                latest_close,
+                tolerance,
+                rule_version,
+            )
+            if zone is not None:
+                zones.append(zone)
+            continue
         selected = positions[-5:]
         if len(selected) < 2:
             continue
-        prices = np.array([float(data.iloc[position][column]) for position in selected])
-        slope, intercept = np.polyfit(np.array(selected, dtype=float), prices, 1)
-        center = float(slope * (len(data) - 1) + intercept)
-        residual = float(np.mean(np.abs(prices - (slope * np.array(selected) + intercept))))
+        slope, intercept, center, residual = _fit_trend(data, selected, column)
         if residual > tolerance:
             continue
         if kind == "support" and center >= latest_close:
@@ -163,8 +282,11 @@ def detect_zones(
         if kind == "resistance" and center <= latest_close:
             continue
         anchors = tuple(
-            (pd.Timestamp(data.iloc[position]["timestamp"]).date(), float(price))
-            for position, price in zip(selected, prices, strict=True)
+            (
+                pd.Timestamp(data.iloc[position]["timestamp"]).date(),
+                float(data.iloc[position][column]),
+            )
+            for position in selected
         )
         zones.append(
             PriceZone(
