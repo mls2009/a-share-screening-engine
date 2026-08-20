@@ -367,59 +367,137 @@ def nearest_zones(
     as_of: date,
     limit_each: int = 3,
 ) -> list[dict]:
-    close_row = connection.execute(
-        """
-        select close from market_features
-        where symbol = ? and timeframe = ? and feature_date <= ?
-        order by feature_date desc limit 1
-        """,
-        [symbol, timeframe.value, as_of],
-    ).fetchone()
-    auto_zone_date = connection.execute(
-        """
-        select max(as_of_date) from support_resistance_zones
-        where symbol = ? and timeframe = ? and as_of_date <= ? and source = 'auto'
-        """,
-        [symbol, timeframe.value, as_of],
-    ).fetchone()
-    if close_row is None:
+    rows, close = _active_zones(connection, symbol, timeframe, as_of)
+    if close is None:
         return []
+    return _nearest_horizontal_zones(rows, close, limit_each)
+
+
+def chart_zones(
+    connection: duckdb.DuckDBPyConnection,
+    symbol: str,
+    timeframe: Timeframe,
+    as_of: date,
+    limit_each: int = 3,
+) -> list[dict]:
+    rows, close = _active_zones(connection, symbol, timeframe, as_of)
+    if close is None:
+        return []
+
+    selected = [row for row in rows if row["source"] == "manual"]
+    selected.extend(
+        _nearest_horizontal_zones(rows, close, limit_each, source="auto")
+    )
+    auto_trends = [
+        row
+        for row in rows
+        if row["source"] == "auto" and row["geometry"] == "trend"
+    ]
+    for kind in ("uptrend", "downtrend"):
+        matching = [row for row in auto_trends if row["zone_kind"] == kind]
+        if matching:
+            selected.append(
+                max(
+                    matching,
+                    key=lambda row: (
+                        row["last_touched_on"] or date.min,
+                        row["touches"],
+                        row["strength"],
+                    ),
+                )
+            )
+    return selected
+
+
+def _active_zones(
+    connection: duckdb.DuckDBPyConnection,
+    symbol: str,
+    timeframe: Timeframe,
+    as_of: date,
+) -> tuple[list[dict], float | None]:
     cursor = connection.execute(
         """
-        select * from support_resistance_zones
-        where symbol = ? and timeframe = ? and state = 'active' and as_of_date <= ?
-          and (source = 'manual' or (source = 'auto' and as_of_date = ?))
+        with latest_close as (
+          select close from market_features
+          where symbol = ? and timeframe = ? and feature_date <= ?
+          order by feature_date desc limit 1
+        ),
+        latest_auto as (
+          select max(as_of_date) as as_of_date
+          from support_resistance_zones
+          where symbol = ? and timeframe = ? and as_of_date <= ? and source = 'auto'
+        ),
+        active as (
+          select zones.*
+          from support_resistance_zones zones, latest_auto
+          where zones.symbol = ? and zones.timeframe = ?
+            and zones.state = 'active' and zones.as_of_date <= ?
+            and (
+              zones.source = 'manual'
+              or (zones.source = 'auto' and zones.as_of_date = latest_auto.as_of_date)
+            )
+        )
+        select active.*, latest_close.close as latest_close,
+          exists(
+            select 1 from zone_deletion_markers marker
+            where marker.symbol = ? and marker.timeframe = ?
+              and marker.geometry = active.geometry
+              and marker.lower_price <= active.center_price
+              and marker.upper_price >= active.center_price
+          ) as reappeared
+        from latest_close left join active on true
         """,
         [
             symbol,
             timeframe.value,
             as_of,
-            auto_zone_date[0] if auto_zone_date is not None else None,
+            symbol,
+            timeframe.value,
+            as_of,
+            symbol,
+            timeframe.value,
+            as_of,
+            symbol,
+            timeframe.value,
         ],
     )
     columns = [column[0] for column in cursor.description]
-    rows = [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
-    markers = connection.execute(
-        """
-        select geometry, lower_price, upper_price
-        from zone_deletion_markers
-        where symbol = ? and timeframe = ?
-        """,
-        [symbol, timeframe.value],
-    ).fetchall()
+    loaded = [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+    if not loaded:
+        return [], None
+    close = float(loaded[0].pop("latest_close"))
+    rows = []
+    for row in loaded:
+        row.pop("latest_close", None)
+        if row["zone_id"] is None:
+            continue
+        rows.append(row)
     for row in rows:
-        if row["source"] == "auto" and row["center_price"] != close_row[0]:
-            row["zone_kind"] = (
-                "support" if row["center_price"] < close_row[0] else "resistance"
-            )
-        row["reappeared"] = any(
-            geometry == row["geometry"]
-            and lower_price <= row["center_price"] <= upper_price
-            for geometry, lower_price, upper_price in markers
-        )
+        if (
+            row["source"] == "auto"
+            and row["geometry"] == "horizontal"
+            and row["zone_kind"] in {"support", "resistance"}
+            and row["center_price"] != close
+        ):
+            row["zone_kind"] = "support" if row["center_price"] < close else "resistance"
+    return rows, close
+
+
+def _nearest_horizontal_zones(
+    rows: list[dict],
+    close: float,
+    limit_each: int,
+    source: str | None = None,
+) -> list[dict]:
     selected = []
     for kind in ("support", "resistance"):
-        matching = [row for row in rows if row["zone_kind"] == kind]
-        matching.sort(key=lambda row: abs(row["center_price"] - close_row[0]))
+        matching = [
+            row
+            for row in rows
+            if row["geometry"] == "horizontal"
+            and row["zone_kind"] == kind
+            and (source is None or row["source"] == source)
+        ]
+        matching.sort(key=lambda row: abs(row["center_price"] - close))
         selected.extend(matching[:limit_each])
     return selected

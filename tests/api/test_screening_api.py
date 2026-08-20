@@ -179,6 +179,36 @@ def test_bars_zones_run_results_and_sync_status_contracts(tmp_path: Path) -> Non
     assert sync.json()["succeeded"] == 100
 
 
+def test_zones_api_returns_trends_independently_of_horizontal_limit(tmp_path: Path) -> None:
+    client, database = _client(tmp_path)
+    database.connection.executemany(
+        """
+        insert into support_resistance_zones
+          (zone_id, symbol, timeframe, as_of_date, zone_kind, geometry,
+           lower_price, center_price, upper_price, slope, intercept, strength,
+           touches, last_touched_on, source, rule_version)
+        values (?, '600001.SH', '1d', '2026-08-20', ?, 'trend', ?, ?, ?, ?, ?,
+                0.8, 3, '2026-08-20', 'auto', 'v1')
+        """,
+        [
+            ["00000000-0000-0000-0000-000000000201", "uptrend", 12.9, 13.0, 13.1, 0.1, 10.0],
+            ["00000000-0000-0000-0000-000000000202", "downtrend", 10.9, 11.0, 11.1, -0.1, 14.0],
+        ],
+    )
+
+    response = client.get(
+        "/api/symbols/600001.SH/zones",
+        params={"timeframe": "1d", "as_of": "2026-08-20", "limit_each": 1},
+    )
+
+    assert response.status_code == 200
+    assert {row["zone_kind"] for row in response.json()} == {
+        "support",
+        "uptrend",
+        "downtrend",
+    }
+
+
 def test_validation_errors_have_stable_code_message_and_path(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
     invalid = {**CONDITION, "metric": "not_a_metric"}

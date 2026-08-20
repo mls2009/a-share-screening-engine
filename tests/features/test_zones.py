@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from astock.domain.market import Timeframe
+from astock.features import zones as zones_module
 from astock.features.zones import (
     ManualZoneInput,
     create_manual_zone,
@@ -220,6 +221,85 @@ def test_persists_auto_zones_and_returns_nearest_support_and_resistance(tmp_path
     assert all(row["source"] == "auto" for row in nearest)
 
 
+def test_distance_and_chart_zone_selectors_keep_trends_separate(tmp_path: Path) -> None:
+    database = Database(tmp_path / "zone-selectors.duckdb")
+    database.migrate()
+    as_of = date(2026, 8, 20)
+    database.connection.execute(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, close)
+        values ('600001.SH', '1d', ?, 'v1', 10)
+        """,
+        [as_of],
+    )
+    database.connection.executemany(
+        """
+        insert into support_resistance_zones
+          (zone_id, symbol, timeframe, as_of_date, zone_kind, geometry,
+           lower_price, center_price, upper_price, slope, intercept, strength,
+           touches, last_touched_on, state, source, rule_version)
+        values (?, '600001.SH', '1d', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'v1')
+        """,
+        [
+            ["00000000-0000-0000-0000-000000000101", as_of, "resistance", "horizontal", 9.4, 9.5, 9.6, None, None, 0.8, 3, date(2026, 8, 18), "active", "auto"],
+            ["00000000-0000-0000-0000-000000000102", as_of, "support", "horizontal", 8.4, 8.5, 8.6, None, None, 0.9, 5, date(2026, 8, 19), "active", "auto"],
+            ["00000000-0000-0000-0000-000000000103", as_of, "support", "horizontal", 10.2, 10.3, 10.4, None, None, 0.7, 2, date(2026, 8, 17), "active", "auto"],
+            ["00000000-0000-0000-0000-000000000104", as_of, "resistance", "horizontal", 11.9, 12.0, 12.1, None, None, 0.9, 5, date(2026, 8, 19), "active", "auto"],
+            ["00000000-0000-0000-0000-000000000105", as_of, "uptrend", "trend", 10.9, 11.0, 11.1, 0.1, 8.0, 0.3, 2, date(2026, 8, 19), "active", "auto"],
+            ["00000000-0000-0000-0000-000000000106", as_of, "uptrend", "trend", 8.9, 9.0, 9.1, 0.1, 7.0, 1.0, 9, date(2026, 8, 18), "active", "auto"],
+            ["00000000-0000-0000-0000-000000000107", as_of, "downtrend", "trend", 8.8, 8.9, 9.0, -0.1, 12.0, 0.9, 4, date(2026, 8, 19), "active", "auto"],
+            ["00000000-0000-0000-0000-000000000108", as_of, "downtrend", "trend", 8.7, 8.8, 8.9, -0.1, 12.0, 1.0, 3, date(2026, 8, 19), "active", "auto"],
+            ["00000000-0000-0000-0000-000000000112", as_of, "downtrend", "trend", 8.6, 8.7, 8.8, -0.1, 12.0, 0.95, 4, date(2026, 8, 19), "active", "auto"],
+            ["00000000-0000-0000-0000-000000000109", as_of, "support", "horizontal", 9.8, 9.9, 10.0, None, None, 1.0, 1, date(2026, 8, 20), "active", "manual"],
+            ["00000000-0000-0000-0000-000000000110", as_of, "support", "trend", 9.85, 9.95, 10.05, 0.05, 9.0, 1.0, 2, date(2026, 8, 20), "active", "manual"],
+            ["00000000-0000-0000-0000-000000000111", as_of, "resistance", "trend", 10.4, 10.5, 10.6, -0.05, 11.0, 1.0, 2, date(2026, 8, 20), "deleted", "manual"],
+        ],
+    )
+    database.connection.executemany(
+        """
+        insert into zone_deletion_markers
+          (marker_id, symbol, timeframe, geometry, lower_price, center_price, upper_price)
+        values (?, '600001.SH', '1d', ?, ?, ?, ?)
+        """,
+        [
+            ["00000000-0000-0000-0000-000000000121", "horizontal", 10.2, 10.3, 10.4],
+            ["00000000-0000-0000-0000-000000000122", "trend", 9.85, 9.95, 10.05],
+        ],
+    )
+
+    nearest = nearest_zones(
+        database.connection, "600001.SH", Timeframe.DAY, as_of, limit_each=1
+    )
+    chart = zones_module.chart_zones(
+        database.connection, "600001.SH", Timeframe.DAY, as_of, limit_each=1
+    )
+
+    assert {str(row["zone_id"]) for row in nearest} == {
+        "00000000-0000-0000-0000-000000000103",
+        "00000000-0000-0000-0000-000000000109",
+    }
+    assert all(row["geometry"] == "horizontal" for row in nearest)
+    assert next(
+        row for row in nearest if str(row["zone_id"]).endswith("103")
+    )["reappeared"] is True
+    assert {str(row["zone_id"]) for row in chart} == {
+        "00000000-0000-0000-0000-000000000101",
+        "00000000-0000-0000-0000-000000000103",
+        "00000000-0000-0000-0000-000000000105",
+        "00000000-0000-0000-0000-000000000112",
+        "00000000-0000-0000-0000-000000000109",
+        "00000000-0000-0000-0000-000000000110",
+    }
+    chart_by_id = {str(row["zone_id"]): row for row in chart}
+    assert chart_by_id["00000000-0000-0000-0000-000000000101"]["zone_kind"] == "support"
+    assert chart_by_id["00000000-0000-0000-0000-000000000103"]["zone_kind"] == "resistance"
+    assert chart_by_id["00000000-0000-0000-0000-000000000105"]["zone_kind"] == "uptrend"
+    assert chart_by_id["00000000-0000-0000-0000-000000000112"]["zone_kind"] == "downtrend"
+    assert chart_by_id["00000000-0000-0000-0000-000000000103"]["reappeared"] is True
+    assert chart_by_id["00000000-0000-0000-0000-000000000110"]["reappeared"] is True
+
+
 def test_manual_zone_survives_auto_replacement_and_can_be_deleted(tmp_path: Path) -> None:
     database = Database(tmp_path / "manual-zones.duckdb")
     database.migrate()
@@ -250,7 +330,9 @@ def test_manual_zone_survives_auto_replacement_and_can_be_deleted(tmp_path: Path
     )
 
     replace_auto_zones(database.connection, "600001.SH", Timeframe.DAY, as_of, [])
-    rows = nearest_zones(database.connection, "600001.SH", Timeframe.DAY, as_of)
+    rows = zones_module.chart_zones(
+        database.connection, "600001.SH", Timeframe.DAY, as_of
+    )
 
     assert len(rows) == 1
     assert rows[0]["zone_id"] == zone_id
@@ -377,6 +459,9 @@ def test_deleting_only_latest_automatic_zone_does_not_reveal_previous_batch(
     ) is True
 
     assert nearest_zones(
+        database.connection, "600001.SH", Timeframe.DAY, latest, limit_each=20
+    ) == []
+    assert zones_module.chart_zones(
         database.connection, "600001.SH", Timeframe.DAY, latest, limit_each=20
     ) == []
 

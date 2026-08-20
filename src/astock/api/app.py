@@ -22,9 +22,9 @@ from astock.features.builder import FeatureBuilder
 from astock.features.store import MarketFeatureStore
 from astock.features.zones import (
     ManualZoneInput,
+    chart_zones,
     create_manual_zone,
     delete_zone,
-    nearest_zones,
 )
 from astock.live.calendar import SHANGHAI
 from astock.live.models import MonitorScope, MonitorTaskCreate
@@ -218,7 +218,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         as_of: date,
         limit_each: int = Query(default=3, ge=1, le=20),
     ) -> list[dict]:
-        rows = nearest_zones(
+        rows = chart_zones(
             context.database.connection, symbol, timeframe, as_of, limit_each
         )
         return jsonable_encoder(rows)
