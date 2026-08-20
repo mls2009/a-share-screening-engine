@@ -48,9 +48,9 @@ def _compare(left: Any, right: Any, operator: Operator) -> TruthValue:
     if left is None or right is None:
         return TruthValue.UNKNOWN
     if operator == Operator.EQ:
-        return _truth(left == right)
+        return _truth(right in left if isinstance(left, list) else left == right)
     if operator == Operator.NE:
-        return _truth(left != right)
+        return _truth(right not in left if isinstance(left, list) else left != right)
     if operator == Operator.GT:
         return _truth(left > right)
     if operator == Operator.GTE:
@@ -60,9 +60,17 @@ def _compare(left: Any, right: Any, operator: Operator) -> TruthValue:
     if operator == Operator.LTE:
         return _truth(left <= right)
     if operator == Operator.IN:
-        return _truth(left in right)
+        return _truth(
+            any(value in right for value in left)
+            if isinstance(left, list)
+            else left in right
+        )
     if operator == Operator.NOT_IN:
-        return _truth(left not in right)
+        return _truth(
+            all(value not in right for value in left)
+            if isinstance(left, list)
+            else left not in right
+        )
     if operator in {Operator.BETWEEN, Operator.NOT_BETWEEN}:
         inside = right[0] <= left <= right[1]
         return _truth(inside if operator == Operator.BETWEEN else not inside)
@@ -83,7 +91,11 @@ def _right_value(
         return node.right.value
     assert isinstance(node.right, MetricOperand)
     value = _value(history, node.right.timeframe, node.right.metric, index)
-    return None if value is None else value * node.right.multiplier
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return value * node.right.multiplier
+    return value if node.right.multiplier == 1 else None
 
 
 def _evaluate_condition(

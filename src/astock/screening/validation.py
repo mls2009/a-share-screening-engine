@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 
 from astock.screening.catalog import DEFAULT_CATALOG, MetricCatalog
@@ -47,10 +48,25 @@ def validate_tree(
         if isinstance(node.right, ConstantOperand):
             if node.right.unit != left.unit:
                 issue("unit_mismatch", f"{left.unit} cannot compare with {node.right.unit}", path)
-            if node.operator.value in {"between", "not_between"} and (
-                not isinstance(node.right.value, list) or len(node.right.value) != 2
-            ):
-                issue("invalid_range", "between requires exactly two values", path)
+            if node.operator.value in {"between", "not_between"}:
+                value = node.right.value
+                valid_range = (
+                    isinstance(value, list)
+                    and len(value) == 2
+                    and all(
+                        isinstance(item, (int, float))
+                        and not isinstance(item, bool)
+                        and math.isfinite(item)
+                        for item in value
+                    )
+                    and value[0] <= value[1]
+                )
+                if not valid_range:
+                    issue(
+                        "invalid_range",
+                        "between requires two ordered finite numbers",
+                        path,
+                    )
             if node.operator.value in {"in", "not_in"} and (
                 node.right.unit.value != "category"
                 or not isinstance(node.right.value, list)
@@ -65,6 +81,13 @@ def validate_tree(
             return
 
         assert isinstance(node.right, MetricOperand)
+        if node.operator.value in {"in", "not_in"}:
+            issue(
+                "invalid_membership",
+                "membership requires a constant category list",
+                path,
+            )
+            return
         if node.operator.value in {"between", "not_between"}:
             issue("invalid_range", "between requires a two-value constant", path)
             return

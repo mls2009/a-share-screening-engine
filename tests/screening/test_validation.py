@@ -178,3 +178,48 @@ def test_membership_requires_a_non_empty_category_list() -> None:
 
     assert validate_tree(valid) == []
     assert validate_tree(empty)[0].code == "invalid_membership"
+
+
+def test_category_membership_rejects_metric_operand_but_keeps_legacy_equality() -> None:
+    membership_metric = ConditionNode.model_validate(
+        {
+            "kind": "condition",
+            "metric": "board",
+            "timeframe": "1d",
+            "operator": "in",
+            "right": {
+                "kind": "metric",
+                "metric": "pattern_type",
+                "timeframe": "1d",
+            },
+        }
+    )
+    legacy = ConditionNode.model_validate(
+        {
+            "kind": "condition",
+            "metric": "board",
+            "timeframe": "1d",
+            "operator": "eq",
+            "right": {"kind": "constant", "value": "main", "unit": "category"},
+        }
+    )
+
+    assert validate_tree(membership_metric)[0].code == "invalid_membership"
+    assert validate_tree(legacy) == []
+
+
+def test_numeric_range_rejects_strings_non_finite_values_and_reverse_order() -> None:
+    def condition(value: list[object]) -> ConditionNode:
+        return ConditionNode.model_validate(
+            {
+                "kind": "condition",
+                "metric": "return_20",
+                "timeframe": "1d",
+                "operator": "between",
+                "right": {"kind": "constant", "value": value, "unit": "percent"},
+            }
+        )
+
+    assert validate_tree(condition(["low", "high"]))[0].code == "invalid_range"
+    assert validate_tree(condition([10, float("inf")]))[0].code == "invalid_range"
+    assert validate_tree(condition([30, 10]))[0].code == "invalid_range"

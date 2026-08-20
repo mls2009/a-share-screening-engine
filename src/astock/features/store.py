@@ -240,16 +240,23 @@ class MarketFeatureStore:
                 enriched[key] = value
 
         feature_date = enriched["feature_date"]
-        pattern = self.connection.execute(
+        patterns = self.connection.execute(
             """
             select pattern_type, strength from pattern_events
             where symbol = ? and timeframe = ? and event_date = ?
-            order by strength desc, pattern_type limit 1
+            order by strength desc, pattern_type
             """,
             [symbol, timeframe.value, feature_date],
-        ).fetchone()
-        enriched["pattern_type"] = pattern[0] if pattern else None
-        enriched["pattern_strength"] = pattern[1] if pattern else None
+        ).fetchall()
+        if not patterns:
+            enriched["pattern_type"] = None
+            enriched["pattern_strength"] = None
+        else:
+            pattern_types = [pattern[0] for pattern in patterns]
+            enriched["pattern_type"] = (
+                pattern_types[0] if len(pattern_types) == 1 else pattern_types
+            )
+            enriched["pattern_strength"] = patterns[0][1]
 
         close = enriched.get("close")
         zones = nearest_zones(self.connection, symbol, timeframe, feature_date, limit_each=1)

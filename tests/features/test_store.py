@@ -131,3 +131,36 @@ def test_history_derives_listing_stage_from_trading_days(tmp_path: Path) -> None
         "000003.SZ": "secondary_new",
         "000004.SZ": "established",
     }
+
+
+def test_history_exposes_all_patterns_detected_on_the_same_day(tmp_path: Path) -> None:
+    database = Database(tmp_path / "multiple-patterns.duckdb")
+    database.migrate()
+    database.connection.execute(
+        """
+        insert into symbols (symbol, name, exchange, board, is_listed)
+        values ('600001.SH', '测试股份', 'SH', 'main', true)
+        """
+    )
+    database.connection.execute(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, close)
+        values ('600001.SH', '1d', '2026-08-20', 'v1', 12)
+        """
+    )
+    database.connection.executemany(
+        """
+        insert into pattern_events
+          (symbol, timeframe, event_date, pattern_type, rule_version, strength)
+        values ('600001.SH', '1d', '2026-08-20', ?, 'v1', ?)
+        """,
+        [["doji", 0.7], ["hammer", 0.9]],
+    )
+
+    row = MarketFeatureStore(database).read_history(
+        "600001.SH", Timeframe.DAY, date(2026, 8, 20), 1
+    )[0]
+
+    assert row["pattern_type"] == ["hammer", "doji"]
+    assert row["pattern_strength"] == 0.9

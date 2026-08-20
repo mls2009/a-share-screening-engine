@@ -101,3 +101,24 @@ def test_evaluates_category_membership_and_exclusion() -> None:
 
     assert evaluate_tree(board, history).result == TruthValue.TRUE
     assert evaluate_tree(pattern, history).result == TruthValue.TRUE
+
+
+def test_membership_and_legacy_equality_match_any_detected_pattern() -> None:
+    history = {
+        Timeframe.DAY: [
+            {"pattern_type": ["doji", "hammer"], "board": "main"}
+        ]
+    }
+    membership = _condition(
+        metric="pattern_type",
+        operator="in",
+        right={"kind": "constant", "value": ["hammer"], "unit": "category"},
+    )
+    legacy = _condition(
+        metric="pattern_type",
+        operator="eq",
+        right={"kind": "constant", "value": "hammer", "unit": "category"},
+    )
+
+    assert evaluate_tree(membership, history).result == TruthValue.TRUE
+    assert evaluate_tree(legacy, history).result == TruthValue.TRUE
