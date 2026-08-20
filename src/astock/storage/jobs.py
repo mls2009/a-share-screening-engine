@@ -110,6 +110,16 @@ class SyncJobRepository:
             [status, job_id],
         )
 
+    def reopen(self, job_id: UUID) -> None:
+        self.connection.execute(
+            """
+            update data_sync_jobs
+            set status = 'running', finished_at = null
+            where job_id = ?
+            """,
+            [job_id],
+        )
+
     def _refresh_counts(self, job_id: UUID, current_symbol: str) -> None:
         self.connection.execute(
             """
