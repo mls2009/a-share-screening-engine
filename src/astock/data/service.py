@@ -137,7 +137,12 @@ class MarketDataService:
             )
             if symbol_rows:
                 connection.executemany(
-                    "insert or replace into symbols values (?, ?, ?, null, null)",
+                    """
+                    insert into symbols (symbol, name, exchange)
+                    values (?, ?, ?)
+                    on conflict (symbol) do update set
+                      name = excluded.name, exchange = excluded.exchange
+                    """,
                     [
                         [row["symbol"], row["name"], row["symbol"].split(".")[1]]
                         for row in symbol_rows
