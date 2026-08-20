@@ -231,14 +231,61 @@ def test_delete_zone_persists_marker_for_automatic_line_and_checks_owner(
 
     assert delete_zone(database.connection, "600001.SH", zone_id) is True
     assert database.connection.execute(
-        "select count(*) from support_resistance_zones where zone_id = ?", [zone_id]
+        """
+        select count(*) from support_resistance_zones
+        where zone_id = ? and state = 'active'
+        """,
+        [zone_id],
     ).fetchone() == (0,)
+    assert database.connection.execute(
+        "select state from support_resistance_zones where zone_id = ?", [zone_id]
+    ).fetchone() == ("deleted",)
     assert database.connection.execute(
         """
         select symbol, timeframe, geometry, lower_price, center_price, upper_price
         from zone_deletion_markers
         """
     ).fetchone() == ("600001.SH", "1d", "horizontal", 9.8, 10.0, 10.2)
+
+
+def test_deleting_only_latest_automatic_zone_does_not_reveal_previous_batch(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "zone-batches.duckdb")
+    database.migrate()
+    latest = date(2026, 8, 20)
+    database.connection.execute(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, close)
+        values ('600001.SH', '1d', ?, 'v1', 12)
+        """,
+        [latest],
+    )
+    database.connection.executemany(
+        """
+        insert into support_resistance_zones
+          (zone_id, symbol, timeframe, as_of_date, zone_kind, geometry,
+           lower_price, center_price, upper_price, strength, touches, source,
+           rule_version)
+        values (?, '600001.SH', '1d', ?, 'support', 'horizontal',
+                9.8, 10, 10.2, 0.8, 3, 'auto', 'v1')
+        """,
+        [
+            ["00000000-0000-0000-0000-000000000031", date(2026, 8, 19)],
+            ["00000000-0000-0000-0000-000000000032", latest],
+        ],
+    )
+
+    assert delete_zone(
+        database.connection,
+        "600001.SH",
+        "00000000-0000-0000-0000-000000000032",
+    ) is True
+
+    assert nearest_zones(
+        database.connection, "600001.SH", Timeframe.DAY, latest, limit_each=20
+    ) == []
 
 
 def test_nearest_zones_converts_automatic_roles_but_preserves_manual_choice(

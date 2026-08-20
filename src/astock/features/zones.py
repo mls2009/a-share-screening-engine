@@ -397,7 +397,7 @@ def delete_zone(
         """
         select symbol, timeframe, geometry, lower_price, center_price, upper_price
         from support_resistance_zones
-        where zone_id = ? and symbol = ?
+        where zone_id = ? and symbol = ? and state = 'active'
         """,
         [zone_id, symbol],
     ).fetchone()
@@ -415,7 +415,10 @@ def delete_zone(
             [uuid4(), *zone],
         )
         connection.execute(
-            "delete from support_resistance_zones where zone_id = ? and symbol = ?",
+            """
+            update support_resistance_zones set state = 'deleted'
+            where zone_id = ? and symbol = ?
+            """,
             [zone_id, symbol],
         )
         connection.execute("commit")
