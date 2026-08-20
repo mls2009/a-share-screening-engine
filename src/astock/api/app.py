@@ -96,6 +96,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
     monitor_scheduler = MonitoringScheduler(monitoring)
     app.state.monitoring = monitoring
     app.state.monitor_scheduler = monitor_scheduler
+    app.add_event_handler("shutdown", monitor_scheduler.stop)
 
     @app.get("/api/catalog")
     def catalog() -> list[dict]:

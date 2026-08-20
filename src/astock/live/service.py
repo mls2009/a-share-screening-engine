@@ -1,4 +1,5 @@
 from datetime import datetime
+from threading import Lock
 from typing import Protocol
 
 from astock.domain.market import Quote
@@ -28,6 +29,7 @@ class MonitoringService:
         self.quote_source = quote_source
         self.outbox = outbox
         self.max_quote_age_seconds = max_quote_age_seconds
+        self._scan_lock = Lock()
 
     def _calendar(self, now: datetime) -> TradingCalendar:
         rows = self.database.connection.execute(
@@ -36,7 +38,7 @@ class MonitoringService:
         ).fetchall()
         return TradingCalendar({row[0] for row in rows})
 
-    def _run(self, scope: MonitorScope, now: datetime, force: bool) -> ScanSummary:
+    def _run_locked(self, scope: MonitorScope, now: datetime, force: bool) -> ScanSummary:
         tasks = [
             task
             for task in self.repository.list_tasks(enabled=True)
@@ -106,6 +108,10 @@ class MonitoringService:
             triggered=triggered,
             paused_symbols=paused,
         )
+
+    def _run(self, scope: MonitorScope, now: datetime, force: bool) -> ScanSummary:
+        with self._scan_lock:
+            return self._run_locked(scope, now, force)
 
     def run_watchlist_once(self, now: datetime, force: bool = False) -> ScanSummary:
         return self._run(MonitorScope.WATCHLIST, now, force)
