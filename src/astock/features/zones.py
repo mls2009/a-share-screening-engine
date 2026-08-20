@@ -381,13 +381,12 @@ def chart_zones(
     limit_each: int = 3,
 ) -> list[dict]:
     rows, close = _active_zones(connection, symbol, timeframe, as_of)
-    if close is None:
-        return []
 
     selected = [row for row in rows if row["source"] == "manual"]
-    selected.extend(
-        _nearest_horizontal_zones(rows, close, limit_each, source="auto")
-    )
+    if close is not None:
+        selected.extend(
+            _nearest_horizontal_zones(rows, close, limit_each, source="auto")
+        )
     auto_trends = [
         row
         for row in rows
@@ -403,6 +402,7 @@ def chart_zones(
                         row["last_touched_on"] or date.min,
                         row["touches"],
                         row["strength"],
+                        str(row["zone_id"]),
                     ),
                 )
             )
@@ -420,6 +420,7 @@ def _active_zones(
         with latest_close as (
           select close from market_features
           where symbol = ? and timeframe = ? and feature_date <= ?
+            and close is not null
           order by feature_date desc limit 1
         ),
         latest_auto as (
@@ -437,7 +438,7 @@ def _active_zones(
               or (zones.source = 'auto' and zones.as_of_date = latest_auto.as_of_date)
             )
         )
-        select active.*, latest_close.close as latest_close,
+        select active.*, (select close from latest_close) as latest_close,
           exists(
             select 1 from zone_deletion_markers marker
             where marker.symbol = ? and marker.timeframe = ?
@@ -445,7 +446,7 @@ def _active_zones(
               and marker.lower_price <= active.center_price
               and marker.upper_price >= active.center_price
           ) as reappeared
-        from latest_close left join active on true
+        from active
         """,
         [
             symbol,
@@ -465,7 +466,8 @@ def _active_zones(
     loaded = [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
     if not loaded:
         return [], None
-    close = float(loaded[0].pop("latest_close"))
+    close_value = loaded[0].pop("latest_close")
+    close = float(close_value) if close_value is not None else None
     rows = []
     for row in loaded:
         row.pop("latest_close", None)
@@ -477,6 +479,7 @@ def _active_zones(
             row["source"] == "auto"
             and row["geometry"] == "horizontal"
             and row["zone_kind"] in {"support", "resistance"}
+            and close is not None
             and row["center_price"] != close
         ):
             row["zone_kind"] = "support" if row["center_price"] < close else "resistance"

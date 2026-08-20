@@ -209,6 +209,27 @@ def test_zones_api_returns_trends_independently_of_horizontal_limit(tmp_path: Pa
     }
 
 
+def test_zones_api_uses_latest_non_null_close(tmp_path: Path) -> None:
+    client, database = _client(tmp_path)
+    database.connection.execute(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, close)
+        values ('600001.SH', '1d', '2026-08-21', 'v1', null)
+        """
+    )
+
+    response = client.get(
+        "/api/symbols/600001.SH/zones",
+        params={"timeframe": "1d", "as_of": "2026-08-21", "limit_each": 1},
+    )
+
+    assert response.status_code == 200
+    assert [(row["zone_kind"], row["center_price"]) for row in response.json()] == [
+        ("support", 10.0)
+    ]
+
+
 def test_validation_errors_have_stable_code_message_and_path(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
     invalid = {**CONDITION, "metric": "not_a_metric"}

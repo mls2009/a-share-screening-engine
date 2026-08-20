@@ -300,6 +300,86 @@ def test_distance_and_chart_zone_selectors_keep_trends_separate(tmp_path: Path) 
     assert chart_by_id["00000000-0000-0000-0000-000000000110"]["reappeared"] is True
 
 
+@pytest.mark.parametrize("close_state", ["missing", "null"])
+def test_chart_zones_returns_trends_without_a_non_null_close(
+    tmp_path: Path, close_state: str
+) -> None:
+    database = Database(tmp_path / f"zones-with-{close_state}-close.duckdb")
+    database.migrate()
+    as_of = date(2026, 8, 20)
+    if close_state == "null":
+        database.connection.execute(
+            """
+            insert into market_features
+              (symbol, timeframe, feature_date, feature_version, close)
+            values ('600001.SH', '1d', ?, 'v1', null)
+            """,
+            [as_of],
+        )
+    database.connection.executemany(
+        """
+        insert into support_resistance_zones
+          (zone_id, symbol, timeframe, as_of_date, zone_kind, geometry,
+           lower_price, center_price, upper_price, slope, intercept, strength,
+           touches, last_touched_on, source, rule_version)
+        values (?, '600001.SH', '1d', ?, ?, 'trend', ?, ?, ?, ?, ?, 0.8, 3,
+                ?, ?, 'v1')
+        """,
+        [
+            ["00000000-0000-0000-0000-000000000131", as_of, "support", 9.8, 10.0, 10.2, 0.1, 8.0, as_of, "manual"],
+            ["00000000-0000-0000-0000-000000000132", as_of, "uptrend", 10.8, 11.0, 11.2, 0.1, 9.0, as_of, "auto"],
+        ],
+    )
+
+    chart = zones_module.chart_zones(
+        database.connection, "600001.SH", Timeframe.DAY, as_of, limit_each=1
+    )
+
+    assert {str(row["zone_id"]) for row in chart} == {
+        "00000000-0000-0000-0000-000000000131",
+        "00000000-0000-0000-0000-000000000132",
+    }
+    assert nearest_zones(
+        database.connection, "600001.SH", Timeframe.DAY, as_of, limit_each=1
+    ) == []
+
+
+def test_chart_zones_breaks_fully_tied_auto_trends_by_zone_id(tmp_path: Path) -> None:
+    database = Database(tmp_path / "tied-chart-trends.duckdb")
+    database.migrate()
+    as_of = date(2026, 8, 20)
+    database.connection.execute(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, close)
+        values ('600001.SH', '1d', ?, 'v1', 10)
+        """,
+        [as_of],
+    )
+    database.connection.executemany(
+        """
+        insert into support_resistance_zones
+          (zone_id, symbol, timeframe, as_of_date, zone_kind, geometry,
+           lower_price, center_price, upper_price, slope, intercept, strength,
+           touches, last_touched_on, source, rule_version)
+        values (?, '600001.SH', '1d', ?, 'uptrend', 'trend', 10.8, 11, 11.2,
+                0.1, 9, 0.8, 3, ?, 'auto', 'v1')
+        """,
+        [
+            ["00000000-0000-0000-0000-000000000141", as_of, as_of],
+            ["00000000-0000-0000-0000-000000000142", as_of, as_of],
+        ],
+    )
+
+    chart = zones_module.chart_zones(
+        database.connection, "600001.SH", Timeframe.DAY, as_of
+    )
+
+    assert [str(row["zone_id"]) for row in chart] == [
+        "00000000-0000-0000-0000-000000000142"
+    ]
+
+
 def test_manual_zone_survives_auto_replacement_and_can_be_deleted(tmp_path: Path) -> None:
     database = Database(tmp_path / "manual-zones.duckdb")
     database.migrate()
