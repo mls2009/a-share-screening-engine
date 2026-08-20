@@ -31,12 +31,18 @@ function trendValues(zone: PriceZone, bars: Bar[]): Array<number | null> {
     .filter(([index]) => index >= 0)
     .sort(([left], [right]) => left - right);
   if (indexed.length < 2) return bars.map(() => null);
-  const [firstIndex, firstPrice] = indexed[0];
-  const [lastIndex, lastPrice] = indexed.at(-1)!;
-  if (firstIndex === lastIndex) return bars.map(() => null);
-  const slope = (lastPrice - firstPrice) / (lastIndex - firstIndex);
+  const firstIndex = indexed[0][0];
+  const meanIndex = indexed.reduce((sum, [index]) => sum + index, 0) / indexed.length;
+  const meanPrice = indexed.reduce((sum, [, price]) => sum + price, 0) / indexed.length;
+  const denominator = indexed.reduce((sum, [index]) => sum + (index - meanIndex) ** 2, 0);
+  if (denominator === 0) return bars.map(() => null);
+  const slope = indexed.reduce(
+    (sum, [index, price]) => sum + (index - meanIndex) * (price - meanPrice),
+    0,
+  ) / denominator;
+  const intercept = meanPrice - slope * meanIndex;
   return bars.map((_, index) => (
-    index < firstIndex ? null : Number((firstPrice + slope * (index - firstIndex)).toFixed(12))
+    index < firstIndex ? null : Number((intercept + slope * index).toFixed(12))
   ));
 }
 
