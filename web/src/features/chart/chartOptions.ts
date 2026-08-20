@@ -9,11 +9,19 @@ const compactTime = (value: string) => {
 };
 
 export function zonePresentation(zone: PriceZone) {
-  const support = zone.zone_kind === "support";
+  const support = zone.zone_kind === "support" || zone.zone_kind === "uptrend";
+  const role = support ? "支撑" : "压力";
+  const label = zone.source === "manual"
+    ? `手动${role}`
+    : zone.zone_kind === "uptrend"
+      ? "自动上升趋势线"
+      : zone.zone_kind === "downtrend"
+        ? "自动下降趋势线"
+        : `自动水平${role}`;
   return {
     color: support ? "#2ecf79" : "#ff5a67",
     lineType: zone.reappeared ? "dashed" as const : "solid" as const,
-    label: `${zone.source === "auto" ? "自动" : "手动"}${support ? "支撑" : "压力"}`,
+    label,
   };
 }
 
@@ -66,7 +74,7 @@ function zoneSeries(zone: PriceZone, bars: Bar[]): LineSeriesOption {
       ...base,
       data,
       endLabel: {
-        show: currentPrice !== undefined,
+        show: zone.source === "manual" && currentPrice !== undefined,
         formatter: `${style.label} ${currentPrice?.toFixed(2) ?? ""}`,
         color: style.color,
         backgroundColor: "#0d1113e6",
@@ -83,7 +91,7 @@ function zoneSeries(zone: PriceZone, bars: Bar[]): LineSeriesOption {
       silent: true,
       symbol: ["none", "none"],
       label: {
-        show: true,
+        show: zone.source === "manual",
         position: "insideEndTop",
         formatter: `${style.label} ${zone.center_price.toFixed(2)}`,
         color: style.color,

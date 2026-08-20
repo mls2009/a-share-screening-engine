@@ -15,6 +15,20 @@ export interface ChartClient {
   deleteZone(symbol: string, zoneId: string): Promise<void>;
 }
 
+function zoneLabel(zone: PriceZone): string {
+  const role = zone.zone_kind === "support" || zone.zone_kind === "uptrend"
+    ? "支撑"
+    : "压力";
+  if (zone.source === "manual") return `手动${role}`;
+  if (zone.source === "auto" && zone.zone_kind === "uptrend") {
+    return "自动上升趋势线";
+  }
+  if (zone.source === "auto" && zone.zone_kind === "downtrend") {
+    return "自动下降趋势线";
+  }
+  return `自动${zone.geometry === "trend" ? "趋势" : "水平"}${role}`;
+}
+
 const date = (value: Date) => value.toISOString().slice(0, 10);
 const range = (timeframe: Timeframe) => {
   const end = new Date();
@@ -116,7 +130,7 @@ export function ChartPage({
         <div className="section-title"><div><span>支撑压力线</span><em>{zones.length}</em></div><p><i className="support-dot" />支撑<i className="resistance-dot" />压力<span className="normal-line" />正常实线<span className="reappeared-line" />删除后重现虚线</p></div>
         <div className="zone-list">
           {zones.map((zone) => {
-            const label = `${zone.source === "manual" ? "手动" : "自动"}${zone.geometry === "trend" ? "趋势" : "水平"}${zone.zone_kind === "support" ? "支撑" : "压力"}`;
+            const label = zoneLabel(zone);
             return <div key={zone.zone_id} className={zone.zone_kind}><span>{label}</span><b>{zone.center_price.toFixed(2)}</b><small>{zone.touches} 次触及</small><button type="button" aria-label={`删除${label} ${zone.zone_id}`} disabled={deletingZoneIds.has(zone.zone_id)} onClick={() => remove(zone)}><Trash2 size={14} /></button></div>;
           })}
           {!zones.length && <div className="result-empty">当前窗口内尚未识别到有效支撑压力线。</div>}

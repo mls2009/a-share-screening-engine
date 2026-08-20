@@ -28,6 +28,18 @@ const automatic: PriceZone = {
   anchors: [["2026-08-01", 11.8]],
   source: "auto",
 };
+const automaticUptrend: PriceZone = {
+  ...manual,
+  zone_id: "auto-uptrend-1",
+  zone_kind: "uptrend",
+  source: "auto",
+};
+const automaticDowntrend: PriceZone = {
+  ...manual,
+  zone_id: "auto-downtrend-1",
+  zone_kind: "downtrend",
+  source: "auto",
+};
 
 function FakeChart({ bars: chartBars, zones, onAnchor }: StockChartProps) {
   return <div><span>{chartBars.length} 根 K 线 / {zones.length} 条线</span><button onClick={() => onAnchor?.({ date: "2026-08-01", price: 10 })}>锚点1</button><button onClick={() => onAnchor?.({ date: "2026-08-20", price: 11 })}>锚点2</button></div>;
@@ -54,11 +66,11 @@ it("切换周期、用两个锚点保存手动趋势支撑并可删除自动和�
   await waitFor(() => expect(created).toHaveLength(1));
   expect(created[0]).toMatchObject({ zone_kind: "support", geometry: "trend" });
   expect(screen.getByText("支撑压力线")).toBeInTheDocument();
-  expect(await screen.findByText("手动趋势支撑")).toBeInTheDocument();
+  expect(await screen.findByText("手动支撑")).toBeInTheDocument();
   expect(screen.getByText("11.00")).toBeInTheDocument();
   expect(screen.queryByText("10.90 — 11.10")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "删除自动水平压力 auto-1" }));
-  await userEvent.click(screen.getByRole("button", { name: "删除手动趋势支撑 manual-1" }));
+  await userEvent.click(screen.getByRole("button", { name: "删除手动支撑 manual-1" }));
   expect(deleted).toEqual(["auto-1", "manual-1"]);
 });
 
@@ -81,6 +93,23 @@ it("删除失败时保留线并显示错误", async () => {
   expect(button).toBeEnabled();
   await userEvent.click(button);
   await waitFor(() => expect(calls).toBe(2));
+});
+
+it("自动趋势线按方向展示名称并用于删除按钮", async () => {
+  const client: ChartClient = {
+    bars: async () => bars,
+    zones: async () => [automaticUptrend, automaticDowntrend],
+    createManualZone: async () => manual,
+    deleteZone: async () => undefined,
+  };
+  render(<ChartPage initialSymbol="600001.SH" client={client} Chart={FakeChart} />);
+
+  expect(await screen.findByText("自动上升趋势线")).toBeInTheDocument();
+  expect(screen.getByText("自动下降趋势线")).toBeInTheDocument();
+  expect(screen.queryByText("自动趋势支撑")).not.toBeInTheDocument();
+  expect(screen.queryByText("自动趋势压力")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "删除自动上升趋势线 auto-uptrend-1" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "删除自动下降趋势线 auto-downtrend-1" })).toBeInTheDocument();
 });
 
 it("删除请求完成前禁止重复提交", async () => {
