@@ -1,9 +1,11 @@
 from bisect import bisect_right
 from datetime import date
+from threading import Lock
 
 import pandas as pd
 
 from astock.data.aggregate import aggregate_daily
+from astock.data.service import MarketDataService
 from astock.domain.market import Adjustment, Bar, Timeframe
 from astock.features.patterns import detect_patterns, persist_pattern_events
 from astock.features.store import MarketFeatureStore
@@ -11,6 +13,8 @@ from astock.features.technical import compute_technical_features
 from astock.features.zones import detect_zones, replace_auto_zones
 from astock.storage.bars import BarStore
 from astock.storage.database import Database
+
+_CHART_ZONE_BUILD_LOCK = Lock()
 
 
 def _bar_frame(bars: list[Bar]) -> pd.DataFrame:
@@ -30,6 +34,17 @@ def _bar_frame(bars: list[Bar]) -> pd.DataFrame:
     )
 
 
+def chart_base_timeframe(timeframe: Timeframe) -> Timeframe:
+    if timeframe in {
+        Timeframe.MIN_5,
+        Timeframe.MIN_15,
+        Timeframe.MIN_30,
+        Timeframe.MIN_60,
+    }:
+        return Timeframe.MIN_5
+    return Timeframe.DAY
+
+
 class FeatureBuilder:
     def __init__(
         self,
@@ -40,6 +55,42 @@ class FeatureBuilder:
         self.bar_store = bar_store
         self.feature_store = feature_store
         self.connection = database.connection
+
+    def ensure_chart_zones(
+        self, symbol: str, timeframe: Timeframe, as_of: date
+    ) -> float | None:
+        base = chart_base_timeframe(timeframe)
+        source = [
+            bar
+            for bar in self.bar_store.read(symbol, base, Adjustment.QFQ)
+            if bar.timestamp.date() <= as_of and bar.is_final
+        ]
+        if not source:
+            return None
+
+        bars = source if timeframe == base else MarketDataService.derive(source, timeframe)
+        if not bars:
+            return None
+
+        frame = _bar_frame(bars)
+        zone_date = bars[-1].timestamp.date()
+        with _CHART_ZONE_BUILD_LOCK:
+            latest_auto = self.connection.execute(
+                """
+                select max(as_of_date) from support_resistance_zones
+                where symbol = ? and timeframe = ? and source = 'auto'
+                """,
+                [symbol, timeframe.value],
+            ).fetchone()[0]
+            if latest_auto is None or latest_auto < zone_date:
+                replace_auto_zones(
+                    self.connection,
+                    symbol,
+                    timeframe,
+                    zone_date,
+                    detect_zones(frame, zone_date, timeframe=timeframe),
+                )
+        return float(bars[-1].close)
 
     def build_symbol(self, symbol: str, as_of: date) -> None:
         bars = [

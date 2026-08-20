@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
@@ -89,6 +89,47 @@ def _client(tmp_path: Path) -> tuple[TestClient, Database]:
         market_sync=FakeSync(),
     )
     return TestClient(create_app(context)), database
+
+
+def _fifteen_minute_trend_source_bars() -> list[Bar]:
+    bucket_ends = [
+        (date(2026, 8, 19), time(9, 45)),
+        (date(2026, 8, 19), time(10, 0)),
+        (date(2026, 8, 19), time(10, 15)),
+        (date(2026, 8, 19), time(10, 30)),
+        (date(2026, 8, 19), time(13, 15)),
+        (date(2026, 8, 19), time(13, 30)),
+        (date(2026, 8, 19), time(13, 45)),
+        (date(2026, 8, 19), time(14, 0)),
+        (date(2026, 8, 20), time(9, 45)),
+        (date(2026, 8, 20), time(10, 0)),
+        (date(2026, 8, 20), time(10, 15)),
+        (date(2026, 8, 20), time(10, 30)),
+        (date(2026, 8, 20), time(13, 15)),
+        (date(2026, 8, 20), time(13, 30)),
+    ]
+    lows = {1: 8.0, 4: 9.0, 7: 10.0, 10: 11.0}
+    highs = {2: 16.0, 5: 15.0, 8: 14.0, 11: 13.0}
+    bars = []
+    for index, (trade_date, bucket_end) in enumerate(bucket_ends):
+        end = datetime.combine(trade_date, bucket_end, tzinfo=ZoneInfo("Asia/Shanghai"))
+        for minutes_before in (10, 5, 0):
+            bars.append(
+                Bar(
+                    symbol="600001.SH",
+                    timestamp=end - timedelta(minutes=minutes_before),
+                    timeframe=Timeframe.MIN_5,
+                    open=12,
+                    high=highs.get(index, 12.4),
+                    low=lows.get(index, 11.6),
+                    close=12,
+                    volume_shares=100,
+                    amount_cny=1_000,
+                    adjustment=Adjustment.QFQ,
+                    source="test",
+                )
+            )
+    return bars
 
 
 CONDITION = {
@@ -232,6 +273,200 @@ def test_zones_api_uses_latest_non_null_close(tmp_path: Path) -> None:
     assert [(row["zone_kind"], row["center_price"]) for row in response.json()] == [
         ("support", 10.0)
     ]
+
+
+def test_zones_api_builds_and_reuses_requested_minute_timeframe(tmp_path: Path) -> None:
+    client, database = _client(tmp_path)
+    client.app.state.context.bar_store.upsert(_fifteen_minute_trend_source_bars())
+
+    first = client.get(
+        "/api/symbols/600001.SH/zones",
+        params={"timeframe": "15m", "as_of": "2026-08-20", "limit_each": 1},
+    )
+    first_rows = database.connection.execute(
+        """
+        select zone_id, created_at from support_resistance_zones
+        where symbol = '600001.SH' and timeframe = '15m' and source = 'auto'
+        order by zone_id
+        """
+    ).fetchall()
+    second = client.get(
+        "/api/symbols/600001.SH/zones",
+        params={"timeframe": "15m", "as_of": "2026-08-20", "limit_each": 1},
+    )
+    second_rows = database.connection.execute(
+        """
+        select zone_id, created_at from support_resistance_zones
+        where symbol = '600001.SH' and timeframe = '15m' and source = 'auto'
+        order by zone_id
+        """
+    ).fetchall()
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert database.connection.execute(
+        """
+        select count(*) from market_features
+        where symbol = '600001.SH' and timeframe = '15m' and close is not null
+        """
+    ).fetchone() == (0,)
+    assert [row["zone_kind"] for row in first.json()].count("uptrend") == 1
+    assert [row["zone_kind"] for row in first.json()].count("downtrend") == 1
+    assert first_rows
+    assert second_rows == first_rows
+
+    client.app.state.context.bar_store.upsert(
+        [
+            Bar(
+                symbol="600001.SH",
+                timestamp=datetime(
+                    2026, 8, 21, 9, minute, tzinfo=ZoneInfo("Asia/Shanghai")
+                ),
+                timeframe=Timeframe.MIN_5,
+                open=12,
+                high=12.4,
+                low=11.6,
+                close=12,
+                volume_shares=100,
+                amount_cny=1_000,
+                adjustment=Adjustment.QFQ,
+                source="test",
+            )
+            for minute in (35, 40, 45)
+        ]
+    )
+    refreshed = client.get(
+        "/api/symbols/600001.SH/zones",
+        params={"timeframe": "15m", "as_of": "2026-08-21", "limit_each": 1},
+    )
+
+    assert refreshed.status_code == 200
+    assert database.connection.execute(
+        """
+        select max(as_of_date) from support_resistance_zones
+        where symbol = '600001.SH' and timeframe = '15m' and source = 'auto'
+        """
+    ).fetchone() == (date(2026, 8, 21),)
+    assert [row["zone_kind"] for row in refreshed.json()].count("uptrend") == 1
+    assert [row["zone_kind"] for row in refreshed.json()].count("downtrend") == 1
+
+
+def test_minute_chart_uses_bar_close_and_does_not_rebuild_deleted_latest_batch(
+    tmp_path: Path,
+) -> None:
+    client, database = _client(tmp_path)
+    client.app.state.context.bar_store.upsert(
+        [
+            Bar(
+                symbol="600001.SH",
+                timestamp=datetime(
+                    2026, 8, 20, 9, 35, tzinfo=ZoneInfo("Asia/Shanghai")
+                ),
+                timeframe=Timeframe.MIN_5,
+                open=12,
+                high=12.4,
+                low=11.6,
+                close=12,
+                volume_shares=100,
+                amount_cny=1_000,
+                adjustment=Adjustment.QFQ,
+                source="test",
+            )
+        ]
+    )
+    previous_zone = PriceZone(
+        as_of_date=date(2026, 8, 19),
+        zone_kind="support",
+        geometry="horizontal",
+        lower_price=7.8,
+        center_price=8,
+        upper_price=8.2,
+        slope=None,
+        intercept=None,
+        anchors=((date(2026, 8, 19), 8),),
+        strength=0.8,
+        touches=1,
+    )
+    replace_auto_zones(
+        database.connection,
+        "600001.SH",
+        Timeframe.MIN_5,
+        date(2026, 8, 19),
+        [previous_zone],
+    )
+    replace_auto_zones(
+        database.connection,
+        "600001.SH",
+        Timeframe.MIN_5,
+        date(2026, 8, 20),
+        [
+            PriceZone(
+                as_of_date=date(2026, 8, 20),
+                zone_kind="support",
+                geometry="horizontal",
+                lower_price=9.8,
+                center_price=10,
+                upper_price=10.2,
+                slope=None,
+                intercept=None,
+                anchors=((date(2026, 8, 20), 10),),
+                strength=0.8,
+                touches=1,
+            )
+        ],
+    )
+    zone_id = database.connection.execute(
+        """
+        select zone_id from support_resistance_zones
+        where symbol = '600001.SH' and timeframe = '5m' and source = 'auto'
+          and as_of_date = '2026-08-20'
+        """
+    ).fetchone()[0]
+
+    visible = client.get(
+        "/api/symbols/600001.SH/zones",
+        params={"timeframe": "5m", "as_of": "2026-08-20"},
+    )
+    deleted = client.delete(f"/api/symbols/600001.SH/zones/{zone_id}")
+    after_delete = client.get(
+        "/api/symbols/600001.SH/zones",
+        params={"timeframe": "5m", "as_of": "2026-08-20"},
+    )
+
+    assert visible.status_code == 200
+    assert [(row["zone_kind"], row["center_price"]) for row in visible.json()] == [
+        ("support", 10.0)
+    ]
+    assert deleted.status_code == 204
+    assert after_delete.json() == []
+    assert database.connection.execute(
+        "select state from support_resistance_zones where zone_id = ?", [zone_id]
+    ).fetchone() == ("deleted",)
+
+
+def test_minute_chart_without_bars_still_returns_active_manual_zone(
+    tmp_path: Path,
+) -> None:
+    client, _ = _client(tmp_path)
+    payload = {
+        "timeframe": "30m",
+        "as_of_date": "2026-08-20",
+        "zone_kind": "support",
+        "geometry": "horizontal",
+        "lower_price": 9.8,
+        "center_price": 10.0,
+        "upper_price": 10.2,
+        "anchors": [["2026-08-20", 10.0]],
+    }
+    created = client.post("/api/symbols/600001.SH/zones/manual", json=payload)
+
+    response = client.get(
+        "/api/symbols/600001.SH/zones",
+        params={"timeframe": "30m", "as_of": "2026-08-20"},
+    )
+
+    assert created.status_code == 201
+    assert [row["zone_id"] for row in response.json()] == [created.json()["zone_id"]]
 
 
 def test_validation_errors_have_stable_code_message_and_path(tmp_path: Path) -> None:

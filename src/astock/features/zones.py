@@ -379,8 +379,11 @@ def chart_zones(
     timeframe: Timeframe,
     as_of: date,
     limit_each: int = 3,
+    close_override: float | None = None,
 ) -> list[dict]:
-    rows, close = _active_zones(connection, symbol, timeframe, as_of)
+    rows, close = _active_zones(
+        connection, symbol, timeframe, as_of, close_override=close_override
+    )
 
     selected = [row for row in rows if row["source"] == "manual"]
     if close is not None:
@@ -414,6 +417,7 @@ def _active_zones(
     symbol: str,
     timeframe: Timeframe,
     as_of: date,
+    close_override: float | None = None,
 ) -> tuple[list[dict], float | None]:
     cursor = connection.execute(
         """
@@ -468,6 +472,8 @@ def _active_zones(
         return [], None
     close_value = loaded[0].pop("latest_close")
     close = float(close_value) if close_value is not None else None
+    if close_override is not None and np.isfinite(close_override) and close_override > 0:
+        close = float(close_override)
     rows = []
     for row in loaded:
         row.pop("latest_close", None)

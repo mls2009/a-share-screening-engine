@@ -18,7 +18,7 @@ from astock.data.providers.routing import build_default_market_providers
 from astock.data.providers.tencent import TencentQuoteProvider
 from astock.data.service import MarketDataService
 from astock.domain.market import Adjustment, Timeframe
-from astock.features.builder import FeatureBuilder
+from astock.features.builder import FeatureBuilder, chart_base_timeframe
 from astock.features.store import MarketFeatureStore
 from astock.features.zones import (
     ManualZoneInput,
@@ -110,6 +110,9 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
     app.state.monitoring = monitoring
     app.state.monitor_scheduler = monitor_scheduler
     app.add_event_handler("shutdown", monitor_scheduler.stop)
+    feature_builder = FeatureBuilder(
+        context.bar_store, MarketFeatureStore(context.database), context.database
+    )
 
     @app.get("/api/catalog")
     def catalog() -> list[dict]:
@@ -199,12 +202,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         start: date,
         end: date,
     ) -> list[dict]:
-        base = (
-            Timeframe.MIN_5
-            if timeframe
-            in {Timeframe.MIN_5, Timeframe.MIN_15, Timeframe.MIN_30, Timeframe.MIN_60}
-            else Timeframe.DAY
-        )
+        base = chart_base_timeframe(timeframe)
         source = context.bar_store.read_range(
             symbol, base, Adjustment.QFQ, start, end
         )
@@ -218,8 +216,14 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         as_of: date,
         limit_each: int = Query(default=3, ge=1, le=20),
     ) -> list[dict]:
+        latest_close = feature_builder.ensure_chart_zones(symbol, timeframe, as_of)
         rows = chart_zones(
-            context.database.connection, symbol, timeframe, as_of, limit_each
+            context.database.connection,
+            symbol,
+            timeframe,
+            as_of,
+            limit_each,
+            close_override=latest_close,
         )
         return jsonable_encoder(rows)
 
