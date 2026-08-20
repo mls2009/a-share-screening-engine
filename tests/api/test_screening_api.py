@@ -143,6 +143,13 @@ def test_catalog_exposes_hierarchical_filter_metadata(tmp_path: Path) -> None:
         "hammer",
         "bullish_engulfing",
     }
+    assert catalog["listing_stage"]["choices"] == [
+        {"value": "new", "label": "新股"},
+        {"value": "secondary_new", "label": "次新股"},
+        {"value": "established", "label": "老股"},
+    ]
+    assert catalog["is_new"]["visible"] is False
+    assert catalog["is_secondary_new"]["visible"] is False
 
 
 def test_bars_zones_run_results_and_sync_status_contracts(tmp_path: Path) -> None:

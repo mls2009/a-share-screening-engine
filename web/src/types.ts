@@ -18,6 +18,7 @@ export interface MetricSpec {
   directions?: MetricChoice[];
   choices?: MetricChoice[];
   multiple?: boolean;
+  visible?: boolean;
 }
 
 export interface UiConstantOperand {

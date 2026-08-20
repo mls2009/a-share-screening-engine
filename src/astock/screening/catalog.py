@@ -44,6 +44,7 @@ class MetricSpec:
     directions: tuple[ChoiceSpec, ...] = ()
     choices: tuple[ChoiceSpec, ...] = ()
     multiple: bool = False
+    visible: bool = True
 
 
 def _metric(
@@ -183,8 +184,8 @@ METRICS = [
     _metric("down_streak", "连续下跌周期数", Unit.DAYS, group="trend", family="down_streak"),
     MetricSpec("listing_trade_days", "上市交易日数", Unit.DAYS, group="attributes", family="listing_days"),
     MetricSpec("listing_stage", "上市阶段", Unit.CATEGORY, operators=MEMBERSHIP_OPERATORS, group="attributes", family="listing_stage", choices=LISTING_STAGE_CHOICES, multiple=True),
-    MetricSpec("is_new", "新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="attributes", family="is_new"),
-    MetricSpec("is_secondary_new", "次新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="attributes", family="is_secondary_new"),
+    MetricSpec("is_new", "新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="attributes", family="is_new", visible=False),
+    MetricSpec("is_secondary_new", "次新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="attributes", family="is_secondary_new", visible=False),
     MetricSpec("is_st", "ST 状态", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="status", family="st_status", choices=(ChoiceSpec("true", "ST"), ChoiceSpec("false", "非 ST"))),
     MetricSpec("is_suspended", "交易状态", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="status", family="suspension_status", choices=(ChoiceSpec("false", "正常交易"), ChoiceSpec("true", "停牌"))),
     MetricSpec("board", "所属板块", Unit.CATEGORY, operators=MEMBERSHIP_OPERATORS, group="attributes", family="board", choices=BOARD_CHOICES, multiple=True),

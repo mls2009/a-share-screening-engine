@@ -73,6 +73,7 @@ def _catalog() -> list[dict]:
                 for item in metric.choices
             ],
             "multiple": metric.multiple,
+            "visible": metric.visible,
         }
         for metric in DEFAULT_CATALOG.all()
     ]
