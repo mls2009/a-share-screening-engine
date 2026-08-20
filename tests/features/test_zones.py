@@ -100,6 +100,30 @@ def test_daily_trend_selection_returns_support_and_resistance_when_strict_fit_mi
     assert weekly == strict
 
 
+def test_daily_trend_prefers_recent_confirmed_window_over_old_distant_line() -> None:
+    closes = [100 + index * 0.01 for index in range(23)]
+    frame = _frame(
+        closes,
+        lows={1: 90, 4: 85, 7: 80, 10: 75, 13: 70, 16: 95, 19: 94},
+        highs={2: 110, 5: 109, 8: 108, 11: 107, 14: 106, 17: 105, 20: 104},
+    )
+
+    zones = detect_zones(
+        frame,
+        as_of=date(2026, 2, 2),
+        timeframe=Timeframe.DAY,
+        pivot_order=1,
+    )
+    support = next(
+        zone
+        for zone in zones
+        if zone.geometry == "trend" and zone.zone_kind == "support"
+    )
+
+    assert support.anchors[-1][0] == pd.Timestamp(frame.iloc[19]["timestamp"]).date()
+    assert support.center_price > 90
+
+
 def test_zone_calculation_respects_explicit_as_of_without_future_leakage() -> None:
     frame = _frame(
         [12, 10.5, 12, 14.5, 12, 10.4, 12, 14.6, 12, 30],

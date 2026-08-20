@@ -127,20 +127,20 @@ def _daily_trend_zone(
         chosen = min(
             confirmed,
             key=lambda item: (
-                -len(item[0]),
-                item[4] / tolerance,
                 -item[0][-1],
                 abs(item[3] - latest_close),
+                -len(item[0]),
+                item[4] / tolerance,
             ),
         )
     elif role_valid:
         chosen = min(
             role_valid,
             key=lambda item: (
-                item[4] / tolerance,
-                -len(item[0]),
                 -item[0][-1],
                 abs(item[3] - latest_close),
+                item[4] / tolerance,
+                -len(item[0]),
             ),
         )
     else:

@@ -134,7 +134,7 @@ Expected: FAIL because the daily fixture has no trend pair and `detect_zones` ha
 
 - [ ] **Step 3: Add bounded daily candidate selection**
 
-Pass the timeframe from the feature builder into `detect_zones`. For `1d`, take the last 12 pivots and enumerate contiguous windows of length 2–5. Fit each window once and rank confirmed role-valid candidates by `(-touches, normalized_residual, -last_position, distance)`; if none are confirmed, rank all role-valid candidates by `(normalized_residual, -touches, -last_position, distance)`. If none are role-valid, shift the minimum-residual candidate to `latest_close ± tolerance` and return two synthetic line endpoints consistent with the shifted line. For non-daily timeframes, retain the current last-five strict branch.
+Pass the timeframe from the feature builder into `detect_zones`. For `1d`, take the last 12 pivots and enumerate contiguous windows of length 2–5. Fit each window once and rank confirmed role-valid candidates by `(-last_position, distance, -touches, normalized_residual)`; if none are confirmed, rank all role-valid candidates by `(-last_position, distance, normalized_residual, -touches)`. If none are role-valid, shift the minimum-residual candidate to `latest_close ± tolerance` and return two synthetic line endpoints consistent with the shifted line. For non-daily timeframes, retain the current last-five strict branch.
 
 - [ ] **Step 4: Run tests and verify GREEN**
 
