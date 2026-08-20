@@ -11,6 +11,7 @@ export function createCondition(metric = "return_20"): UiConditionNode {
     timeframe: "1d",
     operator: "gte",
     right: { kind: "constant", value: "30" },
+    ...(metric.startsWith("return_") ? { direction: "rise" as const } : {}),
   };
 }
 
@@ -49,20 +50,46 @@ function constantValue(raw: string, unit: Unit): boolean | number | string | num
   return Number(raw);
 }
 
+const inverseOperator: Record<string, string> = {
+  gt: "lt",
+  gte: "lte",
+  lt: "gt",
+  lte: "gte",
+};
+
+type ConstantValue = boolean | number | string | number[] | string[];
+
+function negativeMagnitude(value: ConstantValue): ConstantValue {
+  if (Array.isArray(value)) {
+    return value.every((item) => typeof item === "number")
+      ? value.map((item) => -Number(item)).reverse()
+      : value;
+  }
+  return typeof value === "number" ? -value : value;
+}
+
 export function toApiNode(node: UiNode, metrics: MetricSpec[]): object {
   if (node.kind === "group") {
     return { kind: "group", logic: node.logic, children: node.children.map((child) => toApiNode(child, metrics)) };
   }
   const metric = metrics.find((item) => item.key === node.metric);
   if (!metric) throw new Error(`未知指标：${node.metric}`);
+  const negativeDirection = node.direction === "fall" || node.direction === "decrease";
+  const constant = node.selectedValues?.length
+    ? node.selectedValues
+    : constantValue(node.right.kind === "constant" ? node.right.value : "", metric.unit);
   const right = node.right.kind === "constant"
-    ? { kind: "constant", value: constantValue(node.right.value, metric.unit), unit: metric.unit }
+    ? {
+        kind: "constant",
+        value: negativeDirection ? negativeMagnitude(constant) : constant,
+        unit: metric.unit,
+      }
     : node.right;
   return {
     kind: "condition",
     metric: node.metric,
     timeframe: node.timeframe,
-    operator: node.operator,
+    operator: negativeDirection ? inverseOperator[node.operator] ?? node.operator : node.operator,
     right,
     ...(node.lookback ? { lookback: node.lookback } : {}),
     ...(node.occurrences ? { occurrences: node.occurrences } : {}),

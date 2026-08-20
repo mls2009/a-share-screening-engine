@@ -1,12 +1,23 @@
 export type Timeframe = "5m" | "15m" | "30m" | "60m" | "1d" | "1w" | "1mo";
 export type Unit = "price" | "percent" | "ratio" | "shares" | "amount" | "days" | "boolean" | "category" | "score";
 
+export interface MetricChoice {
+  value: string;
+  label: string;
+}
+
 export interface MetricSpec {
   key: string;
   label: string;
   unit: Unit;
   timeframes: Timeframe[];
   operators: string[];
+  group?: string;
+  family?: string;
+  period?: number | null;
+  directions?: MetricChoice[];
+  choices?: MetricChoice[];
+  multiple?: boolean;
 }
 
 export interface UiConstantOperand {
@@ -30,6 +41,8 @@ export interface UiConditionNode {
   timeframe: Timeframe;
   operator: string;
   right: UiOperand;
+  direction?: "rise" | "fall" | "increase" | "decrease";
+  selectedValues?: string[];
   lookback?: number;
   occurrences?: number;
 }
