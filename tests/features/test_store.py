@@ -98,3 +98,36 @@ def test_batch_history_reads_all_symbols_without_optional_enrichment(tmp_path: P
     assert histories["600001.SH"][0]["up_streak"] == 2
     assert histories["000001.SZ"][0]["return_20"] == 40
     assert "pattern_type" not in histories["600001.SH"][0]
+
+
+def test_history_derives_listing_stage_from_trading_days(tmp_path: Path) -> None:
+    database = Database(tmp_path / "listing-stage.duckdb")
+    database.migrate()
+    database.connection.executemany(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, listing_trade_days)
+        values (?, '1d', '2026-08-20', 'v1', ?)
+        """,
+        [
+            ["000001.SZ", 30],
+            ["000002.SZ", 31],
+            ["000003.SZ", 250],
+            ["000004.SZ", 251],
+        ],
+    )
+    store = MarketFeatureStore(database)
+
+    stages = {
+        symbol: store.read_history(
+            symbol, Timeframe.DAY, date(2026, 8, 20), 1, enrich=False
+        )[0]["listing_stage"]
+        for symbol in ("000001.SZ", "000002.SZ", "000003.SZ", "000004.SZ")
+    }
+
+    assert stages == {
+        "000001.SZ": "new",
+        "000002.SZ": "secondary_new",
+        "000003.SZ": "secondary_new",
+        "000004.SZ": "established",
+    }

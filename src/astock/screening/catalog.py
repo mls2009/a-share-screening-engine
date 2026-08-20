@@ -20,6 +20,7 @@ NUMERIC_OPERATORS = frozenset(
     }
 )
 EQUALITY_OPERATORS = frozenset({Operator.EQ, Operator.NE})
+MEMBERSHIP_OPERATORS = frozenset({Operator.IN, Operator.NOT_IN})
 SCREEN_TIMEFRAMES = frozenset({Timeframe.DAY, Timeframe.WEEK, Timeframe.MONTH})
 ALL_TIMEFRAMES = frozenset(Timeframe)
 
@@ -80,6 +81,11 @@ BOARD_CHOICES = (
     ChoiceSpec("chinext", "创业板"),
     ChoiceSpec("star", "科创板"),
     ChoiceSpec("beijing", "北交所"),
+)
+LISTING_STAGE_CHOICES = (
+    ChoiceSpec("new", "新股"),
+    ChoiceSpec("secondary_new", "次新股"),
+    ChoiceSpec("established", "老股"),
 )
 PATTERN_CHOICES = (
     ChoiceSpec("doji", "十字星"),
@@ -176,12 +182,13 @@ METRICS = [
     _metric("up_streak", "连续上涨周期数", Unit.DAYS, group="trend", family="up_streak"),
     _metric("down_streak", "连续下跌周期数", Unit.DAYS, group="trend", family="down_streak"),
     MetricSpec("listing_trade_days", "上市交易日数", Unit.DAYS, group="attributes", family="listing_days"),
+    MetricSpec("listing_stage", "上市阶段", Unit.CATEGORY, operators=MEMBERSHIP_OPERATORS, group="attributes", family="listing_stage", choices=LISTING_STAGE_CHOICES, multiple=True),
     MetricSpec("is_new", "新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="attributes", family="is_new"),
     MetricSpec("is_secondary_new", "次新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="attributes", family="is_secondary_new"),
     MetricSpec("is_st", "ST 状态", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="status", family="st_status", choices=(ChoiceSpec("true", "ST"), ChoiceSpec("false", "非 ST"))),
     MetricSpec("is_suspended", "交易状态", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="status", family="suspension_status", choices=(ChoiceSpec("false", "正常交易"), ChoiceSpec("true", "停牌"))),
-    MetricSpec("board", "所属板块", Unit.CATEGORY, operators=EQUALITY_OPERATORS, group="attributes", family="board", choices=BOARD_CHOICES, multiple=True),
-    MetricSpec("pattern_type", "K 线形态", Unit.CATEGORY, operators=EQUALITY_OPERATORS, group="candlestick", family="pattern", choices=PATTERN_CHOICES, multiple=True),
+    MetricSpec("board", "所属板块", Unit.CATEGORY, operators=MEMBERSHIP_OPERATORS, group="attributes", family="board", choices=BOARD_CHOICES, multiple=True),
+    MetricSpec("pattern_type", "K 线形态", Unit.CATEGORY, operators=MEMBERSHIP_OPERATORS, group="candlestick", family="pattern", choices=PATTERN_CHOICES, multiple=True),
     MetricSpec("pattern_strength", "形态强度", Unit.SCORE, group="candlestick", family="pattern_strength"),
     MetricSpec("support_distance", "距支撑位", Unit.PERCENT, group="trend", family="support_distance"),
     MetricSpec("resistance_distance", "距压力位", Unit.PERCENT, group="trend", family="resistance_distance"),

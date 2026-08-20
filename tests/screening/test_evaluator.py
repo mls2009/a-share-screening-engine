@@ -76,3 +76,28 @@ def test_evaluates_cross_and_recent_occurrence_operators() -> None:
 
     assert evaluate_tree(cross, history).result == TruthValue.TRUE
     assert evaluate_tree(recent, history).result == TruthValue.TRUE
+
+
+def test_evaluates_category_membership_and_exclusion() -> None:
+    history = {Timeframe.DAY: [{"board": "chinext", "pattern_type": "hammer"}]}
+    board = _condition(
+        metric="board",
+        operator="in",
+        right={
+            "kind": "constant",
+            "value": ["main", "chinext"],
+            "unit": "category",
+        },
+    )
+    pattern = _condition(
+        metric="pattern_type",
+        operator="not_in",
+        right={
+            "kind": "constant",
+            "value": ["morning_star", "bullish_engulfing"],
+            "unit": "category",
+        },
+    )
+
+    assert evaluate_tree(board, history).result == TruthValue.TRUE
+    assert evaluate_tree(pattern, history).result == TruthValue.TRUE

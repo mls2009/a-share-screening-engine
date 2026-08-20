@@ -154,3 +154,27 @@ def test_accepts_realtime_turnover_volume_ratio_and_market_cap_metrics() -> None
             }
         )
         assert validate_tree(condition) == []
+
+
+def test_membership_requires_a_non_empty_category_list() -> None:
+    valid = ConditionNode.model_validate(
+        {
+            "kind": "condition",
+            "metric": "board",
+            "timeframe": "1d",
+            "operator": "in",
+            "right": {
+                "kind": "constant",
+                "value": ["main", "chinext"],
+                "unit": "category",
+            },
+        }
+    )
+    empty = valid.model_copy(
+        update={
+            "right": valid.right.model_copy(update={"value": []}),
+        }
+    )
+
+    assert validate_tree(valid) == []
+    assert validate_tree(empty)[0].code == "invalid_membership"

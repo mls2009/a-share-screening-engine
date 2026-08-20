@@ -195,6 +195,14 @@ class MarketFeatureStore:
         extra = decoded.pop("extra", None)
         if extra:
             decoded.update(json.loads(extra) if isinstance(extra, str) else extra)
+        listing_days = decoded.get("listing_trade_days")
+        if listing_days is not None:
+            if listing_days <= 30:
+                decoded["listing_stage"] = "new"
+            elif listing_days <= 250:
+                decoded["listing_stage"] = "secondary_new"
+            else:
+                decoded["listing_stage"] = "established"
         return decoded
 
     def _enrich(self, symbol: str, timeframe: Timeframe, row: dict) -> dict:

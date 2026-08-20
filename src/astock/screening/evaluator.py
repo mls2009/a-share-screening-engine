@@ -59,6 +59,10 @@ def _compare(left: Any, right: Any, operator: Operator) -> TruthValue:
         return _truth(left < right)
     if operator == Operator.LTE:
         return _truth(left <= right)
+    if operator == Operator.IN:
+        return _truth(left in right)
+    if operator == Operator.NOT_IN:
+        return _truth(left not in right)
     if operator in {Operator.BETWEEN, Operator.NOT_BETWEEN}:
         inside = right[0] <= left <= right[1]
         return _truth(inside if operator == Operator.BETWEEN else not inside)

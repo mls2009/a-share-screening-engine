@@ -33,13 +33,15 @@ class Operator(StrEnum):
     CROSSES_BELOW = "crosses_below"
     AT_LEAST = "at_least"
     CONTINUOUS = "continuous"
+    IN = "in"
+    NOT_IN = "not_in"
 
 
 class ConstantOperand(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     kind: Literal["constant"] = "constant"
-    value: bool | float | str | list[float]
+    value: bool | float | str | list[float] | list[str]
     unit: Unit
 
 

@@ -51,6 +51,17 @@ def validate_tree(
                 not isinstance(node.right.value, list) or len(node.right.value) != 2
             ):
                 issue("invalid_range", "between requires exactly two values", path)
+            if node.operator.value in {"in", "not_in"} and (
+                node.right.unit.value != "category"
+                or not isinstance(node.right.value, list)
+                or not node.right.value
+                or not all(isinstance(value, str) for value in node.right.value)
+            ):
+                issue(
+                    "invalid_membership",
+                    "membership requires a non-empty category list",
+                    path,
+                )
             return
 
         assert isinstance(node.right, MetricOperand)
