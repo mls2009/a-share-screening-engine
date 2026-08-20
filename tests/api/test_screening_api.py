@@ -131,6 +131,7 @@ def test_catalog_exposes_hierarchical_filter_metadata(tmp_path: Path) -> None:
         {"value": "fall", "label": "下跌幅度"},
     ]
     assert catalog["board"]["multiple"] is True
+    assert {"eq", "ne", "in", "not_in"}.issubset(catalog["board"]["operators"])
     assert catalog["board"]["choices"] == [
         {"value": "main", "label": "主板"},
         {"value": "chinext", "label": "创业板"},
@@ -138,6 +139,9 @@ def test_catalog_exposes_hierarchical_filter_metadata(tmp_path: Path) -> None:
         {"value": "beijing", "label": "北交所"},
     ]
     assert catalog["pattern_type"]["multiple"] is True
+    assert {"eq", "ne", "in", "not_in"}.issubset(
+        catalog["pattern_type"]["operators"]
+    )
     assert {choice["value"] for choice in catalog["pattern_type"]["choices"]} >= {
         "morning_star",
         "hammer",
