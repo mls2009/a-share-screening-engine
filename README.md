@@ -101,14 +101,14 @@ cd web
 npm install
 npm run build
 cd ..
-uvicorn astock.api.app:create_default_app --factory --host 127.0.0.1 --port 8000
+uvicorn astock.api.app:create_default_app --factory --host 127.0.0.1 --port 8888
 ```
 
-浏览器打开 [http://127.0.0.1:8000](http://127.0.0.1:8000)。开发模式可分别运行
+浏览器打开 [http://127.0.0.1:8888](http://127.0.0.1:8888)。开发模式可分别运行
 `uvicorn` 和 `cd web && npm run dev`。
 
 ```bash
-.venv/bin/uvicorn astock.api.app:create_default_app --factory --host 127.0.0.1 --port 8000
+.venv/bin/uvicorn astock.api.app:create_default_app --factory --host 127.0.0.1 --port 8888
 ```
 
 主要接口：
