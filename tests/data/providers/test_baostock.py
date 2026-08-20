@@ -214,6 +214,32 @@ def test_baostock_builds_complete_listed_security_universe() -> None:
     assert securities[1].is_suspended is True
 
 
+def test_security_universe_falls_back_to_latest_completed_trading_day() -> None:
+    class IntradayBaoStock(FakeBaoStock):
+        def __init__(self) -> None:
+            super().__init__()
+            self.requested_days: list[str] = []
+            self.basic_rows = [
+                ["sh.600519", "贵州茅台", "2001-08-27", "", "1", "1"]
+            ]
+
+        def query_all_stock(self, **kwargs: str) -> FakeResult:
+            self.requested_days.append(kwargs["day"])
+            rows = (
+                []
+                if kwargs["day"] == "2026-08-20"
+                else [["sh.600519", "1", "贵州茅台"]]
+            )
+            return FakeResult(["code", "tradeStatus", "code_name"], rows)
+
+    fake = IntradayBaoStock()
+
+    securities = BaoStockProvider(fake).securities_on(date(2026, 8, 20))
+
+    assert [security.symbol for security in securities] == ["600519.SH"]
+    assert fake.requested_days == ["2026-08-20", "2026-08-19"]
+
+
 def test_baostock_builds_point_in_time_security_status() -> None:
     fake = FakeBaoStock()
     fake.history_rows = [["2026-08-20", "sh.600519", "10", "0", "1"]]

@@ -98,6 +98,16 @@ class SyncJobRepository:
         ).fetchall()
         return [row[0] for row in rows]
 
+    def succeeded_symbols(self, job_id: UUID) -> set[str]:
+        rows = self.connection.execute(
+            """
+            select symbol from sync_job_symbols
+            where job_id = ? and status = 'succeeded'
+            """,
+            [job_id],
+        ).fetchall()
+        return {row[0] for row in rows}
+
     def complete(self, job_id: UUID) -> None:
         failed = self.get(job_id).failed
         status = "completed_with_errors" if failed else "completed"

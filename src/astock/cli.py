@@ -10,10 +10,10 @@ from pydantic import TypeAdapter
 
 from astock.config import Settings
 from astock.data.market_sync import MarketSyncService
-from astock.data.providers.baostock import BaoStockProvider
 from astock.data.providers.base import QuoteProvider
 from astock.data.providers.fallback import FallbackQuoteProvider
 from astock.data.providers.mootdx import MootdxProvider, create_mootdx_client
+from astock.data.providers.routing import build_default_market_providers
 from astock.data.providers.tencent import TencentQuoteProvider
 from astock.data.service import MarketDataService
 from astock.domain.market import Adjustment, Timeframe
@@ -34,10 +34,10 @@ def build_market_data_service() -> MarketDataService:
     settings.ensure_directories()
     database = Database(settings.database_path)
     database.migrate()
-    provider = BaoStockProvider()
+    history_provider, reference_provider = build_default_market_providers()
     return MarketDataService(
-        history_provider=provider,
-        reference_provider=provider,
+        history_provider=history_provider,
+        reference_provider=reference_provider,
         bar_store=BarStore(settings.bars_dir),
         database=database,
     )
@@ -66,13 +66,15 @@ def build_market_sync_service() -> MarketSyncService:
     settings.ensure_directories()
     database = Database(settings.database_path)
     database.migrate()
-    provider = BaoStockProvider()
+    history_provider, reference_provider = build_default_market_providers()
     bars = BarStore(settings.bars_dir)
-    market_data = MarketDataService(provider, bars, database, reference_provider=provider)
+    market_data = MarketDataService(
+        history_provider, bars, database, reference_provider=reference_provider
+    )
     feature_store = MarketFeatureStore(database)
     return MarketSyncService(
         market_data,
-        provider,
+        reference_provider,
         SyncJobRepository(database.connection),
         FeatureBuilder(bars, feature_store, database),
     )

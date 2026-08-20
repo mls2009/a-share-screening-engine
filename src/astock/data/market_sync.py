@@ -5,11 +5,12 @@ from uuid import UUID
 
 from astock.data.providers.base import ReferenceDataProvider
 from astock.domain.market import Adjustment, Timeframe
+from astock.domain.security import Security
 from astock.storage.jobs import SyncJobRepository
 
 
 class MarketDataWriter(Protocol):
-    def sync_reference(self, symbols: list[str], start: date, end: date) -> None: ...
+    def sync_universe(self, start: date, end: date) -> list[Security]: ...
 
     def history(
         self,
@@ -58,14 +59,24 @@ class MarketSyncService:
         if years <= 0:
             raise ValueError("years must be positive")
         start = self._years_before(end, years)
-        securities = self.reference_provider.securities_on(end)
+        securities = self.market_data.sync_universe(start, end)
         symbols = [security.symbol for security in securities if security.is_listed]
-        self.market_data.sync_reference(symbols, start, end)
         job_id = self.jobs.create(start, end, total=len(symbols))
         return self._run(job_id, symbols)
 
     def retry_failed(self, job_id: UUID) -> SyncSummary:
         symbols = self.jobs.failed_symbols(job_id)
+        self.jobs.reopen(job_id)
+        return self._run(job_id, symbols)
+
+    def resume(self, job_id: UUID) -> SyncSummary:
+        job = self.jobs.get(job_id)
+        succeeded = self.jobs.succeeded_symbols(job_id)
+        symbols = [
+            security.symbol
+            for security in self.reference_provider.securities_on(job.end_date)
+            if security.is_listed and security.symbol not in succeeded
+        ]
         self.jobs.reopen(job_id)
         return self._run(job_id, symbols)
 

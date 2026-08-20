@@ -8,12 +8,21 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from astock.api.dependencies import ApiContext
+from astock.config import Settings
+from astock.data.market_sync import MarketSyncService
+from astock.data.providers.routing import build_default_market_providers
+from astock.data.providers.tencent import TencentQuoteProvider
 from astock.data.service import MarketDataService
 from astock.domain.market import Adjustment, Timeframe
+from astock.features.builder import FeatureBuilder
+from astock.features.store import MarketFeatureStore
 from astock.features.zones import nearest_zones
 from astock.screening.catalog import DEFAULT_CATALOG
 from astock.screening.models import Node
-from astock.screening.service import ScreenDefinitionError
+from astock.screening.service import ScreenDefinitionError, ScreeningService
+from astock.storage.bars import BarStore
+from astock.storage.database import Database
+from astock.storage.jobs import SyncJobRepository
 
 
 class ScreenRunRequest(BaseModel):
@@ -147,19 +156,16 @@ def create_app(context: ApiContext) -> FastAPI:
         start: date,
         end: date,
     ) -> list[dict]:
-        if timeframe not in {Timeframe.DAY, Timeframe.WEEK, Timeframe.MONTH}:
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "code": "unsupported_timeframe",
-                    "message": "chart API supports day, week and month",
-                    "path": "timeframe",
-                },
-            )
-        daily = context.bar_store.read_range(
-            symbol, Timeframe.DAY, Adjustment.QFQ, start, end
+        base = (
+            Timeframe.MIN_5
+            if timeframe
+            in {Timeframe.MIN_5, Timeframe.MIN_15, Timeframe.MIN_30, Timeframe.MIN_60}
+            else Timeframe.DAY
         )
-        bars = daily if timeframe == Timeframe.DAY else MarketDataService.derive(daily, timeframe)
+        source = context.bar_store.read_range(
+            symbol, base, Adjustment.QFQ, start, end
+        )
+        bars = source if timeframe == base else MarketDataService.derive(source, timeframe)
         return [bar.model_dump(mode="json") for bar in bars]
 
     @app.get("/api/symbols/{symbol}/zones")
@@ -177,4 +183,32 @@ def create_app(context: ApiContext) -> FastAPI:
     return app
 
 
-__all__ = ["ApiContext", "create_app"]
+def create_default_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or Settings()
+    settings.ensure_directories()
+    database = Database(settings.database_path)
+    database.migrate()
+    bars = BarStore(settings.bars_dir)
+    history_provider, reference_provider = build_default_market_providers()
+    feature_store = MarketFeatureStore(database)
+    market_data = MarketDataService(
+        history_provider,
+        bars,
+        database,
+        reference_provider=reference_provider,
+    )
+    market_sync = MarketSyncService(
+        market_data,
+        reference_provider,
+        SyncJobRepository(database.connection),
+        FeatureBuilder(bars, feature_store, database),
+    )
+    screening = ScreeningService(
+        database,
+        feature_store,
+        snapshot_provider=TencentQuoteProvider(),
+    )
+    return create_app(ApiContext(database, bars, screening, market_sync))
+
+
+__all__ = ["ApiContext", "create_app", "create_default_app"]

@@ -38,6 +38,7 @@ class FakeHistory:
 
 
 class FakeReference:
+    detail_calls = 0
     def trading_dates(self, start: date, end: date) -> set[date]:
         return {START}
 
@@ -65,6 +66,7 @@ class FakeReference:
         ]
 
     def adjustment_factors(self, symbol: str, start: date, end: date) -> list[dict]:
+        self.detail_calls += 1
         return [
             {
                 "symbol": symbol,
@@ -76,6 +78,7 @@ class FakeReference:
         ]
 
     def corporate_actions(self, symbol: str, start: date, end: date) -> list[dict]:
+        self.detail_calls += 1
         return [
             {
                 "symbol": symbol,
@@ -87,6 +90,7 @@ class FakeReference:
         ]
 
     def security_status(self, symbol: str, start: date, end: date) -> list[dict]:
+        self.detail_calls += 1
         return [
             {
                 "symbol": symbol,
@@ -174,3 +178,25 @@ def test_sync_reference_persists_realistic_backtest_inputs(tmp_path: Path) -> No
     assert database.connection.execute(
         "select board, listed_on, is_listed from symbols where symbol = '600519.SH'"
     ).fetchone() == ("main", date(2001, 8, 27), True)
+
+
+def test_sync_universe_is_lightweight_and_skips_per_symbol_reference_calls(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "universe.duckdb")
+    database.migrate()
+    reference = FakeReference()
+    reference.detail_calls = 0
+    service = MarketDataService(
+        history_provider=FakeHistory([]),
+        bar_store=BarStore(tmp_path / "bars"),
+        database=database,
+        reference_provider=reference,
+    )
+
+    securities = service.sync_universe(START, END)
+
+    assert [security.symbol for security in securities] == ["600519.SH"]
+    assert reference.detail_calls == 0
+    assert database.connection.execute("select count(*) from symbols").fetchone()[0] == 1
+    assert database.connection.execute("select count(*) from trading_calendar").fetchone()[0] == 1

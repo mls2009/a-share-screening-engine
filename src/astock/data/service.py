@@ -7,6 +7,7 @@ from astock.data.aggregate import aggregate_daily, aggregate_intraday
 from astock.data.providers.base import HistoryProvider, ReferenceDataProvider
 from astock.data.quality import QualityContext, QualityIssue, inspect_rows
 from astock.domain.market import Adjustment, Bar, Timeframe
+from astock.domain.security import Security
 from astock.storage.bars import BarStore
 from astock.storage.coverage import CoverageRepository
 from astock.storage.database import Database
@@ -104,6 +105,55 @@ class MarketDataService:
 
         bars = self.bar_store.read_range(symbol, base, adjustment, start, end)
         return self.derive(bars, timeframe)
+
+    def sync_universe(self, start: date, end: date) -> list[Security]:
+        if self.reference_provider is None:
+            raise RuntimeError("reference provider is not configured")
+        securities = self.reference_provider.securities_on(end)
+        open_dates = self.reference_provider.trading_dates(start, end)
+        calendar_rows = []
+        current = start
+        while current <= end:
+            calendar_rows.append([current, current in open_dates])
+            current += timedelta(days=1)
+        connection = self.database.connection
+        connection.execute("begin transaction")
+        try:
+            connection.executemany(
+                "insert or replace into trading_calendar values (?, ?)", calendar_rows
+            )
+            if securities:
+                connection.executemany(
+                    """
+                    insert into symbols
+                      (symbol, name, exchange, listed_on, delisted_on, board, is_listed)
+                    values (?, ?, ?, ?, ?, ?, ?)
+                    on conflict (symbol) do update set
+                      name = excluded.name,
+                      exchange = excluded.exchange,
+                      listed_on = excluded.listed_on,
+                      delisted_on = excluded.delisted_on,
+                      board = excluded.board,
+                      is_listed = excluded.is_listed
+                    """,
+                    [
+                        [
+                            security.symbol,
+                            security.name,
+                            security.exchange,
+                            security.listed_on,
+                            security.delisted_on,
+                            security.board,
+                            security.is_listed,
+                        ]
+                        for security in securities
+                    ],
+                )
+            connection.execute("commit")
+        except Exception:
+            connection.execute("rollback")
+            raise
+        return securities
 
     def sync_reference(self, symbols: list[str], start: date, end: date) -> None:
         if self.reference_provider is None:

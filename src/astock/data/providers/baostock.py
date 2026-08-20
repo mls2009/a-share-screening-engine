@@ -130,7 +130,7 @@ class BaoStockProvider:
         }
 
     def symbols_on(self, on_date: date) -> list[dict]:
-        rows = self._query_rows("query_all_stock", day=on_date.isoformat())
+        rows = self._all_stock_rows(on_date)
         return [
             {
                 "symbol": self._symbol(row["code"]),
@@ -141,8 +141,16 @@ class BaoStockProvider:
             for row in rows
         ]
 
+    def _all_stock_rows(self, on_date: date) -> list[dict[str, str]]:
+        for offset in range(10):
+            candidate = on_date - timedelta(days=offset)
+            rows = self._query_rows("query_all_stock", day=candidate.isoformat())
+            if rows:
+                return rows
+        return []
+
     def securities_on(self, on_date: date) -> list[Security]:
-        trade_rows = self._query_rows("query_all_stock", day=on_date.isoformat())
+        trade_rows = self._all_stock_rows(on_date)
         basic_rows = self._query_rows("query_stock_basic")
         basics = {row["code"]: row for row in basic_rows if row.get("code")}
         securities = []

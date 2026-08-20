@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 
-from astock.api.app import ApiContext, create_app
+from astock.api.app import ApiContext, create_app, create_default_app
+from astock.config import Settings
 from astock.domain.market import Adjustment, Bar, Timeframe
 from astock.features.store import MarketFeatureStore
 from astock.features.zones import PriceZone, replace_auto_zones
@@ -159,3 +160,50 @@ def test_validation_errors_have_stable_code_message_and_path(tmp_path: Path) -> 
             }
         ],
     }
+
+
+def test_default_app_factory_is_runnable_with_configured_data_directory(tmp_path: Path) -> None:
+    app = create_default_app(Settings(data_dir=tmp_path / "runtime-data"))
+
+    response = TestClient(app).get("/api/catalog")
+
+    assert response.status_code == 200
+
+
+def test_bars_api_supports_five_fifteen_thirty_sixty_day_week_and_month(
+    tmp_path: Path,
+) -> None:
+    client, database = _client(tmp_path)
+    bars_root = tmp_path / "bars"
+    store = BarStore(bars_root)
+    store.upsert(
+        [
+            Bar(
+                symbol="600001.SH",
+                timestamp=datetime(2026, 8, 20, 9, minute, tzinfo=ZoneInfo("Asia/Shanghai")),
+                timeframe=Timeframe.MIN_5,
+                open=10,
+                high=11,
+                low=9,
+                close=10.5,
+                volume_shares=100,
+                amount_cny=1_000,
+                adjustment=Adjustment.QFQ,
+                source="test",
+            )
+            for minute in (35, 40, 45)
+        ]
+    )
+
+    for timeframe in ("5m", "15m", "30m", "60m", "1d", "1w", "1mo"):
+        response = client.get(
+            "/api/symbols/600001.SH/bars",
+            params={
+                "timeframe": timeframe,
+                "start": "2026-08-01",
+                "end": "2026-08-20",
+            },
+        )
+        assert response.status_code == 200
+        assert response.json(), timeframe
+    database.connection.close()

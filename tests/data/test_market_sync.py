@@ -30,12 +30,13 @@ class FakeReference:
 
 class FakeMarketData:
     def __init__(self) -> None:
-        self.reference_calls: list[tuple] = []
+        self.universe_calls: list[tuple] = []
         self.history_calls: list[tuple] = []
         self.fail_once = {"000001.SZ"}
 
-    def sync_reference(self, symbols: list[str], start: date, end: date) -> None:
-        self.reference_calls.append((symbols, start, end))
+    def sync_universe(self, start: date, end: date) -> list[Security]:
+        self.universe_calls.append((start, end))
+        return FakeReference().securities_on(end)
 
     def history(
         self,
@@ -81,8 +82,8 @@ def test_full_market_sync_continues_after_one_symbol_fails(tmp_path: Path) -> No
     assert summary.succeeded == 1
     assert summary.failed == 1
     assert summary.status == "completed_with_errors"
-    assert market_data.reference_calls == [
-        (["600000.SH", "000001.SZ"], date(2023, 8, 20), date(2026, 8, 20))
+    assert market_data.universe_calls == [
+        (date(2023, 8, 20), date(2026, 8, 20))
     ]
     assert jobs.failed_symbols(summary.job_id) == ["000001.SZ"]
 
@@ -125,3 +126,21 @@ def test_successful_symbol_builds_screening_features_immediately(tmp_path: Path)
     service.start(end=date(2026, 8, 20), years=3)
 
     assert builder.calls == [("600000.SH", date(2026, 8, 20))]
+
+
+def test_resume_requests_pending_symbols_but_not_already_succeeded_symbols(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "resume.duckdb")
+    database.migrate()
+    jobs = SyncJobRepository(database.connection)
+    job_id = jobs.create(date(2023, 8, 20), date(2026, 8, 20), total=2)
+    jobs.mark_succeeded(job_id, "600000.SH")
+    market_data = FakeMarketData()
+    market_data.fail_once.clear()
+    service = MarketSyncService(market_data, FakeReference(), jobs)
+
+    summary = service.resume(job_id)
+
+    assert summary.status == "completed"
+    assert [call[0] for call in market_data.history_calls] == ["000001.SZ"]
