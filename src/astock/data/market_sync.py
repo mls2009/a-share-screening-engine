@@ -21,6 +21,10 @@ class MarketDataWriter(Protocol):
     ) -> list: ...
 
 
+class SymbolFeatureBuilder(Protocol):
+    def build_symbol(self, symbol: str, as_of: date) -> None: ...
+
+
 @dataclass(frozen=True)
 class SyncSummary:
     job_id: UUID
@@ -36,10 +40,12 @@ class MarketSyncService:
         market_data: MarketDataWriter,
         reference_provider: ReferenceDataProvider,
         jobs: SyncJobRepository,
+        feature_builder: SymbolFeatureBuilder | None = None,
     ) -> None:
         self.market_data = market_data
         self.reference_provider = reference_provider
         self.jobs = jobs
+        self.feature_builder = feature_builder
 
     @staticmethod
     def _years_before(value: date, years: int) -> date:
@@ -74,6 +80,8 @@ class MarketSyncService:
                     job.end_date,
                     Adjustment.QFQ,
                 )
+                if self.feature_builder is not None:
+                    self.feature_builder.build_symbol(symbol, job.end_date)
             except Exception as error:  # noqa: BLE001 - one stock must not abort the batch
                 self.jobs.mark_failed(job_id, symbol, str(error))
             else:

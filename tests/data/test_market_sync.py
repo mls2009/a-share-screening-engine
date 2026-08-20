@@ -52,6 +52,14 @@ class FakeMarketData:
         return []
 
 
+class FakeFeatureBuilder:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, date]] = []
+
+    def build_symbol(self, symbol: str, as_of: date) -> None:
+        self.calls.append((symbol, as_of))
+
+
 def _service(tmp_path: Path) -> tuple[MarketSyncService, FakeMarketData, SyncJobRepository]:
     database = Database(tmp_path / "market.duckdb")
     database.migrate()
@@ -100,3 +108,20 @@ def test_retry_failed_only_requests_previously_failed_symbols(tmp_path: Path) ->
         ),
     ]
     assert jobs.failed_symbols(first.job_id) == []
+
+
+def test_successful_symbol_builds_screening_features_immediately(tmp_path: Path) -> None:
+    database = Database(tmp_path / "pipeline.duckdb")
+    database.migrate()
+    market_data = FakeMarketData()
+    builder = FakeFeatureBuilder()
+    service = MarketSyncService(
+        market_data,
+        FakeReference(),
+        SyncJobRepository(database.connection),
+        feature_builder=builder,
+    )
+
+    service.start(end=date(2026, 8, 20), years=3)
+
+    assert builder.calls == [("600000.SH", date(2026, 8, 20))]

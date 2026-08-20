@@ -8,6 +8,7 @@ from astock.domain.market import Adjustment, Bar, Timeframe
 from astock.features.patterns import detect_patterns, persist_pattern_events
 from astock.features.store import MarketFeatureStore
 from astock.features.technical import compute_technical_features
+from astock.features.zones import detect_zones, replace_auto_zones
 from astock.storage.bars import BarStore
 from astock.storage.database import Database
 
@@ -77,4 +78,12 @@ class FeatureBuilder:
                 symbol,
                 timeframe,
                 detect_patterns(frame),
+            )
+            zone_date = pd.Timestamp(frame.iloc[-1]["timestamp"]).date()
+            replace_auto_zones(
+                self.connection,
+                symbol,
+                timeframe,
+                zone_date,
+                detect_zones(frame, zone_date),
             )

@@ -65,3 +65,50 @@ def test_builder_persists_idempotent_daily_weekly_monthly_features(tmp_path: Pat
     assert latest["listing_trade_days"] == 40
     assert latest["is_new"] is False
     assert latest["is_secondary_new"] is True
+
+
+def test_builder_persists_automatic_support_and_resistance_zones(tmp_path: Path) -> None:
+    database = Database(tmp_path / "zones.duckdb")
+    database.migrate()
+    bar_store = BarStore(tmp_path / "bars")
+    closes = [12, 10.5, 12.5, 14.5, 13, 10.4, 12.5, 14.6, 13, 10.3, 12.5, 14.5, 12]
+    dates = pd.date_range("2026-01-01", periods=len(closes), freq="B")
+    bars = []
+    for index, (stamp, close) in enumerate(zip(dates, closes, strict=True)):
+        low = {1: 10.0, 5: 10.1, 9: 9.95}.get(index, close - 0.4)
+        high = {3: 15.0, 7: 15.1, 11: 14.95}.get(index, close + 0.4)
+        bars.append(
+            Bar(
+                symbol="600000.SH",
+                timestamp=datetime.combine(stamp.date(), datetime.min.time(), tzinfo=TZ),
+                timeframe=Timeframe.DAY,
+                open=close - 0.1,
+                high=high,
+                low=low,
+                close=close,
+                volume_shares=1_000,
+                amount_cny=10_000,
+                adjustment=Adjustment.QFQ,
+                source="test",
+            )
+        )
+    bar_store.upsert(bars)
+    database.connection.execute(
+        """
+        insert into symbols (symbol, name, exchange, listed_on, is_listed)
+        values ('600000.SH', '浦发银行', 'SH', ?, true)
+        """,
+        [dates[0].date()],
+    )
+
+    FeatureBuilder(bar_store, MarketFeatureStore(database), database).build_symbol(
+        "600000.SH", dates[-1].date()
+    )
+
+    kinds = {
+        row[0]
+        for row in database.connection.execute(
+            "select distinct zone_kind from support_resistance_zones where timeframe = '1d'"
+        ).fetchall()
+    }
+    assert kinds == {"support", "resistance"}
