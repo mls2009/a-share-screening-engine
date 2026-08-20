@@ -123,15 +123,22 @@ def persist_pattern_events(
 ) -> None:
     if not events:
         return
-    connection.executemany(
-        """
-        insert or replace into pattern_events
-          (symbol, timeframe, event_date, pattern_type, rule_version, strength,
-           body_ratio, upper_shadow_ratio, lower_shadow_ratio, amplitude_ratio, parameters)
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
+    columns = [
+        "symbol",
+        "timeframe",
+        "event_date",
+        "pattern_type",
+        "rule_version",
+        "strength",
+        "body_ratio",
+        "upper_shadow_ratio",
+        "lower_shadow_ratio",
+        "amplitude_ratio",
+        "parameters",
+    ]
+    incoming = pd.DataFrame(
         [
-            [
+            (
                 symbol,
                 timeframe.value,
                 event.event_date,
@@ -143,7 +150,18 @@ def persist_pattern_events(
                 event.lower_shadow_ratio,
                 event.amplitude_ratio,
                 json.dumps(event.parameters),
-            ]
+            )
             for event in events
         ],
+        columns=columns,
     )
+    connection.register("_incoming_pattern_events", incoming)
+    try:
+        connection.execute(
+            f"""
+            insert or replace into pattern_events ({', '.join(columns)})
+            select {', '.join(columns)} from _incoming_pattern_events
+            """
+        )
+    finally:
+        connection.unregister("_incoming_pattern_events")

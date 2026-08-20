@@ -85,7 +85,6 @@ class MarketFeatureStore:
         feature_version: str = "v1",
     ) -> None:
         columns = ["symbol", "timeframe", "feature_date", "feature_version", *FEATURE_COLUMNS, "extra"]
-        placeholders = ", ".join("?" for _ in columns)
         rows = []
         for record in features.to_dict("records"):
             extra = {key: _value(record.get(key)) for key in EXTRA_COLUMNS}
@@ -100,10 +99,17 @@ class MarketFeatureStore:
                 ]
             )
         if rows:
-            self.connection.executemany(
-                f"insert or replace into market_features ({', '.join(columns)}) values ({placeholders})",
-                rows,
-            )
+            incoming = pd.DataFrame(rows, columns=columns)
+            self.connection.register("_incoming_market_features", incoming)
+            try:
+                self.connection.execute(
+                    f"""
+                    insert or replace into market_features ({', '.join(columns)})
+                    select {', '.join(columns)} from _incoming_market_features
+                    """
+                )
+            finally:
+                self.connection.unregister("_incoming_market_features")
 
     def read_latest(
         self,
