@@ -50,6 +50,10 @@ METRICS = [
     ],
     _metric("volume_ratio_20", "20周期量比", Unit.RATIO),
     _metric("volume_ratio", "实时量比", Unit.RATIO),
+    *[
+        _metric(f"volume_change_{window}", f"成交量{window}周期增减", Unit.PERCENT)
+        for window in (1, 5, 20)
+    ],
     _metric("turnover_rate", "换手率", Unit.PERCENT),
     _metric("total_market_cap", "总市值", Unit.AMOUNT),
     _metric("float_market_cap", "流通市值", Unit.AMOUNT),
@@ -64,6 +68,20 @@ METRICS = [
         for key in ("boll_upper", "boll_middle", "boll_lower", "atr_14", "obv")
     ],
     *[_metric(key, key, Unit.PERCENT) for key in ("amplitude", "volatility_20")],
+    *[
+        _metric(f"high_{window}", f"{window}周期最高价", Unit.PRICE)
+        for window in (20, 60, 250)
+    ],
+    *[
+        _metric(f"low_{window}", f"{window}周期最低价", Unit.PRICE)
+        for window in (20, 60, 250)
+    ],
+    *[
+        _metric(f"max_drawdown_{window}", f"{window}周期最大回撤", Unit.PERCENT)
+        for window in (20, 60, 250)
+    ],
+    _metric("up_streak", "连续上涨周期数", Unit.DAYS),
+    _metric("down_streak", "连续下跌周期数", Unit.DAYS),
     _metric("listing_trade_days", "上市交易日数", Unit.DAYS),
     MetricSpec("is_new", "新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS),
     MetricSpec("is_secondary_new", "次新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS),

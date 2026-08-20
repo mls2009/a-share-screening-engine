@@ -1,10 +1,13 @@
 import json
 from dataclasses import dataclass
 from datetime import date
+from typing import Literal
+from uuid import UUID, uuid4
 
 import duckdb
 import numpy as np
 import pandas as pd
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from astock.domain.market import Timeframe
 
@@ -24,6 +27,33 @@ class PriceZone:
     touches: int
     source: str = "auto"
     rule_version: str = "v1"
+
+
+class ManualZoneInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    timeframe: Timeframe
+    as_of_date: date
+    zone_kind: Literal["support", "resistance"]
+    geometry: Literal["horizontal", "trend"]
+    lower_price: float
+    center_price: float
+    upper_price: float
+    slope: float | None = None
+    intercept: float | None = None
+    anchors: tuple[tuple[date, float], ...]
+
+    @model_validator(mode="after")
+    def validate_geometry(self) -> "ManualZoneInput":
+        if not 0 < self.lower_price <= self.center_price <= self.upper_price:
+            raise ValueError("prices must be positive and ordered")
+        if self.geometry == "trend" and len(self.anchors) < 2:
+            raise ValueError("trend zone requires at least two anchors")
+        if self.geometry == "trend" and (self.slope is None or self.intercept is None):
+            raise ValueError("trend zone requires slope and intercept")
+        if not self.anchors:
+            raise ValueError("zone requires at least one anchor")
+        return self
 
 
 def _pivots(values: pd.Series, order: int, low: bool) -> list[int]:
@@ -203,6 +233,55 @@ def replace_auto_zones(
         )
 
 
+def create_manual_zone(
+    connection: duckdb.DuckDBPyConnection,
+    symbol: str,
+    zone: ManualZoneInput,
+) -> UUID:
+    zone_id = uuid4()
+    connection.execute(
+        """
+        insert into support_resistance_zones
+          (zone_id, symbol, timeframe, as_of_date, zone_kind, geometry, lower_price,
+           center_price, upper_price, slope, intercept, anchors, strength, touches,
+           first_touched_on, last_touched_on, state, source, rule_version)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, 'active', 'manual', 'manual-v1')
+        """,
+        [
+            zone_id,
+            symbol,
+            zone.timeframe.value,
+            zone.as_of_date,
+            zone.zone_kind,
+            zone.geometry,
+            zone.lower_price,
+            zone.center_price,
+            zone.upper_price,
+            zone.slope,
+            zone.intercept,
+            json.dumps([[day.isoformat(), price] for day, price in zone.anchors]),
+            len(zone.anchors),
+            min(day for day, _ in zone.anchors),
+            max(day for day, _ in zone.anchors),
+        ],
+    )
+    return zone_id
+
+
+def delete_manual_zone(connection: duckdb.DuckDBPyConnection, zone_id: UUID) -> bool:
+    exists = connection.execute(
+        "select 1 from support_resistance_zones where zone_id = ? and source = 'manual'",
+        [zone_id],
+    ).fetchone()
+    if exists is None:
+        return False
+    connection.execute(
+        "delete from support_resistance_zones where zone_id = ? and source = 'manual'",
+        [zone_id],
+    )
+    return True
+
+
 def nearest_zones(
     connection: duckdb.DuckDBPyConnection,
     symbol: str,
@@ -218,21 +297,27 @@ def nearest_zones(
         """,
         [symbol, timeframe.value, as_of],
     ).fetchone()
-    zone_date = connection.execute(
+    auto_zone_date = connection.execute(
         """
         select max(as_of_date) from support_resistance_zones
-        where symbol = ? and timeframe = ? and as_of_date <= ?
+        where symbol = ? and timeframe = ? and as_of_date <= ? and source = 'auto'
         """,
         [symbol, timeframe.value, as_of],
     ).fetchone()
-    if close_row is None or zone_date is None or zone_date[0] is None:
+    if close_row is None:
         return []
     cursor = connection.execute(
         """
         select * from support_resistance_zones
-        where symbol = ? and timeframe = ? and as_of_date = ?
+        where symbol = ? and timeframe = ? and state = 'active' and as_of_date <= ?
+          and (source = 'manual' or (source = 'auto' and as_of_date = ?))
         """,
-        [symbol, timeframe.value, zone_date[0]],
+        [
+            symbol,
+            timeframe.value,
+            as_of,
+            auto_zone_date[0] if auto_zone_date is not None else None,
+        ],
     )
     columns = [column[0] for column in cursor.description]
     rows = [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]

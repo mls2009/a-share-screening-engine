@@ -2,6 +2,23 @@ from astock.screening.models import ConditionNode, GroupNode
 from astock.screening.validation import validate_tree
 
 
+def test_catalog_contains_extended_price_volume_pattern_and_risk_metrics() -> None:
+    from astock.screening.catalog import DEFAULT_CATALOG
+
+    keys = {metric.key for metric in DEFAULT_CATALOG.all()}
+
+    assert {
+        "high_20",
+        "low_250",
+        "max_drawdown_60",
+        "up_streak",
+        "down_streak",
+        "pattern_type",
+        "support_distance",
+        "resistance_distance",
+    } <= keys
+
+
 def test_validates_known_metric_operator_timeframe_and_unit() -> None:
     tree = ConditionNode.model_validate(
         {

@@ -4,7 +4,14 @@ from pathlib import Path
 import pandas as pd
 
 from astock.domain.market import Timeframe
-from astock.features.zones import detect_zones, nearest_zones, replace_auto_zones
+from astock.features.zones import (
+    ManualZoneInput,
+    create_manual_zone,
+    delete_manual_zone,
+    detect_zones,
+    nearest_zones,
+    replace_auto_zones,
+)
 from astock.storage.database import Database
 
 
@@ -104,3 +111,42 @@ def test_persists_auto_zones_and_returns_nearest_support_and_resistance(tmp_path
 
     assert {row["zone_kind"] for row in nearest} == {"support", "resistance"}
     assert all(row["source"] == "auto" for row in nearest)
+
+
+def test_manual_zone_survives_auto_replacement_and_can_be_deleted(tmp_path: Path) -> None:
+    database = Database(tmp_path / "manual-zones.duckdb")
+    database.migrate()
+    as_of = date(2026, 8, 20)
+    database.connection.execute(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, close)
+        values ('600001.SH', '1d', ?, 'v1', 12)
+        """,
+        [as_of],
+    )
+    zone_id = create_manual_zone(
+        database.connection,
+        "600001.SH",
+        ManualZoneInput(
+            timeframe=Timeframe.DAY,
+            as_of_date=as_of,
+            zone_kind="support",
+            geometry="trend",
+            lower_price=10.0,
+            center_price=10.1,
+            upper_price=10.2,
+            slope=0.05,
+            intercept=9.5,
+            anchors=((date(2026, 8, 1), 9.8), (date(2026, 8, 20), 10.1)),
+        ),
+    )
+
+    replace_auto_zones(database.connection, "600001.SH", Timeframe.DAY, as_of, [])
+    rows = nearest_zones(database.connection, "600001.SH", Timeframe.DAY, as_of)
+
+    assert len(rows) == 1
+    assert rows[0]["zone_id"] == zone_id
+    assert rows[0]["source"] == "manual"
+    assert delete_manual_zone(database.connection, zone_id) is True
+    assert delete_manual_zone(database.connection, zone_id) is False

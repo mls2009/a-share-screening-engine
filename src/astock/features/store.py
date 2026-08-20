@@ -4,6 +4,7 @@ from datetime import date
 import pandas as pd
 
 from astock.domain.market import Timeframe
+from astock.features.zones import nearest_zones
 from astock.storage.database import Database
 
 FEATURE_COLUMNS = [
@@ -62,6 +63,9 @@ EXTRA_COLUMNS = [
     "max_drawdown_250",
     "up_streak",
     "down_streak",
+    "volume_change_1",
+    "volume_change_5",
+    "volume_change_20",
 ]
 
 
@@ -119,7 +123,8 @@ class MarketFeatureStore:
         row = cursor.fetchone()
         if row is None:
             return None
-        return dict(zip([column[0] for column in cursor.description], row, strict=True))
+        result = dict(zip([column[0] for column in cursor.description], row, strict=True))
+        return self._enrich(symbol, timeframe, result)
 
     def read_history(
         self,
@@ -138,4 +143,69 @@ class MarketFeatureStore:
             [symbol, timeframe.value, feature_version, end, limit],
         )
         columns = [column[0] for column in cursor.description]
-        return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+        return [
+            self._enrich(symbol, timeframe, dict(zip(columns, row, strict=True)))
+            for row in cursor.fetchall()
+        ]
+
+    def _enrich(self, symbol: str, timeframe: Timeframe, row: dict) -> dict:
+        enriched = dict(row)
+        extra = enriched.pop("extra", None)
+        if extra:
+            enriched.update(json.loads(extra) if isinstance(extra, str) else extra)
+
+        security = self.connection.execute(
+            """
+            select s.name, s.board, st.is_st, st.is_suspended, st.previous_close,
+                   st.limit_up, st.limit_down
+            from symbols s
+            left join lateral (
+              select is_st, is_suspended, previous_close, limit_up, limit_down
+              from security_status
+              where symbol = s.symbol and trade_date <= ?
+              order by trade_date desc limit 1
+            ) st on true
+            where s.symbol = ?
+            """,
+            [enriched["feature_date"], symbol],
+        ).fetchone()
+        if security:
+            for key, value in zip(
+                (
+                    "name",
+                    "board",
+                    "is_st",
+                    "is_suspended",
+                    "previous_close",
+                    "limit_up",
+                    "limit_down",
+                ),
+                security,
+                strict=True,
+            ):
+                enriched[key] = value
+
+        feature_date = enriched["feature_date"]
+        pattern = self.connection.execute(
+            """
+            select pattern_type, strength from pattern_events
+            where symbol = ? and timeframe = ? and event_date = ?
+            order by strength desc, pattern_type limit 1
+            """,
+            [symbol, timeframe.value, feature_date],
+        ).fetchone()
+        enriched["pattern_type"] = pattern[0] if pattern else None
+        enriched["pattern_strength"] = pattern[1] if pattern else None
+
+        close = enriched.get("close")
+        zones = nearest_zones(self.connection, symbol, timeframe, feature_date, limit_each=1)
+        for kind in ("support", "resistance"):
+            matching = next((zone for zone in zones if zone["zone_kind"] == kind), None)
+            key = f"{kind}_distance"
+            if close in {None, 0} or matching is None:
+                enriched[key] = None
+            elif kind == "support":
+                enriched[key] = (close - matching["center_price"]) / close * 100
+            else:
+                enriched[key] = (matching["center_price"] - close) / close * 100
+        return enriched

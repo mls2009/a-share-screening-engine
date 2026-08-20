@@ -2,7 +2,7 @@ from datetime import date
 from typing import Literal
 from uuid import UUID
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -16,7 +16,12 @@ from astock.data.service import MarketDataService
 from astock.domain.market import Adjustment, Timeframe
 from astock.features.builder import FeatureBuilder
 from astock.features.store import MarketFeatureStore
-from astock.features.zones import nearest_zones
+from astock.features.zones import (
+    ManualZoneInput,
+    create_manual_zone,
+    delete_manual_zone,
+    nearest_zones,
+)
 from astock.screening.catalog import DEFAULT_CATALOG
 from astock.screening.models import Node
 from astock.screening.service import ScreenDefinitionError, ScreeningService
@@ -179,6 +184,32 @@ def create_app(context: ApiContext) -> FastAPI:
             context.database.connection, symbol, timeframe, as_of, limit_each
         )
         return jsonable_encoder(rows)
+
+    @app.post("/api/symbols/{symbol}/zones/manual", status_code=201)
+    def add_manual_zone(symbol: str, zone: ManualZoneInput) -> dict:
+        zone_id = create_manual_zone(context.database.connection, symbol, zone)
+        row = context.database.connection.execute(
+            "select * from support_resistance_zones where zone_id = ?", [zone_id]
+        )
+        values = row.fetchone()
+        columns = [column[0] for column in row.description]
+        return jsonable_encoder(dict(zip(columns, values, strict=True)))
+
+    @app.delete("/api/symbols/{symbol}/zones/manual/{zone_id}")
+    def remove_manual_zone(symbol: str, zone_id: UUID):
+        owned = context.database.connection.execute(
+            """
+            select 1 from support_resistance_zones
+            where zone_id = ? and symbol = ? and source = 'manual'
+            """,
+            [zone_id, symbol],
+        ).fetchone()
+        if owned is None or not delete_manual_zone(context.database.connection, zone_id):
+            return JSONResponse(
+                status_code=404,
+                content={"code": "zone_not_found", "message": "manual zone not found"},
+            )
+        return Response(status_code=204)
 
     return app
 

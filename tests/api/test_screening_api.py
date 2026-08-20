@@ -207,3 +207,35 @@ def test_bars_api_supports_five_fifteen_thirty_sixty_day_week_and_month(
         assert response.status_code == 200
         assert response.json(), timeframe
     database.connection.close()
+
+
+def test_manual_zone_create_and_delete_api(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    payload = {
+        "timeframe": "1d",
+        "as_of_date": "2026-08-20",
+        "zone_kind": "resistance",
+        "geometry": "trend",
+        "lower_price": 14.8,
+        "center_price": 15.0,
+        "upper_price": 15.2,
+        "slope": -0.02,
+        "intercept": 15.4,
+        "anchors": [["2026-08-01", 15.4], ["2026-08-20", 15.0]],
+    }
+
+    created = client.post("/api/symbols/600001.SH/zones/manual", json=payload)
+    assert created.status_code == 201
+    assert created.json()["source"] == "manual"
+    zone_id = created.json()["zone_id"]
+
+    zones = client.get(
+        "/api/symbols/600001.SH/zones",
+        params={"timeframe": "1d", "as_of": "2026-08-20", "limit_each": 20},
+    ).json()
+    assert any(row["zone_id"] == zone_id for row in zones)
+
+    deleted = client.delete(f"/api/symbols/600001.SH/zones/manual/{zone_id}")
+    missing = client.delete(f"/api/symbols/600001.SH/zones/manual/{zone_id}")
+    assert deleted.status_code == 204
+    assert missing.status_code == 404

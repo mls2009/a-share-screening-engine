@@ -31,6 +31,8 @@ def compute_technical_features(bars: pd.DataFrame) -> pd.DataFrame:
     for window in (5, 20, 60):
         data[f"volume_ma_{window}"] = volume.rolling(window).mean()
     data["volume_ratio_20"] = volume / data["volume_ma_20"]
+    for window in (1, 5, 20):
+        data[f"volume_change_{window}"] = volume.pct_change(window, fill_method=None) * 100
 
     ema_12 = close.ewm(span=12, adjust=False).mean()
     ema_26 = close.ewm(span=26, adjust=False).mean()
