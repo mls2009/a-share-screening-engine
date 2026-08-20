@@ -154,6 +154,17 @@ create table if not exists support_resistance_zones (
   created_at timestamp not null default current_timestamp
 );
 
+create table if not exists zone_deletion_markers (
+  marker_id uuid primary key,
+  symbol varchar not null,
+  timeframe varchar not null,
+  geometry varchar not null,
+  lower_price double not null,
+  center_price double not null,
+  upper_price double not null,
+  deleted_at timestamp not null default current_timestamp
+);
+
 create table if not exists data_sync_jobs (
   job_id uuid primary key,
   start_date date not null,

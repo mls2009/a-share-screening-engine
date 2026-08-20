@@ -17,6 +17,7 @@ def test_screening_schema_contains_required_tables_and_symbol_columns(tmp_path: 
         "market_features",
         "pattern_events",
         "support_resistance_zones",
+        "zone_deletion_markers",
         "data_sync_jobs",
         "sync_job_failures",
         "screen_definitions",

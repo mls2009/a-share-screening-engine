@@ -7,7 +7,7 @@ from astock.domain.market import Timeframe
 from astock.features.zones import (
     ManualZoneInput,
     create_manual_zone,
-    delete_manual_zone,
+    delete_zone,
     detect_zones,
     nearest_zones,
     replace_auto_zones,
@@ -148,8 +148,44 @@ def test_manual_zone_survives_auto_replacement_and_can_be_deleted(tmp_path: Path
     assert len(rows) == 1
     assert rows[0]["zone_id"] == zone_id
     assert rows[0]["source"] == "manual"
-    assert delete_manual_zone(database.connection, zone_id) is True
-    assert delete_manual_zone(database.connection, zone_id) is False
+    assert delete_zone(database.connection, "600001.SH", zone_id) is True
+    assert delete_zone(database.connection, "600001.SH", zone_id) is False
+
+
+def test_delete_zone_persists_marker_for_automatic_line_and_checks_owner(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "deleted-zones.duckdb")
+    database.migrate()
+    as_of = date(2026, 8, 20)
+    zone_id = "00000000-0000-0000-0000-000000000011"
+    database.connection.execute(
+        """
+        insert into support_resistance_zones
+          (zone_id, symbol, timeframe, as_of_date, zone_kind, geometry,
+           lower_price, center_price, upper_price, strength, touches, source,
+           rule_version)
+        values (?, '600001.SH', '1d', ?, 'support', 'horizontal',
+                9.8, 10, 10.2, 0.8, 3, 'auto', 'v1')
+        """,
+        [zone_id, as_of],
+    )
+
+    assert delete_zone(database.connection, "000001.SZ", zone_id) is False
+    assert database.connection.execute(
+        "select count(*) from zone_deletion_markers"
+    ).fetchone() == (0,)
+
+    assert delete_zone(database.connection, "600001.SH", zone_id) is True
+    assert database.connection.execute(
+        "select count(*) from support_resistance_zones where zone_id = ?", [zone_id]
+    ).fetchone() == (0,)
+    assert database.connection.execute(
+        """
+        select symbol, timeframe, geometry, lower_price, center_price, upper_price
+        from zone_deletion_markers
+        """
+    ).fetchone() == ("600001.SH", "1d", "horizontal", 9.8, 10.0, 10.2)
 
 
 def test_nearest_zones_converts_automatic_roles_but_preserves_manual_choice(

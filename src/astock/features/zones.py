@@ -268,17 +268,38 @@ def create_manual_zone(
     return zone_id
 
 
-def delete_manual_zone(connection: duckdb.DuckDBPyConnection, zone_id: UUID) -> bool:
-    exists = connection.execute(
-        "select 1 from support_resistance_zones where zone_id = ? and source = 'manual'",
-        [zone_id],
+def delete_zone(
+    connection: duckdb.DuckDBPyConnection, symbol: str, zone_id: UUID
+) -> bool:
+    zone = connection.execute(
+        """
+        select symbol, timeframe, geometry, lower_price, center_price, upper_price
+        from support_resistance_zones
+        where zone_id = ? and symbol = ?
+        """,
+        [zone_id, symbol],
     ).fetchone()
-    if exists is None:
+    if zone is None:
         return False
-    connection.execute(
-        "delete from support_resistance_zones where zone_id = ? and source = 'manual'",
-        [zone_id],
-    )
+    connection.execute("begin transaction")
+    try:
+        connection.execute(
+            """
+            insert into zone_deletion_markers
+              (marker_id, symbol, timeframe, geometry, lower_price, center_price,
+               upper_price)
+            values (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [uuid4(), *zone],
+        )
+        connection.execute(
+            "delete from support_resistance_zones where zone_id = ? and symbol = ?",
+            [zone_id, symbol],
+        )
+        connection.execute("commit")
+    except Exception:
+        connection.execute("rollback")
+        raise
     return True
 
 
