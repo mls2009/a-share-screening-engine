@@ -60,3 +60,38 @@ class BarStore:
             for bar in self.read(symbol, timeframe, adjustment)
             if start <= bar.timestamp.date() <= end
         ]
+
+    def read_latest(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        adjustment: Adjustment,
+        as_of: date,
+        *,
+        final_only: bool = False,
+    ) -> Bar | None:
+        timeframe_root = self.root / f"timeframe={timeframe.value}"
+        paths = []
+        for year_root in timeframe_root.glob("year=*"):
+            try:
+                year = int(year_root.name.removeprefix("year="))
+            except ValueError:
+                continue
+            path = year_root / f"{symbol}.parquet"
+            if year <= as_of.year and path.exists():
+                paths.append((year, path))
+
+        for _, path in sorted(paths, reverse=True):
+            frame = pd.read_parquet(path)
+            timestamps = pd.to_datetime(frame["timestamp"])
+            selected = frame[
+                (frame["adjustment"] == adjustment.value)
+                & (timestamps.dt.date <= as_of)
+            ]
+            if final_only and "is_final" in selected:
+                selected = selected[selected["is_final"]]
+            if selected.empty:
+                continue
+            latest = selected.sort_values("timestamp").iloc[-1]
+            return Bar.model_validate(latest.to_dict())
+        return None

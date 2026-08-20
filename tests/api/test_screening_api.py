@@ -10,7 +10,7 @@ from astock.api.app import ApiContext, create_app, create_default_app
 from astock.config import Settings
 from astock.domain.market import Adjustment, Bar, Timeframe
 from astock.features.store import MarketFeatureStore
-from astock.features.zones import PriceZone, replace_auto_zones
+from astock.features.zones import ZONE_RULE_VERSION, PriceZone, replace_auto_zones
 from astock.screening.service import ScreeningService
 from astock.storage.bars import BarStore
 from astock.storage.database import Database
@@ -81,6 +81,9 @@ def _client(tmp_path: Path) -> tuple[TestClient, Database]:
                 touches=2,
             )
         ],
+        latest_bar_at=datetime(
+            2026, 8, 20, 15, tzinfo=ZoneInfo("Asia/Shanghai")
+        ),
     )
     context = ApiContext(
         database=database,
@@ -233,11 +236,29 @@ def test_zones_api_returns_trends_independently_of_horizontal_limit(tmp_path: Pa
            lower_price, center_price, upper_price, slope, intercept, strength,
            touches, last_touched_on, source, rule_version)
         values (?, '600001.SH', '1d', '2026-08-20', ?, 'trend', ?, ?, ?, ?, ?,
-                0.8, 3, '2026-08-20', 'auto', 'v1')
+                0.8, 3, '2026-08-20', 'auto', ?)
         """,
         [
-            ["00000000-0000-0000-0000-000000000201", "uptrend", 12.9, 13.0, 13.1, 0.1, 10.0],
-            ["00000000-0000-0000-0000-000000000202", "downtrend", 10.9, 11.0, 11.1, -0.1, 14.0],
+            [
+                "00000000-0000-0000-0000-000000000201",
+                "uptrend",
+                12.9,
+                13.0,
+                13.1,
+                0.1,
+                10.0,
+                ZONE_RULE_VERSION,
+            ],
+            [
+                "00000000-0000-0000-0000-000000000202",
+                "downtrend",
+                10.9,
+                11.0,
+                11.1,
+                -0.1,
+                14.0,
+                ZONE_RULE_VERSION,
+            ],
         ],
     )
 
@@ -414,6 +435,9 @@ def test_minute_chart_uses_bar_close_and_does_not_rebuild_deleted_latest_batch(
                 touches=1,
             )
         ],
+        latest_bar_at=datetime(
+            2026, 8, 20, 9, 35, tzinfo=ZoneInfo("Asia/Shanghai")
+        ),
     )
     zone_id = database.connection.execute(
         """

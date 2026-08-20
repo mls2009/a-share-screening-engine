@@ -13,6 +13,9 @@ def test_screening_schema_contains_required_tables_and_symbol_columns(tmp_path: 
         row[1]
         for row in db.connection.execute("pragma table_info('symbols')").fetchall()
     }
+    batch_info = db.connection.execute(
+        "pragma table_info('zone_detection_batches')"
+    ).fetchall()
 
     assert {
         "market_features",
@@ -27,6 +30,19 @@ def test_screening_schema_contains_required_tables_and_symbol_columns(tmp_path: 
         "screen_matches",
     } <= tables
     assert {"board", "is_listed"} <= symbol_columns
+    assert {row[1] for row in batch_info} >= {
+        "symbol",
+        "timeframe",
+        "as_of_date",
+        "rule_version",
+        "latest_bar_at",
+        "created_at",
+    }
+    assert {row[1] for row in batch_info if row[5]} == {
+        "symbol",
+        "timeframe",
+        "as_of_date",
+    }
 
 
 def test_migration_backfills_existing_automatic_zone_batches(tmp_path: Path) -> None:
@@ -51,7 +67,10 @@ def test_migration_backfills_existing_automatic_zone_batches(tmp_path: Path) -> 
            'auto', 'v2'),
           ('00000000-0000-0000-0000-000000000304', '600001.SH', '1d',
            '2026-08-20', 'support', 'horizontal', 10.8, 11, 11.2, 1, 1,
-           'manual', 'manual-v1')
+           'manual', 'manual-v1'),
+          ('00000000-0000-0000-0000-000000000305', '600001.SH', '1d',
+           '2026-08-20', 'support', 'horizontal', 7.8, 8, 8.2, 0.6, 2,
+           'auto', 'v1')
         """
     )
 
@@ -60,14 +79,20 @@ def test_migration_backfills_existing_automatic_zone_batches(tmp_path: Path) -> 
     assert "zone_detection_batches" in {
         row[0] for row in db.connection.execute("show tables").fetchall()
     }
+    assert "latest_bar_at" in {
+        row[1]
+        for row in db.connection.execute(
+            "pragma table_info('zone_detection_batches')"
+        ).fetchall()
+    }
     assert db.connection.execute(
         """
-        select symbol, timeframe, as_of_date, rule_version
+        select symbol, timeframe, as_of_date, rule_version, cast(latest_bar_at as date)
         from zone_detection_batches order by as_of_date
         """
     ).fetchall() == [
-        ("600001.SH", "1d", date(2026, 8, 19), "v1"),
-        ("600001.SH", "1d", date(2026, 8, 20), "v2"),
+        ("600001.SH", "1d", date(2026, 8, 19), "v1", date(2026, 8, 19)),
+        ("600001.SH", "1d", date(2026, 8, 20), "v2", date(2026, 8, 20)),
     ]
 
 

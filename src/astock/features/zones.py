@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime, time
 from threading import Lock
 from typing import Literal
 from uuid import UUID, uuid4
@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from astock.domain.market import Timeframe
 
 _DELETE_ZONE_LOCK = Lock()
+ZONE_RULE_VERSION = "v2"
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,7 @@ class PriceZone:
     strength: float
     touches: int
     source: str = "auto"
-    rule_version: str = "v1"
+    rule_version: str = ZONE_RULE_VERSION
 
 
 class ManualZoneInput(BaseModel):
@@ -175,7 +176,7 @@ def detect_zones(
     as_of: date,
     timeframe: Timeframe | None = None,
     pivot_order: int = 2,
-    rule_version: str = "v1",
+    rule_version: str = ZONE_RULE_VERSION,
 ) -> list[PriceZone]:
     data = bars.copy()
     data["timestamp"] = pd.to_datetime(data["timestamp"])
@@ -249,8 +250,15 @@ def replace_auto_zones(
     timeframe: Timeframe,
     as_of: date,
     zones: list[PriceZone],
-    rule_version: str = "v1",
+    rule_version: str = ZONE_RULE_VERSION,
+    latest_bar_at: datetime | None = None,
 ) -> None:
+    """Replace one auto-zone batch, owning the transaction for this operation."""
+    if any(zone.as_of_date != as_of for zone in zones):
+        raise ValueError("all automatic zones must match the batch date")
+    if any(zone.rule_version != rule_version for zone in zones):
+        raise ValueError("all automatic zones must match the batch rule version")
+
     rows = [
         [
             symbol,
@@ -272,7 +280,9 @@ def replace_auto_zones(
         ]
         for zone in zones
     ]
-    batch_rule_versions = {zone.rule_version for zone in zones} or {rule_version}
+    watermark = latest_bar_at or datetime.combine(
+        as_of, time.min, tzinfo=UTC
+    )
     connection.execute("begin transaction")
     try:
         connection.execute(
@@ -293,18 +303,20 @@ def replace_auto_zones(
                 """,
                 rows,
             )
-        connection.executemany(
+        connection.execute(
+            """
+            delete from zone_detection_batches
+            where symbol = ? and timeframe = ? and as_of_date = ?
+            """,
+            [symbol, timeframe.value, as_of],
+        )
+        connection.execute(
             """
             insert into zone_detection_batches
-              (symbol, timeframe, as_of_date, rule_version, created_at)
-            values (?, ?, ?, ?, current_timestamp)
-            on conflict (symbol, timeframe, as_of_date, rule_version)
-            do update set created_at = excluded.created_at
+              (symbol, timeframe, as_of_date, rule_version, latest_bar_at)
+            values (?, ?, ?, ?, ?)
             """,
-            [
-                [symbol, timeframe.value, as_of, version]
-                for version in batch_rule_versions
-            ],
+            [symbol, timeframe.value, as_of, rule_version, watermark],
         )
         connection.execute("commit")
     except Exception:
@@ -449,10 +461,15 @@ def _active_zones(
           order by feature_date desc limit 1
         ),
         batch_state as (
-          select count(*) as batch_count,
-            max(case when as_of_date <= ? then as_of_date end) as as_of_date
+          select count(*) as batch_count
           from zone_detection_batches
           where symbol = ? and timeframe = ?
+        ),
+        latest_batch as (
+          select as_of_date, rule_version
+          from zone_detection_batches
+          where symbol = ? and timeframe = ? and as_of_date <= ?
+          order by as_of_date desc limit 1
         ),
         legacy_auto as (
           select max(as_of_date) as as_of_date
@@ -461,10 +478,16 @@ def _active_zones(
         ),
         latest_auto as (
           select case
-            when batch_state.batch_count > 0 then batch_state.as_of_date
+            when batch_state.batch_count > 0 then latest_batch.as_of_date
             else legacy_auto.as_of_date
-          end as as_of_date
-          from batch_state, legacy_auto
+          end as as_of_date,
+          case
+            when batch_state.batch_count > 0 then latest_batch.rule_version
+            else null
+          end as rule_version
+          from batch_state
+          left join latest_batch on true
+          cross join legacy_auto
         ),
         active as (
           select zones.*
@@ -473,7 +496,13 @@ def _active_zones(
             and zones.state = 'active' and zones.as_of_date <= ?
             and (
               zones.source = 'manual'
-              or (zones.source = 'auto' and zones.as_of_date = latest_auto.as_of_date)
+              or (
+                zones.source = 'auto' and zones.as_of_date = latest_auto.as_of_date
+                and (
+                  latest_auto.rule_version is null
+                  or zones.rule_version = latest_auto.rule_version
+                )
+              )
             )
         )
         select active.*, (select close from latest_close) as latest_close,
@@ -490,9 +519,11 @@ def _active_zones(
             symbol,
             timeframe.value,
             as_of,
-            as_of,
             symbol,
             timeframe.value,
+            symbol,
+            timeframe.value,
+            as_of,
             symbol,
             timeframe.value,
             as_of,

@@ -10,7 +10,7 @@ from astock.domain.market import Adjustment, Bar, Timeframe
 from astock.features.patterns import detect_patterns, persist_pattern_events
 from astock.features.store import MarketFeatureStore
 from astock.features.technical import compute_technical_features
-from astock.features.zones import detect_zones, replace_auto_zones
+from astock.features.zones import ZONE_RULE_VERSION, detect_zones, replace_auto_zones
 from astock.storage.bars import BarStore
 from astock.storage.database import Database
 
@@ -60,45 +60,60 @@ class FeatureBuilder:
         self, symbol: str, timeframe: Timeframe, as_of: date
     ) -> float | None:
         base = chart_base_timeframe(timeframe)
-        source = [
-            bar
-            for bar in self.bar_store.read(symbol, base, Adjustment.QFQ)
-            if bar.timestamp.date() <= as_of and bar.is_final
-        ]
-        if not source:
+        latest_base = self.bar_store.read_latest(
+            symbol, base, Adjustment.QFQ, as_of, final_only=True
+        )
+        if latest_base is None:
             return None
 
-        bars = source if timeframe == base else MarketDataService.derive(source, timeframe)
-        if not bars:
-            return None
-
-        frame = _bar_frame(bars)
-        zone_date = bars[-1].timestamp.date()
+        zone_date = latest_base.timestamp.date()
         with _CHART_ZONE_BUILD_LOCK:
-            latest_auto = self.connection.execute(
+            fresh = self.connection.execute(
                 """
-                select max(as_of_date) from zone_detection_batches
-                where symbol = ? and timeframe = ?
+                select latest_bar_at = ? from zone_detection_batches
+                where symbol = ? and timeframe = ? and as_of_date = ?
+                  and rule_version = ?
                 """,
-                [symbol, timeframe.value],
-            ).fetchone()[0]
-            if latest_auto is None:
-                latest_auto = self.connection.execute(
-                    """
-                    select max(as_of_date) from support_resistance_zones
-                    where symbol = ? and timeframe = ? and source = 'auto'
-                    """,
-                    [symbol, timeframe.value],
-                ).fetchone()[0]
-            if latest_auto is None or latest_auto < zone_date:
-                replace_auto_zones(
-                    self.connection,
+                [
+                    latest_base.timestamp,
                     symbol,
-                    timeframe,
+                    timeframe.value,
                     zone_date,
-                    detect_zones(frame, zone_date, timeframe=timeframe),
-                )
-        return float(bars[-1].close)
+                    ZONE_RULE_VERSION,
+                ],
+            ).fetchone()
+            if fresh is not None and fresh[0]:
+                return float(latest_base.close)
+
+            source = [
+                bar
+                for bar in self.bar_store.read(symbol, base, Adjustment.QFQ)
+                if bar.timestamp.date() <= as_of and bar.is_final
+            ]
+            bars = (
+                source
+                if timeframe == base
+                else MarketDataService.derive(source, timeframe)
+            )
+            if not bars:
+                return None
+            frame = _bar_frame(bars)
+            zones = detect_zones(
+                frame,
+                zone_date,
+                timeframe=timeframe,
+                rule_version=ZONE_RULE_VERSION,
+            )
+            replace_auto_zones(
+                self.connection,
+                symbol,
+                timeframe,
+                zone_date,
+                zones,
+                rule_version=ZONE_RULE_VERSION,
+                latest_bar_at=latest_base.timestamp,
+            )
+        return float(latest_base.close)
 
     def build_symbol(self, symbol: str, as_of: date) -> None:
         bars = [
@@ -145,4 +160,6 @@ class FeatureBuilder:
                 timeframe,
                 zone_date,
                 detect_zones(frame, zone_date, timeframe=timeframe),
+                rule_version=ZONE_RULE_VERSION,
+                latest_bar_at=bars[-1].timestamp,
             )

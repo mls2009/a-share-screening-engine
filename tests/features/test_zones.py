@@ -1,7 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from dataclasses import replace
+from datetime import date, datetime
 from pathlib import Path
 from threading import Barrier
+from zoneinfo import ZoneInfo
 
 import duckdb
 import pandas as pd
@@ -305,7 +307,11 @@ def test_auto_zone_replacement_rolls_back_rows_and_batch_on_insert_failure(
         touches=1,
     )
     replace_auto_zones(
-        database.connection, "600001.SH", Timeframe.DAY, as_of, [original]
+        database.connection,
+        "600001.SH",
+        Timeframe.DAY,
+        as_of,
+        [original],
     )
     tables = {row[0] for row in database.connection.execute("show tables").fetchall()}
     assert "zone_detection_batches" in tables
@@ -347,6 +353,192 @@ def test_auto_zone_replacement_rolls_back_rows_and_batch_on_insert_failure(
         """,
         [as_of],
     ).fetchone() == batch_before
+
+
+@pytest.mark.parametrize("invalid_kind", ["as_of", "mixed_version"])
+def test_auto_zone_replacement_validates_batch_before_deleting_old_rows(
+    tmp_path: Path, invalid_kind: str
+) -> None:
+    database = Database(tmp_path / f"invalid-{invalid_kind}.duckdb")
+    database.migrate()
+    as_of = date(2026, 8, 20)
+    original = PriceZone(
+        as_of_date=as_of,
+        zone_kind="support",
+        geometry="horizontal",
+        lower_price=9.8,
+        center_price=10,
+        upper_price=10.2,
+        slope=None,
+        intercept=None,
+        anchors=((as_of, 10),),
+        strength=0.8,
+        touches=1,
+        rule_version="v1",
+    )
+    replace_auto_zones(
+        database.connection,
+        "600001.SH",
+        Timeframe.DAY,
+        as_of,
+        [original],
+        rule_version="v1",
+    )
+    invalid = (
+        [replace(original, as_of_date=date(2026, 8, 19))]
+        if invalid_kind == "as_of"
+        else [original, replace(original, rule_version="v2")]
+    )
+
+    with pytest.raises(ValueError):
+        replace_auto_zones(
+            database.connection,
+            "600001.SH",
+            Timeframe.DAY,
+            as_of,
+            invalid,
+            rule_version="v1",
+        )
+
+    assert database.connection.execute(
+        """
+        select zone_kind, center_price, rule_version
+        from support_resistance_zones
+        where symbol = '600001.SH' and timeframe = '1d' and as_of_date = ?
+        """,
+        [as_of],
+    ).fetchall() == [("support", 10.0, "v1")]
+    assert database.connection.execute(
+        """
+        select rule_version from zone_detection_batches
+        where symbol = '600001.SH' and timeframe = '1d' and as_of_date = ?
+        """,
+        [as_of],
+    ).fetchall() == [("v1",)]
+
+
+def test_auto_zone_replacement_keeps_one_rule_version_per_date(tmp_path: Path) -> None:
+    database = Database(tmp_path / "zone-rule-replacement.duckdb")
+    database.migrate()
+    as_of = date(2026, 8, 20)
+    v1 = PriceZone(
+        as_of_date=as_of,
+        zone_kind="support",
+        geometry="horizontal",
+        lower_price=9.8,
+        center_price=10,
+        upper_price=10.2,
+        slope=None,
+        intercept=None,
+        anchors=((as_of, 10),),
+        strength=0.8,
+        touches=1,
+        rule_version="v1",
+    )
+    v2 = replace(
+        v1,
+        lower_price=10.8,
+        center_price=11,
+        upper_price=11.2,
+        rule_version="v2",
+    )
+
+    replace_auto_zones(
+        database.connection,
+        "600001.SH",
+        Timeframe.DAY,
+        as_of,
+        [v1],
+        rule_version="v1",
+        latest_bar_at=datetime(
+            2026, 8, 20, 14, 55, tzinfo=ZoneInfo("Asia/Shanghai")
+        ),
+    )
+    replace_auto_zones(
+        database.connection,
+        "600001.SH",
+        Timeframe.DAY,
+        as_of,
+        [v2],
+        rule_version="v2",
+        latest_bar_at=datetime(
+            2026, 8, 20, 15, 0, tzinfo=ZoneInfo("Asia/Shanghai")
+        ),
+    )
+
+    assert database.connection.execute(
+        """
+        select rule_version from zone_detection_batches
+        where symbol = '600001.SH' and timeframe = '1d' and as_of_date = ?
+        """,
+        [as_of],
+    ).fetchall() == [("v2",)]
+    assert database.connection.execute(
+        """
+        select center_price, rule_version from support_resistance_zones
+        where symbol = '600001.SH' and timeframe = '1d' and as_of_date = ?
+          and source = 'auto'
+        """,
+        [as_of],
+    ).fetchall() == [(11.0, "v2")]
+
+
+def test_chart_zones_uses_rule_version_recorded_by_latest_batch(tmp_path: Path) -> None:
+    database = Database(tmp_path / "latest-batch-rule.duckdb")
+    database.migrate()
+    as_of = date(2026, 8, 20)
+    database.connection.executemany(
+        """
+        insert into support_resistance_zones
+          (zone_id, symbol, timeframe, as_of_date, zone_kind, geometry,
+           lower_price, center_price, upper_price, slope, intercept, strength,
+           touches, last_touched_on, source, rule_version)
+        values (?, '600001.SH', '5m', ?, ?, 'trend', ?, ?, ?, ?, ?, 0.8, 2,
+                ?, 'auto', ?)
+        """,
+        [
+            [
+                "00000000-0000-0000-0000-000000000401",
+                as_of,
+                "downtrend",
+                9.8,
+                10.0,
+                10.2,
+                -0.1,
+                11.0,
+                as_of,
+                "v1",
+            ],
+            [
+                "00000000-0000-0000-0000-000000000402",
+                as_of,
+                "uptrend",
+                10.8,
+                11.0,
+                11.2,
+                0.1,
+                10.0,
+                as_of,
+                "v2",
+            ],
+        ],
+    )
+    database.connection.execute(
+        """
+        insert into zone_detection_batches
+          (symbol, timeframe, as_of_date, rule_version, latest_bar_at)
+        values ('600001.SH', '5m', ?, 'v2', '2026-08-20 01:35:00+00')
+        """,
+        [as_of],
+    )
+
+    rows = zones_module.chart_zones(
+        database.connection, "600001.SH", Timeframe.MIN_5, as_of
+    )
+
+    assert [(row["zone_kind"], row["rule_version"]) for row in rows] == [
+        ("uptrend", "v2")
+    ]
 
 
 def test_distance_and_chart_zone_selectors_keep_trends_separate(tmp_path: Path) -> None:
