@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import baostock
 
 from astock.domain.market import Adjustment, Bar, Timeframe
+from astock.domain.security import Security
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 ADJUST_FLAGS = {
@@ -139,6 +140,42 @@ class BaoStockProvider:
             }
             for row in rows
         ]
+
+    def securities_on(self, on_date: date) -> list[Security]:
+        trade_rows = self._query_rows("query_all_stock", day=on_date.isoformat())
+        basic_rows = self._query_rows("query_stock_basic")
+        basics = {row["code"]: row for row in basic_rows if row.get("code")}
+        securities = []
+        for row in trade_rows:
+            provider_symbol = row["code"]
+            basic = basics.get(provider_symbol, {})
+            if basic.get("type") not in {None, "", "1"}:
+                continue
+            symbol = self._symbol(provider_symbol)
+            listed_on = (
+                date.fromisoformat(basic["ipoDate"])
+                if basic.get("ipoDate")
+                else None
+            )
+            delisted_on = (
+                date.fromisoformat(basic["outDate"])
+                if basic.get("outDate")
+                else None
+            )
+            is_listed = delisted_on is None or delisted_on > on_date
+            securities.append(
+                Security(
+                    symbol=symbol,
+                    name=row.get("code_name") or basic.get("code_name") or symbol,
+                    exchange=symbol.split(".")[1],
+                    board=self._board(symbol),
+                    listed_on=listed_on,
+                    delisted_on=delisted_on,
+                    is_listed=is_listed,
+                    is_suspended=row.get("tradeStatus") != "1",
+                )
+            )
+        return securities
 
     def adjustment_factors(self, symbol: str, start: date, end: date) -> list[dict]:
         rows = self._query_rows(

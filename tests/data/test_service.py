@@ -6,6 +6,7 @@ import pytest
 
 from astock.data.service import DataQualityError, MarketDataService
 from astock.domain.market import Adjustment, Bar, Timeframe
+from astock.domain.security import Security
 from astock.storage.bars import BarStore
 from astock.storage.database import Database
 
@@ -48,6 +49,19 @@ class FakeReference:
                 "trade_status": "1",
                 "source": "baostock",
             }
+        ]
+
+    def securities_on(self, on_date: date) -> list[Security]:
+        return [
+            Security(
+                symbol="600519.SH",
+                name="贵州茅台",
+                exchange="SH",
+                board="main",
+                listed_on=date(2001, 8, 27),
+                is_listed=True,
+                is_suspended=False,
+            )
         ]
 
     def adjustment_factors(self, symbol: str, start: date, end: date) -> list[dict]:
@@ -157,3 +171,6 @@ def test_sync_reference_persists_realistic_backtest_inputs(tmp_path: Path) -> No
     assert database.connection.execute("select count(*) from adjustment_factors").fetchone()[0] == 1
     assert database.connection.execute("select count(*) from corporate_actions").fetchone()[0] == 1
     assert database.connection.execute("select count(*) from security_status").fetchone()[0] == 1
+    assert database.connection.execute(
+        "select board, listed_on, is_listed from symbols where symbol = '600519.SH'"
+    ).fetchone() == ("main", date(2001, 8, 27), True)

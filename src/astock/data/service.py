@@ -110,10 +110,10 @@ class MarketDataService:
             raise RuntimeError("reference provider is not configured")
 
         open_dates = self.reference_provider.trading_dates(start, end)
-        symbol_rows = [
-            row
-            for row in self.reference_provider.symbols_on(end)
-            if row["symbol"] in symbols
+        securities = [
+            security
+            for security in self.reference_provider.securities_on(end)
+            if security.symbol in symbols
         ]
         factors = []
         actions = []
@@ -135,17 +135,31 @@ class MarketDataService:
             connection.executemany(
                 "insert or replace into trading_calendar values (?, ?)", calendar_rows
             )
-            if symbol_rows:
+            if securities:
                 connection.executemany(
                     """
-                    insert into symbols (symbol, name, exchange)
-                    values (?, ?, ?)
+                    insert into symbols
+                      (symbol, name, exchange, listed_on, delisted_on, board, is_listed)
+                    values (?, ?, ?, ?, ?, ?, ?)
                     on conflict (symbol) do update set
-                      name = excluded.name, exchange = excluded.exchange
+                      name = excluded.name,
+                      exchange = excluded.exchange,
+                      listed_on = excluded.listed_on,
+                      delisted_on = excluded.delisted_on,
+                      board = excluded.board,
+                      is_listed = excluded.is_listed
                     """,
                     [
-                        [row["symbol"], row["name"], row["symbol"].split(".")[1]]
-                        for row in symbol_rows
+                        [
+                            security.symbol,
+                            security.name,
+                            security.exchange,
+                            security.listed_on,
+                            security.delisted_on,
+                            security.board,
+                            security.is_listed,
+                        ]
+                        for security in securities
                     ],
                 )
             if factors:

@@ -61,7 +61,12 @@ class FakeBaoStock:
         return self.results["dividend"]
 
     def query_stock_basic(self, **kwargs: str) -> FakeResult:
-        return FakeResult(["code", "ipoDate"], self.basic_rows)
+        fields = (
+            ["code", "code_name", "ipoDate", "outDate", "type", "status"]
+            if self.basic_rows and len(self.basic_rows[0]) == 6
+            else ["code", "ipoDate"]
+        )
+        return FakeResult(fields, self.basic_rows)
 
 
 def test_baostock_normalizes_daily_history() -> None:
@@ -177,6 +182,36 @@ def test_baostock_normalizes_reference_data() -> None:
             "source": "baostock",
         }
     ]
+
+
+def test_baostock_builds_complete_listed_security_universe() -> None:
+    fake = FakeBaoStock()
+    fake.results["all_stock"] = FakeResult(
+        ["code", "tradeStatus", "code_name"],
+        [
+            ["sh.600519", "1", "贵州茅台"],
+            ["sz.300750", "0", "宁德时代"],
+            ["bj.920001", "1", "北交样例"],
+        ],
+    )
+    fake.basic_rows = [
+        ["sh.600519", "贵州茅台", "2001-08-27", "", "1", "1"],
+        ["sz.300750", "宁德时代", "2018-06-11", "", "1", "1"],
+        ["bj.920001", "北交样例", "2025-01-02", "", "1", "1"],
+    ]
+
+    securities = BaoStockProvider(fake).securities_on(date(2026, 8, 20))
+
+    assert [security.symbol for security in securities] == [
+        "600519.SH",
+        "300750.SZ",
+        "920001.BJ",
+    ]
+    assert securities[0].board == "main"
+    assert securities[1].board == "chinext"
+    assert securities[2].board == "beijing"
+    assert securities[0].listed_on == date(2001, 8, 27)
+    assert securities[1].is_suspended is True
 
 
 def test_baostock_builds_point_in_time_security_status() -> None:

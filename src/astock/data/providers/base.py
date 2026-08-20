@@ -2,6 +2,7 @@ from datetime import date
 from typing import Protocol
 
 from astock.domain.market import Adjustment, Bar, Quote, Timeframe
+from astock.domain.security import Security
 
 
 class HistoryProvider(Protocol):
@@ -23,6 +24,8 @@ class ReferenceDataProvider(Protocol):
     def trading_dates(self, start: date, end: date) -> set[date]: ...
 
     def symbols_on(self, on_date: date) -> list[dict]: ...
+
+    def securities_on(self, on_date: date) -> list[Security]: ...
 
     def adjustment_factors(self, symbol: str, start: date, end: date) -> list[dict]: ...
 
