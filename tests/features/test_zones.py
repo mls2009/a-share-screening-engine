@@ -5,6 +5,7 @@ from threading import Barrier
 
 import duckdb
 import pandas as pd
+import pytest
 
 from astock.domain.market import Timeframe
 from astock.features.zones import (
@@ -58,73 +59,89 @@ def test_detects_horizontal_support_and_resistance_as_price_zones() -> None:
     assert support.source == "auto"
 
 
-def test_detects_rising_trend_support_from_multiple_pivot_anchors() -> None:
+@pytest.mark.parametrize("timeframe", [Timeframe.DAY, Timeframe.WEEK, Timeframe.MONTH])
+def test_detects_at_most_one_trend_line_per_direction_for_every_timeframe(
+    timeframe: Timeframe,
+) -> None:
     frame = _frame(
-        [11, 8.5, 11, 12, 9.5, 12, 13, 10.5, 13, 14],
-        lows={1: 8.0, 4: 9.0, 7: 10.0},
-        highs={},
-    )
-
-    zones = detect_zones(frame, as_of=date(2026, 1, 14), pivot_order=1)
-
-    trend = next(
-        zone for zone in zones if zone.zone_kind == "support" and zone.geometry == "trend"
-    )
-    assert trend.slope is not None and trend.slope > 0
-    assert len(trend.anchors) >= 2
-
-
-def test_daily_trend_selection_returns_support_and_resistance_when_strict_fit_misses_one() -> None:
-    frame = _frame(
-        [13, 9, 14, 10, 13, 11, 12.5, 12, 12, 13, 13.2, 13.8, 13.5, 13.2, 13.8, 13.1],
-        lows={1: 8, 4: 9, 7: 10.5, 10: 12.5, 13: 12.8},
-        highs={2: 16, 5: 15, 8: 13, 11: 15, 14: 14.2},
-    )
-    as_of = date(2026, 1, 22)
-
-    strict = detect_zones(frame, as_of=as_of, pivot_order=1)
-    daily = detect_zones(
-        frame, as_of=as_of, timeframe=Timeframe.DAY, pivot_order=1
-    )
-    weekly = detect_zones(
-        frame, as_of=as_of, timeframe=Timeframe.WEEK, pivot_order=1
-    )
-
-    strict_trends = [zone for zone in strict if zone.geometry == "trend"]
-    daily_trends = [zone for zone in daily if zone.geometry == "trend"]
-    assert {zone.zone_kind for zone in strict_trends} != {"support", "resistance"}
-    assert {zone.zone_kind for zone in daily_trends} == {"support", "resistance"}
-    assert next(
-        zone.center_price for zone in daily_trends if zone.zone_kind == "support"
-    ) < frame.iloc[-1]["close"]
-    assert next(
-        zone.center_price for zone in daily_trends if zone.zone_kind == "resistance"
-    ) > frame.iloc[-1]["close"]
-    assert weekly == strict
-
-
-def test_daily_trend_prefers_recent_confirmed_window_over_old_distant_line() -> None:
-    closes = [100 + index * 0.01 for index in range(23)]
-    frame = _frame(
-        closes,
-        lows={1: 90, 4: 85, 7: 80, 10: 75, 13: 70, 16: 95, 19: 94},
-        highs={2: 110, 5: 109, 8: 108, 11: 107, 14: 106, 17: 105, 20: 104},
+        [12] * 14,
+        lows={
+            0: 10,
+            1: 8,
+            2: 11,
+            3: 10.5,
+            4: 9,
+            5: 11.5,
+            6: 11,
+            7: 10,
+            8: 12,
+            9: 11.5,
+            10: 11,
+            11: 12.5,
+            12: 13,
+            13: 12.5,
+        },
+        highs={
+            0: 13,
+            1: 13.5,
+            2: 16,
+            3: 13,
+            4: 13.5,
+            5: 15,
+            6: 12.5,
+            7: 13,
+            8: 14,
+            9: 12,
+            10: 12.5,
+            11: 13,
+            12: 11.5,
+            13: 12,
+        },
     )
 
     zones = detect_zones(
         frame,
-        as_of=date(2026, 2, 2),
-        timeframe=Timeframe.DAY,
+        as_of=date(2026, 1, 20),
+        timeframe=timeframe,
         pivot_order=1,
     )
-    support = next(
-        zone
-        for zone in zones
-        if zone.geometry == "trend" and zone.zone_kind == "support"
+    trends = [zone for zone in zones if zone.geometry == "trend"]
+    uptrends = [zone for zone in trends if zone.zone_kind == "uptrend"]
+    downtrends = [zone for zone in trends if zone.zone_kind == "downtrend"]
+
+    assert len(uptrends) == 1
+    assert uptrends[0].slope is not None and uptrends[0].slope > 0
+    assert len(downtrends) == 1
+    assert downtrends[0].slope is not None and downtrends[0].slope < 0
+    assert len(trends) == 2
+
+
+def test_nearly_horizontal_pivots_do_not_create_a_trend_line() -> None:
+    frame = _frame(
+        [11] * 10,
+        lows={
+            0: 11,
+            1: 10.0,
+            2: 11,
+            3: 10.8,
+            4: 10.1,
+            5: 11.1,
+            6: 10.9,
+            7: 10.2,
+            8: 11.2,
+            9: 11,
+        },
+        highs={index: 12 + index * 0.1 for index in range(10)},
     )
 
-    assert support.anchors[-1][0] == pd.Timestamp(frame.iloc[19]["timestamp"]).date()
-    assert support.center_price > 90
+    zones = detect_zones(
+        frame,
+        as_of=date(2026, 1, 14),
+        timeframe=Timeframe.MONTH,
+        pivot_order=1,
+    )
+
+    assert not [zone for zone in zones if zone.geometry == "trend"]
 
 
 def test_zone_calculation_respects_explicit_as_of_without_future_leakage() -> None:
