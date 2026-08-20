@@ -7,6 +7,16 @@ test("workbench and chart desk render without browser errors", async ({ page }) 
   });
   page.on("pageerror", (error) => errors.push(error.message));
 
+  await page.route("**/api/catalog", async (route) => {
+    await route.fulfill({ json: [{
+      key: "return_20",
+      label: "20周期涨跌幅",
+      unit: "percent",
+      timeframes: ["5m", "15m", "30m", "60m", "1d", "1w", "1mo"],
+      operators: ["gte", "lt"],
+    }] });
+  });
+
   await page.route("**/api/symbols/*/bars?*", async (route) => {
     const start = new Date("2026-05-01T15:00:00+08:00");
     const bars = Array.from({ length: 80 }, (_, index) => {

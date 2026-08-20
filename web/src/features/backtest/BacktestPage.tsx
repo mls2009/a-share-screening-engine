@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
 import type { BacktestRun, MetricSpec, Timeframe, UiGroupNode, UiNode } from "../../types";
 import { ConditionTree } from "../screener/ConditionTree";
-import { createGroup, toApiNode } from "../screener/treeModel";
+import { createGroup, setTreeTimeframe, toApiNode } from "../screener/treeModel";
 
 export interface BacktestClient {
   catalog(): Promise<MetricSpec[]>;
@@ -56,6 +56,10 @@ export function BacktestPage({ client = api }: { client?: BacktestClient }) {
   const [run, setRun] = useState<BacktestRun>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const backtestCatalog = useMemo(
+    () => catalog.filter((metric) => metric.timeframes.length === 7),
+    [catalog],
+  );
 
   useEffect(() => {
     client.catalog().then(setCatalog).catch((cause: Error) => setError(cause.message));
@@ -70,8 +74,8 @@ export function BacktestPage({ client = api }: { client?: BacktestClient }) {
         timeframe,
         start,
         end,
-        entry_tree: toApiNode(entryTree, catalog),
-        exit_tree: toApiNode(exitTree, catalog),
+        entry_tree: toApiNode(entryTree, backtestCatalog),
+        exit_tree: toApiNode(exitTree, backtestCatalog),
         initial_cash: cash,
         position_size: positionSize / 100,
         mode,
@@ -89,23 +93,23 @@ export function BacktestPage({ client = api }: { client?: BacktestClient }) {
     <main className="backtest-page">
       <header className="compact-heading">
         <div><p className="eyebrow">CAUSAL ENGINE / NEXT OPEN EXECUTION</p><h1>策略回测</h1></div>
-        <button className="run-button" type="button" aria-label="运行策略回测" disabled={!catalog.length || loading} onClick={execute}>
+        <button className="run-button" type="button" aria-label="运行策略回测" disabled={!backtestCatalog.length || loading} onClick={execute}>
           <Play size={16} />{loading ? "计算中…" : "运行回测"}
         </button>
       </header>
       {error && <div className="error-banner" role="alert">{error}</div>}
       <section className="backtest-config">
         <label><span>证券代码（逗号分隔）</span><input aria-label="回测证券代码" value={symbols} onChange={(event) => setSymbols(event.target.value)} /></label>
-        <label><span>周期</span><select aria-label="回测周期" value={timeframe} onChange={(event) => setTimeframe(event.target.value as Timeframe)}>{["5m", "15m", "30m", "60m", "1d", "1w", "1mo"].map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label><span>周期</span><select aria-label="回测周期" value={timeframe} onChange={(event) => { const next = event.target.value as Timeframe; setTimeframe(next); setEntryTree((tree) => setTreeTimeframe(tree, next) as UiGroupNode); setExitTree((tree) => setTreeTimeframe(tree, next) as UiGroupNode); }}>{["5m", "15m", "30m", "60m", "1d", "1w", "1mo"].map((item) => <option key={item}>{item}</option>)}</select></label>
         <label><span>开始</span><input aria-label="回测开始日期" type="date" value={start} onChange={(event) => setStart(event.target.value)} /></label>
         <label><span>结束</span><input aria-label="回测结束日期" type="date" value={end} onChange={(event) => setEnd(event.target.value)} /></label>
         <label><span>初始资金</span><input aria-label="初始资金" type="number" min="1" value={cash} onChange={(event) => setCash(Number(event.target.value))} /></label>
         <label><span>单次仓位 %</span><input aria-label="单次仓位" type="number" min="1" max="100" value={positionSize} onChange={(event) => setPositionSize(Number(event.target.value))} /></label>
-        <label><span>撮合模式</span><select aria-label="撮合模式" value={mode} onChange={(event) => setMode(event.target.value as "simple" | "realistic")}><option value="realistic">A 股真实规则</option><option value="simple">简化模式</option></select></label>
+        <label><span>撮合模式</span><select aria-label="撮合模式" value={mode} onChange={(event) => setMode(event.target.value as "simple" | "realistic")}><option value="realistic">A 股规则近似</option><option value="simple">简化模式</option></select></label>
       </section>
       <div className="strategy-trees">
-        <section className="strategy-tree"><h2><TrendingUp size={17} />入场条件</h2>{catalog.length && <ConditionTree tree={entryTree} catalog={catalog} onChange={(tree: UiNode) => setEntryTree(tree as UiGroupNode)} />}</section>
-        <section className="strategy-tree"><h2><TrendingDown size={17} />离场条件</h2>{catalog.length && <ConditionTree tree={exitTree} catalog={catalog} onChange={(tree: UiNode) => setExitTree(tree as UiGroupNode)} />}</section>
+        <section className="strategy-tree"><h2><TrendingUp size={17} />入场条件</h2>{backtestCatalog.length > 0 && <ConditionTree tree={entryTree} catalog={backtestCatalog} onChange={(tree: UiNode) => setEntryTree(tree as UiGroupNode)} />}</section>
+        <section className="strategy-tree"><h2><TrendingDown size={17} />离场条件</h2>{backtestCatalog.length > 0 && <ConditionTree tree={exitTree} catalog={backtestCatalog} onChange={(tree: UiNode) => setExitTree(tree as UiGroupNode)} />}</section>
       </div>
       {!run ? <section className="result-empty backtest-empty">配置入场与离场条件后运行。信号按收盘计算，下一根 K 线开盘撮合，避免未来函数。</section> : (
         <section className="backtest-report">

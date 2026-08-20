@@ -80,3 +80,21 @@ def test_service_names_every_symbol_with_missing_local_data(tmp_path: Path) -> N
         service.run(_request("000001.SZ"))
 
     assert error.value.symbols == ["000001.SZ"]
+
+
+def test_service_reads_a_warmup_window_before_the_requested_start(tmp_path: Path) -> None:
+    database = Database(tmp_path / "warmup.duckdb")
+    database.migrate()
+
+    class RecordingStore:
+        call = None
+
+        def read_range(self, symbol, timeframe, adjustment, start, end):
+            self.call = (symbol, timeframe, adjustment, start, end)
+            return _daily_bars()
+
+    store = RecordingStore()
+    BacktestService(database, store).run(_request())  # type: ignore[arg-type]
+
+    assert store.call is not None
+    assert store.call[3] < _request().start

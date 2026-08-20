@@ -25,6 +25,15 @@ class OutboxWorker:
 
     def deliver_due(self, now: datetime) -> int:
         local_now = now.astimezone(SHANGHAI).replace(tzinfo=None)
+        lease_expired_before = local_now - timedelta(minutes=5)
+        self.database.connection.execute(
+            """
+            update notification_outbox
+            set status = 'pending', next_attempt_at = ?, updated_at = current_timestamp
+            where status = 'sending' and updated_at <= ?
+            """,
+            [local_now, lease_expired_before],
+        )
         rows = self.database.connection.execute(
             """
             select message_id, payload, attempts

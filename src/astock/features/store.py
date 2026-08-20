@@ -139,6 +139,8 @@ class MarketFeatureStore:
         end: date,
         limit: int,
         feature_version: str = "v1",
+        *,
+        enrich: bool = True,
     ) -> list[dict]:
         cursor = self.connection.execute(
             """
@@ -149,16 +151,54 @@ class MarketFeatureStore:
             [symbol, timeframe.value, feature_version, end, limit],
         )
         columns = [column[0] for column in cursor.description]
-        return [
-            self._enrich(symbol, timeframe, dict(zip(columns, row, strict=True)))
-            for row in cursor.fetchall()
-        ]
+        rows = [self._decode(dict(zip(columns, row, strict=True))) for row in cursor.fetchall()]
+        return [self._enrich(symbol, timeframe, row) for row in rows] if enrich else rows
+
+    def read_histories(
+        self,
+        symbols: list[str],
+        timeframe: Timeframe,
+        end: date,
+        limit: int,
+        feature_version: str = "v1",
+        *,
+        enrich: bool = True,
+    ) -> dict[str, list[dict]]:
+        if not symbols:
+            return {}
+        cursor = self.connection.execute(
+            """
+            select * exclude (history_rank) from (
+              select *, row_number() over (
+                partition by symbol order by feature_date desc
+              ) as history_rank
+              from market_features
+              where symbol in (select unnest(?))
+                and timeframe = ? and feature_version = ? and feature_date <= ?
+            ) where history_rank <= ?
+            order by symbol, feature_date desc
+            """,
+            [symbols, timeframe.value, feature_version, end, limit],
+        )
+        columns = [column[0] for column in cursor.description]
+        histories = {symbol: [] for symbol in symbols}
+        for values in cursor.fetchall():
+            row = self._decode(dict(zip(columns, values, strict=True)))
+            if enrich:
+                row = self._enrich(row["symbol"], timeframe, row)
+            histories[row["symbol"]].append(row)
+        return histories
+
+    @staticmethod
+    def _decode(row: dict) -> dict:
+        decoded = dict(row)
+        extra = decoded.pop("extra", None)
+        if extra:
+            decoded.update(json.loads(extra) if isinstance(extra, str) else extra)
+        return decoded
 
     def _enrich(self, symbol: str, timeframe: Timeframe, row: dict) -> dict:
-        enriched = dict(row)
-        extra = enriched.pop("extra", None)
-        if extra:
-            enriched.update(json.loads(extra) if isinstance(extra, str) else extra)
+        enriched = self._decode(row)
 
         security = self.connection.execute(
             """

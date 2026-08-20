@@ -54,6 +54,9 @@ def validate_tree(
             return
 
         assert isinstance(node.right, MetricOperand)
+        if node.operator.value in {"between", "not_between"}:
+            issue("invalid_range", "between requires a two-value constant", path)
+            return
         right = catalog.get(node.right.metric)
         if right is None:
             issue("unknown_metric", f"unknown metric: {node.right.metric}", path)

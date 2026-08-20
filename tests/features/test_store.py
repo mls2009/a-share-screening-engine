@@ -67,3 +67,34 @@ def test_history_expands_extra_and_adds_pattern_and_zone_context(tmp_path: Path)
     assert row["is_suspended"] is False
     assert row["support_distance"] == 16.666666666666664
     assert row["resistance_distance"] == 25.0
+
+
+def test_batch_history_reads_all_symbols_without_optional_enrichment(tmp_path: Path) -> None:
+    database = Database(tmp_path / "batch-features.duckdb")
+    database.migrate()
+    database.connection.executemany(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, close, return_20, extra)
+        values (?, '1d', ?, 'v1', ?, ?, ?)
+        """,
+        [
+            ["600001.SH", date(2026, 8, 19), 10, 20, json.dumps({"up_streak": 1})],
+            ["600001.SH", date(2026, 8, 20), 11, 30, json.dumps({"up_streak": 2})],
+            ["000001.SZ", date(2026, 8, 20), 12, 40, json.dumps({"up_streak": 3})],
+        ],
+    )
+    store = MarketFeatureStore(database)
+
+    histories = store.read_histories(
+        ["600001.SH", "000001.SZ"],
+        Timeframe.DAY,
+        date(2026, 8, 20),
+        1,
+        enrich=False,
+    )
+
+    assert histories["600001.SH"][0]["feature_date"] == date(2026, 8, 20)
+    assert histories["600001.SH"][0]["up_streak"] == 2
+    assert histories["000001.SZ"][0]["return_20"] == 40
+    assert "pattern_type" not in histories["600001.SH"][0]

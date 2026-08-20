@@ -6,7 +6,7 @@ import { BacktestPage } from "./BacktestPage";
 
 const catalog: MetricSpec[] = [{
   key: "return_20", label: "近 20 周期涨跌幅", unit: "percent",
-  timeframes: ["1d"], operators: ["gte"],
+  timeframes: ["5m", "15m", "30m", "60m", "1d", "1w", "1mo"], operators: ["gte"],
 }];
 const run: BacktestRun = {
   run_id: "run-1",
@@ -47,5 +47,22 @@ describe("BacktestPage", () => {
     expect(await screen.findByText("12.50%")) .toBeInTheDocument();
     expect(screen.getByText("600001.SH")).toBeInTheDocument();
     expect(screen.getByText("买入")).toBeInTheDocument();
+  });
+
+  it("切换回测周期时同步入场和离场条件周期", async () => {
+    const client = {
+      catalog: async () => catalog,
+      runBacktest: vi.fn().mockResolvedValue(run),
+    };
+    render(<BacktestPage client={client} />);
+
+    await screen.findByRole("heading", { name: "入场条件" });
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "回测周期" }), "5m");
+    await userEvent.click(screen.getByRole("button", { name: "运行策略回测" }));
+
+    const payload = client.runBacktest.mock.calls[0][0];
+    expect(payload.timeframe).toBe("5m");
+    expect(payload.entry_tree.children[0].timeframe).toBe("5m");
+    expect(payload.exit_tree.children[0].timeframe).toBe("5m");
   });
 });

@@ -9,7 +9,7 @@ from astock.data.snapshots import overlay_snapshot
 from astock.domain.market import Timeframe
 from astock.features.store import MarketFeatureStore
 from astock.screening.evaluator import Evaluation, TruthValue, evaluate_tree
-from astock.screening.models import ConditionNode, GroupNode, MetricOperand, Node
+from astock.screening.models import ConditionNode, GroupNode, MetricOperand, Node, Operator
 from astock.screening.validation import ScreenValidationIssue, validate_tree
 from astock.storage.database import Database
 
@@ -49,9 +49,34 @@ class SnapshotProvider:
     def snapshot_many(self, symbols: list[str]) -> SnapshotBatchResult: ...
 
 
-def _requirements(tree: Node) -> tuple[set[Timeframe], int]:
+ENRICHED_METRICS = {
+    "board",
+    "is_st",
+    "is_suspended",
+    "pattern_type",
+    "pattern_strength",
+    "support_distance",
+    "resistance_distance",
+}
+
+
+def _live_history_limit(metrics: set[str]) -> int:
+    limit = 1
+    for metric in metrics:
+        if metric == "volume_ratio_20":
+            limit = max(limit, 20)
+            continue
+        if metric.startswith(("return_", "ma_")):
+            suffix = metric.rsplit("_", 1)[-1]
+            if suffix.isdigit():
+                limit = max(limit, int(suffix))
+    return limit
+
+
+def _requirements(tree: Node) -> tuple[set[Timeframe], int, set[str]]:
     timeframes: set[Timeframe] = set()
-    limit = 2
+    metrics: set[str] = set()
+    limit = 1
 
     def visit(node: ConditionNode | GroupNode) -> None:
         nonlocal limit
@@ -60,12 +85,16 @@ def _requirements(tree: Node) -> tuple[set[Timeframe], int]:
                 visit(child)
             return
         timeframes.add(node.timeframe)
+        metrics.add(node.metric)
         if isinstance(node.right, MetricOperand):
             timeframes.add(node.right.timeframe)
+            metrics.add(node.right.metric)
+        if node.operator in {Operator.CROSSES_ABOVE, Operator.CROSSES_BELOW}:
+            limit = max(limit, 2)
         limit = max(limit, node.lookback or 1, node.occurrences or 1)
 
     visit(tree)
-    return timeframes, limit
+    return timeframes, limit, metrics
 
 
 class ScreeningService:
@@ -119,21 +148,35 @@ class ScreeningService:
                 "select symbol from symbols where is_listed order by symbol"
             ).fetchall()
         ]
-        timeframes, history_limit = _requirements(tree)
+        timeframes, history_limit, metrics = _requirements(tree)
         batch = SnapshotBatchResult((), len(symbols), 0)
         if mode == "live":
             if self.snapshot_provider is None:
                 raise RuntimeError("live screening requires a snapshot provider")
             batch = self.snapshot_provider.snapshot_many(symbols)
-            history_limit = max(history_limit, 250)
+            history_limit = max(history_limit, _live_history_limit(metrics))
             timeframes.add(Timeframe.DAY)
+        if rank is not None:
+            timeframes.add(rank.timeframe)
+        timeframes.add(Timeframe.DAY)
         snapshots = {snapshot.symbol: snapshot for snapshot in batch.snapshots}
+        enrich = bool(metrics & ENRICHED_METRICS)
+        histories = {
+            timeframe: self.feature_store.read_histories(
+                symbols, timeframe, as_of, history_limit, enrich=enrich
+            )
+            for timeframe in timeframes
+        }
+        identities = {
+            row[0]: {"name": row[1], "board": row[2]}
+            for row in self.connection.execute(
+                "select symbol, name, board from symbols where is_listed"
+            ).fetchall()
+        }
         candidates = []
         for symbol in symbols:
             history = {
-                timeframe: self.feature_store.read_history(
-                    symbol, timeframe, as_of, history_limit
-                )
+                timeframe: histories[timeframe].get(symbol, [])
                 for timeframe in timeframes
             }
             if mode == "live":
@@ -147,14 +190,13 @@ class ScreeningService:
             explanation = evaluate_tree(tree, history)
             if explanation.result != TruthValue.TRUE:
                 continue
-            snapshot = history.get(Timeframe.DAY, [{}])[0] if history.get(Timeframe.DAY) else {}
+            snapshot = dict(history.get(Timeframe.DAY, [{}])[0]) if history.get(Timeframe.DAY) else {}
+            snapshot.update({key: value for key, value in identities.get(symbol, {}).items() if key not in snapshot})
             rank_value = None
             if rank is not None:
                 rank_rows = history.get(rank.timeframe)
                 if rank_rows is None:
-                    rank_rows = self.feature_store.read_history(
-                        symbol, rank.timeframe, as_of, 1
-                    )
+                    rank_rows = histories[rank.timeframe].get(symbol, [])
                 rank_value = rank_rows[0].get(rank.metric) if rank_rows else None
             candidates.append((symbol, snapshot, explanation, rank_value))
 

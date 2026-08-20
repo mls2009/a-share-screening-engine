@@ -71,3 +71,28 @@ def test_outbox_retries_then_marks_sent(tmp_path: Path) -> None:
     assert database.connection.execute(
         "select status, attempts from notification_outbox"
     ).fetchone() == ("sent", 2)
+
+
+def test_outbox_recovers_a_stale_sending_claim_after_restart(tmp_path: Path) -> None:
+    database = Database(tmp_path / "recover-outbox.duckdb")
+    database.migrate()
+    stale = NOW.astimezone(SHANGHAI).replace(tzinfo=None) - timedelta(minutes=10)
+    database.connection.execute(
+        """
+        insert into notification_outbox
+          (message_id, payload, status, next_attempt_at, updated_at)
+        values ('00000000-0000-0000-0000-000000000002', ?, 'sending', ?, ?)
+        """,
+        [PAYLOAD, stale, stale],
+    )
+
+    class SuccessfulNotifier:
+        def send(self, payload: dict):
+            return type("Result", (), {"success": True, "error": None})()
+
+    sent = OutboxWorker(database, SuccessfulNotifier()).deliver_due(NOW)
+
+    assert sent == 1
+    assert database.connection.execute(
+        "select status, attempts from notification_outbox"
+    ).fetchone() == ("sent", 1)

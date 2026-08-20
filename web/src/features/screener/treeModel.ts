@@ -1,4 +1,4 @@
-import type { MetricSpec, UiConditionNode, UiGroupNode, UiNode, Unit } from "../../types";
+import type { MetricSpec, Timeframe, UiConditionNode, UiGroupNode, UiNode, Unit } from "../../types";
 
 let sequence = 0;
 const id = (prefix: string) => `${prefix}-${++sequence}`;
@@ -32,6 +32,14 @@ export function removeNode(root: UiNode, targetId: string): UiNode {
       .filter((child) => child.id !== targetId)
       .map((child) => removeNode(child, targetId)),
   };
+}
+
+export function setTreeTimeframe(root: UiNode, timeframe: Timeframe): UiNode {
+  if (root.kind === "condition") {
+    const right = root.right.kind === "metric" ? { ...root.right, timeframe } : root.right;
+    return { ...root, timeframe, right };
+  }
+  return { ...root, children: root.children.map((child) => setTreeTimeframe(child, timeframe)) };
 }
 
 function constantValue(raw: string, unit: Unit): boolean | number | string | number[] {

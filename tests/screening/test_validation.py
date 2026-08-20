@@ -19,6 +19,20 @@ def test_catalog_contains_extended_price_volume_pattern_and_risk_metrics() -> No
     } <= keys
 
 
+def test_technical_metrics_support_all_chart_and_backtest_timeframes() -> None:
+    from astock.domain.market import Timeframe
+    from astock.screening.catalog import DEFAULT_CATALOG
+
+    expected = set(Timeframe)
+
+    assert DEFAULT_CATALOG.get("return_20") is not None
+    assert set(DEFAULT_CATALOG.get("return_20").timeframes) == expected
+    assert set(DEFAULT_CATALOG.get("volume_change_5").timeframes) == expected
+    assert set(DEFAULT_CATALOG.get("ma_20").timeframes) == expected
+    assert set(DEFAULT_CATALOG.get("rsi_14").timeframes) == expected
+    assert set(DEFAULT_CATALOG.get("support_distance").timeframes) != expected
+
+
 def test_validates_known_metric_operator_timeframe_and_unit() -> None:
     tree = ConditionNode.model_validate(
         {
@@ -83,6 +97,25 @@ def test_rejects_incompatible_units_and_metric_comparisons() -> None:
 
     assert validate_tree(wrong_constant)[0].code == "unit_mismatch"
     assert validate_tree(wrong_metric)[0].code == "unit_mismatch"
+
+
+def test_rejects_between_with_a_single_metric_operand() -> None:
+    condition = ConditionNode.model_validate(
+        {
+            "kind": "condition",
+            "metric": "close",
+            "timeframe": "1d",
+            "operator": "between",
+            "right": {
+                "kind": "metric",
+                "metric": "ma_20",
+                "timeframe": "1d",
+                "multiplier": 1,
+            },
+        }
+    )
+
+    assert validate_tree(condition)[0].code == "invalid_range"
 
 
 def test_rejects_tree_deeper_than_safety_limit() -> None:

@@ -21,6 +21,7 @@ NUMERIC_OPERATORS = frozenset(
 )
 EQUALITY_OPERATORS = frozenset({Operator.EQ, Operator.NE})
 SCREEN_TIMEFRAMES = frozenset({Timeframe.DAY, Timeframe.WEEK, Timeframe.MONTH})
+ALL_TIMEFRAMES = frozenset(Timeframe)
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,7 @@ class MetricSpec:
 
 
 def _metric(key: str, label: str, unit: Unit) -> MetricSpec:
-    return MetricSpec(key=key, label=label, unit=unit)
+    return MetricSpec(key=key, label=label, unit=unit, timeframes=ALL_TIMEFRAMES)
 
 
 METRICS = [
@@ -49,14 +50,14 @@ METRICS = [
         for window in (5, 20, 60)
     ],
     _metric("volume_ratio_20", "20周期量比", Unit.RATIO),
-    _metric("volume_ratio", "实时量比", Unit.RATIO),
+    MetricSpec("volume_ratio", "实时量比", Unit.RATIO),
     *[
         _metric(f"volume_change_{window}", f"成交量{window}周期增减", Unit.PERCENT)
         for window in (1, 5, 20)
     ],
-    _metric("turnover_rate", "换手率", Unit.PERCENT),
-    _metric("total_market_cap", "总市值", Unit.AMOUNT),
-    _metric("float_market_cap", "流通市值", Unit.AMOUNT),
+    MetricSpec("turnover_rate", "换手率", Unit.PERCENT),
+    MetricSpec("total_market_cap", "总市值", Unit.AMOUNT),
+    MetricSpec("float_market_cap", "流通市值", Unit.AMOUNT),
     *[
         _metric(f"ma_{window}", f"MA{window}", Unit.PRICE)
         for window in (5, 10, 20, 30, 60, 120, 250)
@@ -82,16 +83,16 @@ METRICS = [
     ],
     _metric("up_streak", "连续上涨周期数", Unit.DAYS),
     _metric("down_streak", "连续下跌周期数", Unit.DAYS),
-    _metric("listing_trade_days", "上市交易日数", Unit.DAYS),
+    MetricSpec("listing_trade_days", "上市交易日数", Unit.DAYS),
     MetricSpec("is_new", "新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS),
     MetricSpec("is_secondary_new", "次新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS),
     MetricSpec("is_st", "ST", Unit.BOOLEAN, operators=EQUALITY_OPERATORS),
     MetricSpec("is_suspended", "停牌", Unit.BOOLEAN, operators=EQUALITY_OPERATORS),
     MetricSpec("board", "板块", Unit.CATEGORY, operators=EQUALITY_OPERATORS),
     MetricSpec("pattern_type", "K线形态", Unit.CATEGORY, operators=EQUALITY_OPERATORS),
-    _metric("pattern_strength", "形态强度", Unit.SCORE),
-    _metric("support_distance", "距支撑区", Unit.PERCENT),
-    _metric("resistance_distance", "距压力区", Unit.PERCENT),
+    MetricSpec("pattern_strength", "形态强度", Unit.SCORE),
+    MetricSpec("support_distance", "距支撑区", Unit.PERCENT),
+    MetricSpec("resistance_distance", "距压力区", Unit.PERCENT),
 ]
 
 

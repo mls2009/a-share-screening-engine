@@ -7,7 +7,24 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astock.domain.market import Adjustment, Timeframe
-from astock.screening.models import Node
+from astock.screening.models import ConditionNode, GroupNode, MetricOperand, Node
+from astock.screening.validation import validate_tree
+
+
+def _tree_timeframes(tree: Node) -> set[Timeframe]:
+    result: set[Timeframe] = set()
+
+    def visit(node: ConditionNode | GroupNode) -> None:
+        if isinstance(node, GroupNode):
+            for child in node.children:
+                visit(child)
+            return
+        result.add(node.timeframe)
+        if isinstance(node.right, MetricOperand):
+            result.add(node.right.timeframe)
+
+    visit(tree)
+    return result
 
 
 class BacktestMode(StrEnum):
@@ -64,6 +81,13 @@ class BacktestRequest(BaseModel):
             raise ValueError("start must be on or before end")
         if len(set(self.symbols)) != len(self.symbols):
             raise ValueError("symbols must be unique")
+        tree_timeframes = _tree_timeframes(self.entry_tree) | _tree_timeframes(self.exit_tree)
+        if tree_timeframes != {self.timeframe}:
+            raise ValueError("condition timeframe must match backtest timeframe")
+        issues = validate_tree(self.entry_tree) + validate_tree(self.exit_tree)
+        if issues:
+            details = "; ".join(f"{issue.path}: {issue.message}" for issue in issues)
+            raise ValueError(f"invalid backtest condition: {details}")
         return self
 
 

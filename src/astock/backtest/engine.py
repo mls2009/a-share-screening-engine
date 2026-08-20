@@ -12,7 +12,7 @@ from astock.backtest.models import (
     EquityPoint,
     ExecutionStatus,
 )
-from astock.domain.market import Bar
+from astock.domain.market import Bar, Timeframe
 from astock.features.technical import compute_technical_features
 from astock.screening.evaluator import TruthValue, evaluate_tree
 
@@ -29,6 +29,18 @@ class PendingOrder:
     side: str
     signal_at: pd.Timestamp
     reason: str
+
+
+def _periods_per_year(timeframe: Timeframe) -> int:
+    return {
+        Timeframe.MIN_5: 252 * 48,
+        Timeframe.MIN_15: 252 * 16,
+        Timeframe.MIN_30: 252 * 8,
+        Timeframe.MIN_60: 252 * 4,
+        Timeframe.DAY: 252,
+        Timeframe.WEEK: 52,
+        Timeframe.MONTH: 12,
+    }[timeframe]
 
 
 def _frame(bars: list[Bar]) -> pd.DataFrame:
@@ -50,7 +62,7 @@ def _frame(bars: list[Bar]) -> pd.DataFrame:
 
 def _records(bars: list[Bar]) -> list[dict]:
     frame = compute_technical_features(_frame(bars))
-    return frame.where(pd.notna(frame), None).to_dict("records")
+    return frame.astype(object).where(pd.notna(frame), None).to_dict("records")
 
 
 def _metrics(
@@ -72,10 +84,24 @@ def _metrics(
         )
     equity = pd.Series([point.equity for point in curve], dtype=float)
     total_return = (equity.iloc[-1] / request.initial_cash - 1) * 100
-    periods = max(len(equity) - 1, 1)
-    annualized = ((equity.iloc[-1] / request.initial_cash) ** (252 / periods) - 1) * 100
+    elapsed_seconds = (curve[-1].timestamp - curve[0].timestamp).total_seconds()
+    elapsed_years = elapsed_seconds / (365.25 * 24 * 60 * 60)
+    ratio = equity.iloc[-1] / request.initial_cash
+    annualized = (
+        (ratio ** (1 / elapsed_years) - 1) * 100
+        if elapsed_years > 0 and ratio > 0
+        else 0
+    )
     returns = equity.pct_change().dropna()
-    sharpe = float(returns.mean() / returns.std(ddof=0) * sqrt(252)) if len(returns) > 1 and returns.std(ddof=0) else 0
+    sharpe = (
+        float(
+            returns.mean()
+            / returns.std(ddof=0)
+            * sqrt(_periods_per_year(request.timeframe))
+        )
+        if len(returns) > 1 and returns.std(ddof=0)
+        else 0
+    )
     wins = [value for value in closed_pnls if value > 0]
     losses = [-value for value in closed_pnls if value < 0]
     return BacktestMetrics(
@@ -104,7 +130,7 @@ class BacktestEngine:
                 [
                     bar
                     for bar in market.get(symbol, [])
-                    if request.start <= bar.timestamp.date() <= request.end and bar.is_final
+                    if bar.timestamp.date() <= request.end and bar.is_final
                 ],
                 key=lambda bar: bar.timestamp,
             )
@@ -112,7 +138,12 @@ class BacktestEngine:
                 prepared[symbol] = (bars, _records(bars))
 
         timeline = sorted(
-            {bar.timestamp for bars, _ in prepared.values() for bar in bars}
+            {
+                bar.timestamp
+                for bars, _ in prepared.values()
+                for bar in bars
+                if request.start <= bar.timestamp.date() <= request.end
+            }
         )
         indices = {
             symbol: {bar.timestamp: index for index, bar in enumerate(bars)}

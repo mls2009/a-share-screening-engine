@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
 from astock.backtest.engine import BacktestEngine
@@ -43,8 +43,25 @@ class BacktestService:
             return Timeframe.DAY
         return timeframe
 
+    @staticmethod
+    def _warmup_start(start: date, timeframe: Timeframe) -> date:
+        periods = 300
+        if timeframe in {
+            Timeframe.MIN_5,
+            Timeframe.MIN_15,
+            Timeframe.MIN_30,
+            Timeframe.MIN_60,
+        }:
+            return start - timedelta(days=90)
+        if timeframe == Timeframe.DAY:
+            return start - timedelta(days=periods * 2)
+        if timeframe == Timeframe.WEEK:
+            return start - timedelta(days=periods * 7)
+        return start - timedelta(days=periods * 31)
+
     def run(self, request: BacktestRequest) -> BacktestRun:
         base = self._base_timeframe(request.timeframe)
+        warmup_start = self._warmup_start(request.start, request.timeframe)
         market = {}
         missing = []
         for symbol in request.symbols:
@@ -52,7 +69,7 @@ class BacktestService:
                 symbol,
                 base,
                 request.adjustment,
-                request.start,
+                warmup_start,
                 request.end,
             )
             if not bars:
