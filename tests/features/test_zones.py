@@ -150,3 +150,42 @@ def test_manual_zone_survives_auto_replacement_and_can_be_deleted(tmp_path: Path
     assert rows[0]["source"] == "manual"
     assert delete_manual_zone(database.connection, zone_id) is True
     assert delete_manual_zone(database.connection, zone_id) is False
+
+
+def test_nearest_zones_converts_automatic_roles_but_preserves_manual_choice(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "role-conversion.duckdb")
+    database.migrate()
+    as_of = date(2026, 8, 20)
+    database.connection.execute(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, close)
+        values ('600001.SH', '1w', ?, 'v1', 10)
+        """,
+        [as_of],
+    )
+    database.connection.executemany(
+        """
+        insert into support_resistance_zones
+          (zone_id, symbol, timeframe, as_of_date, zone_kind, geometry,
+           lower_price, center_price, upper_price, strength, touches, source,
+           rule_version)
+        values (?, '600001.SH', '1w', ?, ?, 'horizontal', ?, ?, ?, 0.8, 3, ?, 'v1')
+        """,
+        [
+            ["00000000-0000-0000-0000-000000000001", as_of, "support", 11.9, 12, 12.1, "auto"],
+            ["00000000-0000-0000-0000-000000000002", as_of, "resistance", 7.9, 8, 8.1, "auto"],
+            ["00000000-0000-0000-0000-000000000003", as_of, "support", 10.9, 11, 11.1, "manual"],
+        ],
+    )
+
+    rows = nearest_zones(
+        database.connection, "600001.SH", Timeframe.WEEK, as_of, limit_each=10
+    )
+    roles = {str(row["zone_id"]): row["zone_kind"] for row in rows}
+
+    assert roles["00000000-0000-0000-0000-000000000001"] == "resistance"
+    assert roles["00000000-0000-0000-0000-000000000002"] == "support"
+    assert roles["00000000-0000-0000-0000-000000000003"] == "support"

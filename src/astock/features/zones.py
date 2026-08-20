@@ -321,6 +321,12 @@ def nearest_zones(
     )
     columns = [column[0] for column in cursor.description]
     rows = [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+    for row in rows:
+        if row["source"] != "auto" or row["center_price"] == close_row[0]:
+            continue
+        row["zone_kind"] = (
+            "support" if row["center_price"] < close_row[0] else "resistance"
+        )
     selected = []
     for kind in ("support", "resistance"):
         matching = [row for row in rows if row["zone_kind"] == kind]
