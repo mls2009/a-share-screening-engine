@@ -63,19 +63,24 @@ it("切换周期、用两个锚点保存手动趋势支撑并可删除自动和�
 });
 
 it("删除失败时保留线并显示错误", async () => {
+  let calls = 0;
   const client: ChartClient = {
     bars: async () => bars,
     zones: async () => [automatic],
     createManualZone: async () => manual,
-    deleteZone: async () => { throw new Error("删除失败"); },
+    deleteZone: async () => { calls += 1; throw new Error("删除失败"); },
   };
   render(<ChartPage initialSymbol="600001.SH" client={client} Chart={FakeChart} />);
 
   expect(await screen.findByText("2 根 K 线 / 1 条线")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "删除自动水平压力 auto-1" }));
+  const button = screen.getByRole("button", { name: "删除自动水平压力 auto-1" });
+  await userEvent.click(button);
 
   expect(await screen.findByRole("alert")).toHaveTextContent("删除失败");
   expect(screen.getByText("2 根 K 线 / 1 条线")).toBeInTheDocument();
+  expect(button).toBeEnabled();
+  await userEvent.click(button);
+  await waitFor(() => expect(calls).toBe(2));
 });
 
 it("删除请求完成前禁止重复提交", async () => {
