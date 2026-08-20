@@ -464,15 +464,16 @@ def test_auto_zone_replacement_keeps_one_rule_version_per_date(tmp_path: Path) -
         latest_bar_at=datetime(
             2026, 8, 20, 15, 0, tzinfo=ZoneInfo("Asia/Shanghai")
         ),
+        source_revision="revision-v2",
     )
 
     assert database.connection.execute(
         """
-        select rule_version from zone_detection_batches
+        select rule_version, source_revision from zone_detection_batches
         where symbol = '600001.SH' and timeframe = '1d' and as_of_date = ?
         """,
         [as_of],
-    ).fetchall() == [("v2",)]
+    ).fetchall() == [("v2", "revision-v2")]
     assert database.connection.execute(
         """
         select center_price, rule_version from support_resistance_zones

@@ -84,6 +84,9 @@ def _client(tmp_path: Path) -> tuple[TestClient, Database]:
         latest_bar_at=datetime(
             2026, 8, 20, 15, tzinfo=ZoneInfo("Asia/Shanghai")
         ),
+        source_revision=bar_store.revision(
+            "600001.SH", Timeframe.DAY, date(2026, 8, 20)
+        ),
     )
     context = ApiContext(
         database=database,
@@ -437,6 +440,9 @@ def test_minute_chart_uses_bar_close_and_does_not_rebuild_deleted_latest_batch(
         ],
         latest_bar_at=datetime(
             2026, 8, 20, 9, 35, tzinfo=ZoneInfo("Asia/Shanghai")
+        ),
+        source_revision=client.app.state.context.bar_store.revision(
+            "600001.SH", Timeframe.MIN_5, date(2026, 8, 20)
         ),
     )
     zone_id = database.connection.execute(

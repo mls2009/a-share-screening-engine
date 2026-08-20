@@ -160,14 +160,16 @@ create table if not exists zone_detection_batches (
   as_of_date date not null,
   rule_version varchar not null,
   latest_bar_at timestamptz not null,
+  source_revision varchar not null default 'legacy',
   created_at timestamp not null default current_timestamp,
   primary key(symbol, timeframe, as_of_date)
 );
 
 insert into zone_detection_batches
-  (symbol, timeframe, as_of_date, rule_version, latest_bar_at, created_at)
+  (symbol, timeframe, as_of_date, rule_version, latest_bar_at,
+   source_revision, created_at)
 select symbol, timeframe, as_of_date, max(rule_version),
-  cast(as_of_date as timestamptz), min(created_at)
+  cast(as_of_date as timestamptz), 'legacy', min(created_at)
 from support_resistance_zones
 where source = 'auto'
 group by symbol, timeframe, as_of_date

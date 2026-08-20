@@ -1,4 +1,5 @@
 from datetime import date
+from hashlib import sha256
 from pathlib import Path
 
 import pandas as pd
@@ -95,3 +96,29 @@ class BarStore:
             latest = selected.sort_values("timestamp").iloc[-1]
             return Bar.model_validate(latest.to_dict())
         return None
+
+    def revision(
+        self, symbol: str, timeframe: Timeframe, as_of: date
+    ) -> str | None:
+        timeframe_root = self.root / f"timeframe={timeframe.value}"
+        paths: list[tuple[int, Path]] = []
+        for year_root in timeframe_root.glob("year=*"):
+            try:
+                year = int(year_root.name.removeprefix("year="))
+            except ValueError:
+                continue
+            path = year_root / f"{symbol}.parquet"
+            if year <= as_of.year and path.exists():
+                paths.append((year, path))
+        if not paths:
+            return None
+
+        digest = sha256()
+        for year, path in sorted(paths, key=lambda item: (item[0], str(item[1]))):
+            stat = path.stat()
+            fingerprint = (
+                f"{year}\0{path.name}\0{stat.st_mtime_ns}\0"
+                f"{stat.st_size}\0{stat.st_ino}\n"
+            )
+            digest.update(fingerprint.encode())
+        return digest.hexdigest()

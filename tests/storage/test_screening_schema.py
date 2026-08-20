@@ -36,6 +36,7 @@ def test_screening_schema_contains_required_tables_and_symbol_columns(tmp_path: 
         "as_of_date",
         "rule_version",
         "latest_bar_at",
+        "source_revision",
         "created_at",
     }
     assert {row[1] for row in batch_info if row[5]} == {
@@ -87,12 +88,27 @@ def test_migration_backfills_existing_automatic_zone_batches(tmp_path: Path) -> 
     }
     assert db.connection.execute(
         """
-        select symbol, timeframe, as_of_date, rule_version, cast(latest_bar_at as date)
+        select symbol, timeframe, as_of_date, rule_version,
+          cast(latest_bar_at as date), source_revision
         from zone_detection_batches order by as_of_date
         """
     ).fetchall() == [
-        ("600001.SH", "1d", date(2026, 8, 19), "v1", date(2026, 8, 19)),
-        ("600001.SH", "1d", date(2026, 8, 20), "v2", date(2026, 8, 20)),
+        (
+            "600001.SH",
+            "1d",
+            date(2026, 8, 19),
+            "v1",
+            date(2026, 8, 19),
+            "legacy",
+        ),
+        (
+            "600001.SH",
+            "1d",
+            date(2026, 8, 20),
+            "v2",
+            date(2026, 8, 20),
+            "legacy",
+        ),
     ]
 
 

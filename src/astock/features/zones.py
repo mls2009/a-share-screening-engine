@@ -252,6 +252,7 @@ def replace_auto_zones(
     zones: list[PriceZone],
     rule_version: str = ZONE_RULE_VERSION,
     latest_bar_at: datetime | None = None,
+    source_revision: str = "legacy",
 ) -> None:
     """Replace one auto-zone batch, owning the transaction for this operation."""
     if any(zone.as_of_date != as_of for zone in zones):
@@ -313,10 +314,18 @@ def replace_auto_zones(
         connection.execute(
             """
             insert into zone_detection_batches
-              (symbol, timeframe, as_of_date, rule_version, latest_bar_at)
-            values (?, ?, ?, ?, ?)
+              (symbol, timeframe, as_of_date, rule_version, latest_bar_at,
+               source_revision)
+            values (?, ?, ?, ?, ?, ?)
             """,
-            [symbol, timeframe.value, as_of, rule_version, watermark],
+            [
+                symbol,
+                timeframe.value,
+                as_of,
+                rule_version,
+                watermark,
+                source_revision,
+            ],
         )
         connection.execute("commit")
     except Exception:

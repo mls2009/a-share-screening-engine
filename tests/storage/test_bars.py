@@ -112,3 +112,95 @@ def test_read_latest_can_skip_non_final_rows(tmp_path: Path) -> None:
 
     assert latest is not None and latest.close == 11.0
     assert latest_final is not None and latest_final.close == 10.0
+
+
+def test_revision_changes_when_same_timestamp_bar_is_replaced(tmp_path: Path) -> None:
+    timezone = ZoneInfo("Asia/Shanghai")
+    store = BarStore(tmp_path)
+    timestamp = datetime(2026, 8, 20, 9, 35, tzinfo=timezone)
+
+    def write(close: float) -> None:
+        store.upsert(
+            [
+                Bar(
+                    symbol="600519.SH",
+                    timestamp=timestamp,
+                    timeframe=Timeframe.MIN_5,
+                    open=close,
+                    high=close + 1,
+                    low=close - 1,
+                    close=close,
+                    volume_shares=1_000,
+                    amount_cny=10_500,
+                    adjustment=Adjustment.QFQ,
+                    source="test",
+                )
+            ]
+        )
+
+    assert store.revision("600519.SH", Timeframe.MIN_5, timestamp.date()) is None
+    write(10.0)
+    first = store.revision("600519.SH", Timeframe.MIN_5, timestamp.date())
+    write(11.0)
+    second = store.revision("600519.SH", Timeframe.MIN_5, timestamp.date())
+
+    assert first is not None
+    assert second is not None
+    assert second != first
+
+
+def test_revision_changes_when_an_earlier_year_is_backfilled(tmp_path: Path) -> None:
+    timezone = ZoneInfo("Asia/Shanghai")
+    store = BarStore(tmp_path)
+
+    def bar(year: int) -> Bar:
+        return Bar(
+            symbol="600519.SH",
+            timestamp=datetime(year, 8, 20, 15, tzinfo=timezone),
+            timeframe=Timeframe.DAY,
+            open=10,
+            high=11,
+            low=9,
+            close=10.5,
+            volume_shares=1_000,
+            amount_cny=10_500,
+            adjustment=Adjustment.QFQ,
+            source="test",
+        )
+
+    store.upsert([bar(2026)])
+    first = store.revision("600519.SH", Timeframe.DAY, date(2026, 8, 20))
+    store.upsert([bar(2025)])
+    second = store.revision("600519.SH", Timeframe.DAY, date(2026, 8, 20))
+
+    assert first is not None
+    assert second is not None
+    assert second != first
+
+
+def test_revision_ignores_files_from_years_after_as_of(tmp_path: Path) -> None:
+    timezone = ZoneInfo("Asia/Shanghai")
+    store = BarStore(tmp_path)
+
+    def bar(year: int) -> Bar:
+        return Bar(
+            symbol="600519.SH",
+            timestamp=datetime(year, 8, 20, 15, tzinfo=timezone),
+            timeframe=Timeframe.DAY,
+            open=10,
+            high=11,
+            low=9,
+            close=10.5,
+            volume_shares=1_000,
+            amount_cny=10_500,
+            adjustment=Adjustment.QFQ,
+            source="test",
+        )
+
+    store.upsert([bar(2026)])
+    first = store.revision("600519.SH", Timeframe.DAY, date(2026, 8, 20))
+    store.upsert([bar(2027)])
+
+    assert store.revision(
+        "600519.SH", Timeframe.DAY, date(2026, 8, 20)
+    ) == first

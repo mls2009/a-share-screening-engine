@@ -151,8 +151,16 @@ def test_builder_records_the_latest_source_bar_as_zone_watermark(tmp_path: Path)
     )
 
     assert database.connection.execute(
-        "select distinct epoch(latest_bar_at) from zone_detection_batches"
-    ).fetchall() == [(timestamp.timestamp(),)]
+        """
+        select distinct epoch(latest_bar_at), source_revision
+        from zone_detection_batches
+        """
+    ).fetchall() == [
+        (
+            timestamp.timestamp(),
+            bar_store.revision("600000.SH", Timeframe.DAY, timestamp.date()),
+        )
+    ]
 
 
 @pytest.mark.parametrize(
@@ -424,6 +432,155 @@ def test_same_day_new_final_bar_refreshes_chart_zone_watermark(
     assert latest_bar_epoch == second_timestamp.timestamp()
 
 
+def test_same_timestamp_bar_revision_rebuilds_chart_zones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "same-timestamp-revision.duckdb")
+    database.migrate()
+    bar_store = BarStore(tmp_path / "same-timestamp-revision-bars")
+    timestamp = datetime(2026, 8, 20, 9, 35, tzinfo=TZ)
+
+    def write(close: float) -> None:
+        bar_store.upsert(
+            [
+                Bar(
+                    symbol="600000.SH",
+                    timestamp=timestamp,
+                    timeframe=Timeframe.MIN_5,
+                    open=close,
+                    high=close + 0.5,
+                    low=close - 0.5,
+                    close=close,
+                    volume_shares=1_000,
+                    amount_cny=10_000,
+                    adjustment=Adjustment.QFQ,
+                    source="test",
+                )
+            ]
+        )
+
+    detections = []
+
+    def detect_latest_close(frame, as_of: date, **kwargs) -> list[PriceZone]:
+        center = float(frame.iloc[-1]["close"])
+        detections.append(center)
+        return [
+            PriceZone(
+                as_of_date=as_of,
+                zone_kind="uptrend",
+                geometry="trend",
+                lower_price=center - 0.1,
+                center_price=center,
+                upper_price=center + 0.1,
+                slope=0.1,
+                intercept=center - 1,
+                anchors=((as_of, center - 1), (as_of, center)),
+                strength=0.8,
+                touches=2,
+                rule_version=kwargs["rule_version"],
+            )
+        ]
+
+    monkeypatch.setattr(builder_module, "detect_zones", detect_latest_close)
+    builder = FeatureBuilder(bar_store, MarketFeatureStore(database), database)
+    write(10.0)
+    builder.ensure_chart_zones("600000.SH", Timeframe.MIN_5, timestamp.date())
+    write(11.0)
+    builder.ensure_chart_zones("600000.SH", Timeframe.MIN_5, timestamp.date())
+
+    assert detections == [10.0, 11.0]
+    assert [
+        row["center_price"]
+        for row in chart_zones(
+            database.connection, "600000.SH", Timeframe.MIN_5, timestamp.date()
+        )
+    ] == [11.0]
+
+
+def test_backfilled_earlier_bar_rebuilds_chart_zones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "backfilled-revision.duckdb")
+    database.migrate()
+    bar_store = BarStore(tmp_path / "backfilled-revision-bars")
+
+    def bar(year: int) -> Bar:
+        return Bar(
+            symbol="600000.SH",
+            timestamp=datetime(year, 8, 20, 9, 35, tzinfo=TZ),
+            timeframe=Timeframe.MIN_5,
+            open=10,
+            high=10.5,
+            low=9.5,
+            close=10,
+            volume_shares=1_000,
+            amount_cny=10_000,
+            adjustment=Adjustment.QFQ,
+            source="test",
+        )
+
+    detections = []
+
+    def detect_empty(*_args, **_kwargs) -> list[PriceZone]:
+        detections.append(1)
+        return []
+
+    monkeypatch.setattr(builder_module, "detect_zones", detect_empty)
+    builder = FeatureBuilder(bar_store, MarketFeatureStore(database), database)
+    bar_store.upsert([bar(2026)])
+    builder.ensure_chart_zones(
+        "600000.SH", Timeframe.MIN_5, as_of=date(2026, 8, 20)
+    )
+    bar_store.upsert([bar(2025)])
+    builder.ensure_chart_zones(
+        "600000.SH", Timeframe.MIN_5, as_of=date(2026, 8, 20)
+    )
+
+    assert len(detections) == 2
+
+
+def test_future_year_bar_does_not_rebuild_historical_chart_zones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "future-revision.duckdb")
+    database.migrate()
+    bar_store = BarStore(tmp_path / "future-revision-bars")
+
+    def bar(year: int) -> Bar:
+        return Bar(
+            symbol="600000.SH",
+            timestamp=datetime(year, 8, 20, 9, 35, tzinfo=TZ),
+            timeframe=Timeframe.MIN_5,
+            open=10,
+            high=10.5,
+            low=9.5,
+            close=10,
+            volume_shares=1_000,
+            amount_cny=10_000,
+            adjustment=Adjustment.QFQ,
+            source="test",
+        )
+
+    detections = []
+
+    def detect_empty(*_args, **_kwargs) -> list[PriceZone]:
+        detections.append(1)
+        return []
+
+    monkeypatch.setattr(builder_module, "detect_zones", detect_empty)
+    builder = FeatureBuilder(bar_store, MarketFeatureStore(database), database)
+    bar_store.upsert([bar(2026)])
+    builder.ensure_chart_zones(
+        "600000.SH", Timeframe.MIN_5, as_of=date(2026, 8, 20)
+    )
+    bar_store.upsert([bar(2027)])
+    builder.ensure_chart_zones(
+        "600000.SH", Timeframe.MIN_5, as_of=date(2026, 8, 20)
+    )
+
+    assert len(detections) == 1
+
+
 def test_historical_chart_zone_request_builds_its_own_batch_after_future_request(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -527,6 +684,9 @@ def test_fresh_chart_zone_batch_does_not_read_full_bar_history(
         [],
         rule_version="v2",
         latest_bar_at=timestamp,
+        source_revision=bar_store.revision(
+            "600000.SH", Timeframe.MIN_5, timestamp.date()
+        ),
     )
 
     def unexpected_read(*_args, **_kwargs):

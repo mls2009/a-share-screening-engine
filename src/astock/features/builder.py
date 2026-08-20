@@ -65,17 +65,22 @@ class FeatureBuilder:
         )
         if latest_base is None:
             return None
+        source_revision = self.bar_store.revision(symbol, base, as_of)
+        if source_revision is None:
+            return None
 
         zone_date = latest_base.timestamp.date()
         with _CHART_ZONE_BUILD_LOCK:
             fresh = self.connection.execute(
                 """
-                select latest_bar_at = ? from zone_detection_batches
+                select latest_bar_at = ? and source_revision = ?
+                from zone_detection_batches
                 where symbol = ? and timeframe = ? and as_of_date = ?
                   and rule_version = ?
                 """,
                 [
                     latest_base.timestamp,
+                    source_revision,
                     symbol,
                     timeframe.value,
                     zone_date,
@@ -112,6 +117,7 @@ class FeatureBuilder:
                 zones,
                 rule_version=ZONE_RULE_VERSION,
                 latest_bar_at=latest_base.timestamp,
+                source_revision=source_revision,
             )
         return float(latest_base.close)
 
@@ -122,6 +128,11 @@ class FeatureBuilder:
             if bar.timestamp.date() <= as_of and bar.is_final
         ]
         if not bars:
+            return
+        source_revision = self.bar_store.revision(
+            symbol, Timeframe.DAY, bars[-1].timestamp.date()
+        )
+        if source_revision is None:
             return
         daily = _bar_frame(bars)
         date_index = [pd.Timestamp(value).date() for value in daily["timestamp"]]
@@ -162,4 +173,5 @@ class FeatureBuilder:
                 detect_zones(frame, zone_date, timeframe=timeframe),
                 rule_version=ZONE_RULE_VERSION,
                 latest_bar_at=bars[-1].timestamp,
+                source_revision=source_revision,
             )
