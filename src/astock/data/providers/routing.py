@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date
 
 from astock.data.providers.akshare import AkShareProvider
@@ -22,6 +24,15 @@ class RoutedHistoryProvider:
     ) -> list[Bar]:
         provider = self.bse if symbol.endswith(".BJ") else self.primary
         return provider.history(symbol, timeframe, start, end, adjustment)
+
+    @contextmanager
+    def bulk_session(self) -> Iterator[None]:
+        session = getattr(self.primary, "bulk_session", None)
+        if session is None:
+            yield
+            return
+        with session():
+            yield
 
 
 class CombinedReferenceProvider:

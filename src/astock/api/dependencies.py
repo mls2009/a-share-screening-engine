@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
+from astock.live.service import MonitoringService
 from astock.screening.service import ScreeningService
 from astock.storage.bars import BarStore
 from astock.storage.database import Database
@@ -17,3 +18,4 @@ class ApiContext:
     bar_store: BarStore
     screening: ScreeningService
     market_sync: MarketSyncReader
+    monitoring: MonitoringService | None = None

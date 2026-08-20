@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,6 +8,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="ASTOCK_", env_file=".env")
 
     data_dir: Path = Path("data")
+    feishu_webhook: SecretStr | None = None
+    feishu_secret: SecretStr | None = None
 
     @property
     def database_path(self) -> Path:

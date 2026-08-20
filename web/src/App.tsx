@@ -11,6 +11,7 @@ import { ScreenerPage } from "./features/screener/ScreenerPage";
 
 const ChartPage = lazy(() => import("./features/chart/ChartPage").then((module) => ({ default: module.ChartPage })));
 const BacktestPage = lazy(() => import("./features/backtest/BacktestPage").then((module) => ({ default: module.BacktestPage })));
+const MonitorPage = lazy(() => import("./features/monitor/MonitorPage").then((module) => ({ default: module.MonitorPage })));
 
 type Page = "screener" | "chart" | "backtest" | "monitor";
 
@@ -20,17 +21,6 @@ const pages = [
   { id: "backtest" as const, label: "策略回测", icon: FlaskConical },
   { id: "monitor" as const, label: "实时监控", icon: BellRing },
 ];
-
-function Placeholder({ page }: { page: "monitor" }) {
-  const title = pages.find((item) => item.id === page)?.label ?? "";
-  return (
-    <main className="empty-page">
-      <p className="eyebrow">RESEARCH MODULE</p>
-      <h1>{title}</h1>
-      <p>模块已进入当前实施队列。</p>
-    </main>
-  );
-}
 
 export function App() {
   const [page, setPage] = useState<Page>("screener");
@@ -74,7 +64,9 @@ export function App() {
           <BacktestPage />
         </Suspense>
       ) : (
-        <Placeholder page={page} />
+        <Suspense fallback={<main className="empty-page"><p className="eyebrow">LOADING LIVE MONITOR</p></main>}>
+          <MonitorPage />
+        </Suspense>
       )}
     </div>
   );

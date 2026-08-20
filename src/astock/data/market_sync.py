@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
@@ -92,21 +93,23 @@ class MarketSyncService:
 
     def _run(self, job_id: UUID, symbols: list[str]) -> SyncSummary:
         job = self.jobs.get(job_id)
-        for symbol in symbols:
-            try:
-                self.market_data.history(
-                    symbol,
-                    Timeframe.DAY,
-                    job.start_date,
-                    job.end_date,
-                    Adjustment.QFQ,
-                )
-                if self.feature_builder is not None:
-                    self.feature_builder.build_symbol(symbol, job.end_date)
-            except Exception as error:  # noqa: BLE001 - one stock must not abort the batch
-                self.jobs.mark_failed(job_id, symbol, str(error))
-            else:
-                self.jobs.mark_succeeded(job_id, symbol)
+        session = getattr(self.market_data, "bulk_session", nullcontext)
+        with session():
+            for symbol in symbols:
+                try:
+                    self.market_data.history(
+                        symbol,
+                        Timeframe.DAY,
+                        job.start_date,
+                        job.end_date,
+                        Adjustment.QFQ,
+                    )
+                    if self.feature_builder is not None:
+                        self.feature_builder.build_symbol(symbol, job.end_date)
+                except Exception as error:  # noqa: BLE001 - one stock must not abort the batch
+                    self.jobs.mark_failed(job_id, symbol, str(error))
+                else:
+                    self.jobs.mark_succeeded(job_id, symbol)
         self.jobs.complete(job_id)
         completed = self.jobs.get(job_id)
         return SyncSummary(

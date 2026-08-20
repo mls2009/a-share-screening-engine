@@ -139,3 +139,37 @@ export interface BacktestRun {
     rejected_orders: string[];
   };
 }
+
+export type PriceComparator = "above" | "below" | "cross_above" | "cross_below";
+
+export interface MonitorTask {
+  task_id: string;
+  name: string;
+  symbols: string[];
+  comparator: PriceComparator;
+  threshold: number;
+  cooldown_seconds: number;
+  scope: "watchlist" | "market";
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MonitorStatus {
+  running: boolean;
+  tasks: number;
+  enabled_tasks: number;
+  pending_notifications: number;
+  feishu_configured: boolean;
+  watchlist_interval_seconds: number;
+  market_interval_seconds: number;
+}
+
+export interface MonitorSignal {
+  signal_key: string;
+  symbol: string;
+  price: number;
+  threshold: number;
+  comparator: PriceComparator;
+  triggered_at: string;
+}

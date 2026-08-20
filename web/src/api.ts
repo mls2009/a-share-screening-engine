@@ -1,4 +1,4 @@
-import type { BacktestRun, Bar, MetricSpec, PriceZone, ScreenRunResult, Timeframe } from "./types";
+import type { BacktestRun, Bar, MetricSpec, MonitorSignal, MonitorStatus, MonitorTask, PriceZone, ScreenRunResult, Timeframe } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -42,4 +42,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  monitorTasks: () => request<MonitorTask[]>("/api/monitor/tasks"),
+  monitorStatus: () => request<MonitorStatus>("/api/monitor/status"),
+  monitorSignals: () => request<MonitorSignal[]>("/api/monitor/signals"),
+  createMonitorTask: (payload: object) => request<MonitorTask>("/api/monitor/tasks", {
+    method: "POST", body: JSON.stringify(payload),
+  }),
+  toggleMonitorTask: (taskId: string, enabled: boolean) => request<MonitorTask>(`/api/monitor/tasks/${taskId}`, {
+    method: "PATCH", body: JSON.stringify({ enabled }),
+  }),
+  deleteMonitorTask: (taskId: string) => request<void>(`/api/monitor/tasks/${taskId}`, { method: "DELETE" }),
+  startMonitor: () => request<{ running: boolean }>("/api/monitor/start", { method: "POST" }),
+  stopMonitor: () => request<{ running: boolean }>("/api/monitor/stop", { method: "POST" }),
+  scanMonitor: () => request<{ triggered: number }>("/api/monitor/scan?scope=watchlist", { method: "POST" }),
+  testFeishu: () => request<{ success: boolean }>("/api/notifications/feishu/test", { method: "POST" }),
 };

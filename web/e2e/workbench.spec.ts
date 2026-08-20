@@ -29,6 +29,27 @@ test("workbench and chart desk render without browser errors", async ({ page }) 
       { zone_id: "manual-resistance", timeframe: "1d", as_of_date: "2026-08-20", zone_kind: "resistance", geometry: "horizontal", lower_price: 1590, center_price: 1598, upper_price: 1606, slope: null, intercept: null, anchors: "[]", strength: 1, touches: 2, source: "manual" },
     ] });
   });
+  await page.route("**/api/backtests/run", async (route) => {
+    await route.fulfill({ json: {
+      run_id: "backtest-e2e",
+      result: {
+        request: { symbols: ["600519.SH"] },
+        metrics: { total_return: 18.42, annualized_return: 24.8, max_drawdown: 7.3, sharpe_ratio: 1.42, win_rate: 62.5, profit_loss_ratio: 1.9, trade_count: 8, total_fees: 326 },
+        trades: [{ symbol: "600519.SH", side: "buy", signal_at: "2026-08-18T15:00:00+08:00", timestamp: "2026-08-19T09:30:00+08:00", quantity: 600, price: 1542, gross: 925200, commission: 277.56, tax: 0, transfer_fee: 9.25, reason: "entry condition matched" }],
+        equity_curve: Array.from({ length: 60 }, (_, index) => ({ timestamp: new Date(2026, 5, index + 1).toISOString(), cash: 200000, market_value: 800000 + index * 3200 + Math.sin(index / 3) * 15000, equity: 1000000 + index * 3200 + Math.sin(index / 3) * 15000, drawdown: 0 })),
+        rejected_orders: [],
+      },
+    } });
+  });
+  await page.route("**/api/monitor/tasks", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({ json: { task_id: "task-new", ...(await route.request().postDataJSON()), created_at: "2026-08-20", updated_at: "2026-08-20" } });
+      return;
+    }
+    await route.fulfill({ json: [{ task_id: "task-1", name: "贵州茅台突破", symbols: ["600519.SH"], comparator: "cross_above", threshold: 1600, cooldown_seconds: 300, scope: "watchlist", enabled: true, created_at: "2026-08-20", updated_at: "2026-08-20" }] });
+  });
+  await page.route("**/api/monitor/status", async (route) => route.fulfill({ json: { running: false, tasks: 1, enabled_tasks: 1, pending_notifications: 0, feishu_configured: true, watchlist_interval_seconds: 5, market_interval_seconds: 300 } }));
+  await page.route("**/api/monitor/signals", async (route) => route.fulfill({ json: [{ signal_key: "signal-1", symbol: "600519.SH", price: 1602.5, threshold: 1600, comparator: "cross_above", triggered_at: "2026-08-20T10:08:05+08:00" }] }));
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "选股工作台" })).toBeVisible();
@@ -41,6 +62,18 @@ test("workbench and chart desk render without browser errors", async ({ page }) 
   await expect(page.getByText("自动水平支撑")).toBeVisible();
   await expect(page.getByText("手动水平压力")).toBeVisible();
   await page.screenshot({ path: "test-results/chart-desk.png", fullPage: true });
+
+  await page.getByRole("button", { name: "策略回测" }).click();
+  await expect(page.getByRole("heading", { name: "策略回测" })).toBeVisible();
+  await page.getByRole("button", { name: "运行策略回测" }).click();
+  await expect(page.getByText("18.42%")).toBeVisible();
+  await page.screenshot({ path: "test-results/backtest-desk.png", fullPage: true });
+
+  await page.getByRole("button", { name: "实时监控" }).click();
+  await expect(page.getByRole("heading", { name: "实时监控" })).toBeVisible();
+  await expect(page.getByText("贵州茅台突破")).toBeVisible();
+  await expect(page.getByText("1602.5")).toBeVisible();
+  await page.screenshot({ path: "test-results/monitor-desk.png", fullPage: true });
 
   expect(errors).toEqual([]);
 });

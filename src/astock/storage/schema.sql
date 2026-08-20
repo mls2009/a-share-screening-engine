@@ -255,3 +255,48 @@ create table if not exists backtest_equity (
   drawdown double not null,
   primary key(run_id, timestamp)
 );
+
+create table if not exists monitor_tasks (
+  task_id uuid primary key,
+  name varchar not null,
+  symbols json not null,
+  comparator varchar not null,
+  threshold double not null,
+  cooldown_seconds integer not null,
+  scope varchar not null,
+  enabled boolean not null,
+  created_at timestamp not null default current_timestamp,
+  updated_at timestamp not null default current_timestamp
+);
+
+create table if not exists signal_states (
+  task_id uuid not null,
+  symbol varchar not null,
+  active boolean not null,
+  last_value double,
+  last_triggered_at timestamp,
+  primary key(task_id, symbol)
+);
+
+create table if not exists signals (
+  signal_key varchar primary key,
+  task_id uuid not null,
+  symbol varchar not null,
+  quote_timestamp timestamp not null,
+  triggered_at timestamp not null,
+  price double not null,
+  threshold double not null,
+  comparator varchar not null,
+  payload json not null
+);
+
+create table if not exists notification_outbox (
+  message_id uuid primary key,
+  signal_key varchar unique,
+  payload json not null,
+  status varchar not null,
+  attempts integer not null default 0,
+  next_attempt_at timestamp not null,
+  last_error varchar,
+  updated_at timestamp not null default current_timestamp
+);

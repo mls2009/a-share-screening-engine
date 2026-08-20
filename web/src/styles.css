@@ -257,3 +257,56 @@ select:focus, input:focus { border-color: #7c8a8f; box-shadow: inset 2px 0 var(-
   .metrics-grid { grid-template-columns: 1fr 1fr; }
   .strategy-tree .condition-row { grid-template-columns: 1fr 1fr; }
 }
+
+/* Live monitor: operational state is always visible; alerts read like a signal tape. */
+.monitor-page { min-width: 0; padding: 34px clamp(22px, 3.2vw, 54px) 70px; }
+.monitor-runtime { display: flex; align-items: center; gap: 12px; }
+.monitor-runtime > span { display: flex; align-items: center; gap: 7px; color: var(--muted); font: 500 10px "IBM Plex Mono", monospace; }
+.monitor-runtime > span i { width: 8px; height: 8px; border-radius: 50%; background: #586166; }
+.monitor-runtime > span.live { color: var(--support); }
+.monitor-runtime > span.live i { background: var(--support); box-shadow: 0 0 0 5px rgba(46, 207, 121, .08); }
+.success-banner { margin-top: 14px; border-left: 3px solid var(--support); background: rgba(46, 207, 121, .07); color: #8beab7; padding: 11px 14px; font-size: 12px; }
+.monitor-summary { margin-top: 18px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; border: 1px solid var(--line); background: var(--line); }
+.monitor-summary > div { min-height: 82px; padding: 13px; background: #111517; display: grid; grid-template-columns: 22px 1fr; align-content: space-between; }
+.monitor-summary svg { color: var(--signal); }
+.monitor-summary span { color: var(--muted); font: 500 9px "IBM Plex Mono", monospace; }
+.monitor-summary strong { grid-column: 1 / -1; font: 500 19px "IBM Plex Mono", monospace; }
+.monitor-composer, .task-ledger, .signal-ledger { margin-top: 14px; border: 1px solid var(--line); background: #0e1113; }
+.monitor-form { padding: 12px; display: grid; grid-template-columns: 1.1fr 1.25fr .85fr 1fr .7fr .7fr auto; gap: 7px; align-items: end; }
+.monitor-form label { min-width: 0; display: grid; gap: 6px; }
+.monitor-form label span { color: var(--muted); font: 500 8px "IBM Plex Mono", monospace; letter-spacing: .08em; }
+.monitor-form input, .monitor-form select { width: 100%; min-width: 0; font-size: 11px; }
+.monitor-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .75fr); gap: 14px; }
+.scope-note { margin: 9px 0 -4px; color: var(--signal); font-size: 10px; }
+.task-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1px; background: var(--line); }
+.task-list article { min-height: 168px; padding: 15px; background: #111517; display: flex; flex-direction: column; }
+.task-list article.disabled { opacity: .55; }
+.task-list article > div { display: flex; align-items: center; gap: 7px; color: var(--muted); font: 500 8px "IBM Plex Mono", monospace; }
+.task-list article > div i { width: 7px; height: 7px; border-radius: 50%; background: var(--support); }
+.task-list article > div i.down { background: var(--resistance); }
+.task-list h3 { margin: 16px 0 5px; font-size: 15px; font-weight: 560; }
+.task-list code { color: var(--signal); font: 500 10px "IBM Plex Mono", monospace; }
+.task-list p { margin: 13px 0; color: #858f93; font-size: 10px; }
+.task-list p strong { color: var(--paper); font: 500 14px "IBM Plex Mono", monospace; }
+.task-list footer { margin-top: auto; display: flex; gap: 6px; }
+.task-list footer button { min-height: 27px; padding: 0 9px; border: 1px solid #333c40; background: transparent; color: #899397; font-size: 9px; cursor: pointer; }
+.task-list footer button:last-child { margin-left: auto; color: #84595e; }
+.signal-list { display: grid; }
+.signal-list article { position: relative; min-height: 92px; padding: 13px 70px 13px 14px; border-top: 1px solid #252c2f; display: grid; gap: 4px; }
+.signal-list time { color: #687378; font: 500 8px "IBM Plex Mono", monospace; }
+.signal-list strong { font: 500 12px "IBM Plex Mono", monospace; }
+.signal-list p { margin: 0; color: var(--muted); font-size: 9px; }
+.signal-list b { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--signal); font: 500 20px "IBM Plex Mono", monospace; }
+
+@media (max-width: 1100px) {
+  .monitor-form { grid-template-columns: repeat(3, 1fr); }
+  .monitor-grid { grid-template-columns: 1fr; }
+  .monitor-summary { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 760px) {
+  .monitor-page { padding: 26px 12px; }
+  .monitor-runtime { width: 100%; justify-content: space-between; }
+  .monitor-form { grid-template-columns: 1fr 1fr; }
+  .monitor-form .run-button { grid-column: 1 / -1; justify-content: center; }
+}

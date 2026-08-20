@@ -89,6 +89,24 @@ def test_baostock_normalizes_daily_history() -> None:
     assert fake.login_calls == fake.logout_calls == 1
 
 
+def test_bulk_session_reuses_one_login_for_multiple_history_queries() -> None:
+    fake = FakeBaoStock()
+    provider = BaoStockProvider(fake)
+
+    with provider.bulk_session():
+        for symbol in ("600519.SH", "600519.SH"):
+            provider.history(
+                symbol,
+                Timeframe.DAY,
+                date(2026, 8, 20),
+                date(2026, 8, 20),
+                Adjustment.QFQ,
+            )
+
+    assert fake.login_calls == 1
+    assert fake.logout_calls == 1
+
+
 def test_baostock_normalizes_five_minute_history() -> None:
     fake = FakeBaoStock()
     fake.history_rows = [

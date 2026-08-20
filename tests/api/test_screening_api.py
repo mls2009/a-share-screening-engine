@@ -296,3 +296,28 @@ def test_backtest_endpoint_reports_missing_local_history(tmp_path: Path) -> None
 
     assert response.status_code == 422
     assert response.json()["symbols"] == ["000001.SZ"]
+
+
+def test_monitor_task_crud_and_scheduler_status_endpoints(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    payload = {
+        "name": "茅台突破 1500",
+        "symbols": ["600519.SH"],
+        "comparator": "cross_above",
+        "threshold": 1500,
+        "cooldown_seconds": 300,
+        "scope": "watchlist",
+        "enabled": True,
+    }
+
+    created = client.post("/api/monitor/tasks", json=payload)
+
+    assert created.status_code == 201
+    task_id = created.json()["task_id"]
+    assert client.get("/api/monitor/tasks").json()[0]["name"] == "茅台突破 1500"
+    disabled = client.patch(f"/api/monitor/tasks/{task_id}", json={"enabled": False})
+    assert disabled.json()["enabled"] is False
+    assert client.post("/api/monitor/start").json()["running"] is True
+    assert client.get("/api/monitor/status").json()["running"] is True
+    assert client.post("/api/monitor/stop").json()["running"] is False
+    assert client.delete(f"/api/monitor/tasks/{task_id}").status_code == 204

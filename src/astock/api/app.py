@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -26,6 +26,13 @@ from astock.features.zones import (
     delete_manual_zone,
     nearest_zones,
 )
+from astock.live.calendar import SHANGHAI
+from astock.live.models import MonitorScope, MonitorTaskCreate
+from astock.live.repository import MonitoringRepository
+from astock.live.scheduler import MonitoringScheduler
+from astock.live.service import MonitoringService
+from astock.notifications.feishu import FeishuNotifier
+from astock.notifications.outbox import OutboxWorker
 from astock.screening.catalog import DEFAULT_CATALOG
 from astock.screening.models import Node
 from astock.screening.service import ScreenDefinitionError, ScreeningService
@@ -40,6 +47,10 @@ class ScreenRunRequest(BaseModel):
     as_of: date
     limit: int = Field(default=100, ge=1, le=1000)
     offset: int = Field(default=0, ge=0)
+
+
+class EnabledRequest(BaseModel):
+    enabled: bool
 
 
 def _catalog() -> list[dict]:
@@ -77,6 +88,14 @@ def _run_response(result: object) -> dict:
 def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="AStock Internal API", version="0.1.0")
     app.state.context = context
+    monitoring = context.monitoring or MonitoringService(
+        context.database,
+        MonitoringRepository(context.database),
+        TencentQuoteProvider(),
+    )
+    monitor_scheduler = MonitoringScheduler(monitoring)
+    app.state.monitoring = monitoring
+    app.state.monitor_scheduler = monitor_scheduler
 
     @app.get("/api/catalog")
     def catalog() -> list[dict]:
@@ -242,6 +261,101 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             )
         return jsonable_encoder(run)
 
+    @app.get("/api/monitor/tasks")
+    def monitor_tasks() -> list[dict]:
+        return jsonable_encoder(monitoring.repository.list_tasks())
+
+    @app.post("/api/monitor/tasks", status_code=201)
+    def create_monitor_task(payload: MonitorTaskCreate) -> dict:
+        return jsonable_encoder(monitoring.repository.create_task(payload))
+
+    @app.patch("/api/monitor/tasks/{task_id}")
+    def update_monitor_task(task_id: UUID, payload: EnabledRequest):
+        task = monitoring.repository.set_enabled(task_id, payload.enabled)
+        if task is None:
+            return JSONResponse(
+                status_code=404,
+                content={"code": "task_not_found", "message": "monitor task not found"},
+            )
+        return jsonable_encoder(task)
+
+    @app.delete("/api/monitor/tasks/{task_id}")
+    def delete_monitor_task(task_id: UUID):
+        if not monitoring.repository.delete_task(task_id):
+            return JSONResponse(
+                status_code=404,
+                content={"code": "task_not_found", "message": "monitor task not found"},
+            )
+        return Response(status_code=204)
+
+    @app.post("/api/monitor/scan")
+    def scan_monitor(scope: MonitorScope = MonitorScope.WATCHLIST) -> dict:
+        now = datetime.now(SHANGHAI)
+        result = (
+            monitoring.run_watchlist_once(now, force=True)
+            if scope == MonitorScope.WATCHLIST
+            else monitoring.run_market_once(now, force=True)
+        )
+        return jsonable_encoder(result)
+
+    @app.get("/api/monitor/signals")
+    def monitor_signals(limit: int = Query(default=100, ge=1, le=1000)) -> list[dict]:
+        return jsonable_encoder(monitoring.repository.list_signals(limit))
+
+    @app.get("/api/monitor/status")
+    def monitor_status() -> dict:
+        tasks = monitoring.repository.list_tasks()
+        pending = context.database.connection.execute(
+            "select count(*) from notification_outbox where status = 'pending'"
+        ).fetchone()[0]
+        return {
+            "running": monitor_scheduler.running,
+            "tasks": len(tasks),
+            "enabled_tasks": sum(task.enabled for task in tasks),
+            "pending_notifications": pending,
+            "feishu_configured": monitoring.outbox is not None,
+            "watchlist_interval_seconds": 5,
+            "market_interval_seconds": 300,
+        }
+
+    @app.post("/api/monitor/start")
+    def start_monitor() -> dict:
+        monitor_scheduler.start()
+        return {"running": monitor_scheduler.running}
+
+    @app.post("/api/monitor/stop")
+    def stop_monitor() -> dict:
+        monitor_scheduler.stop()
+        return {"running": monitor_scheduler.running}
+
+    @app.post("/api/notifications/feishu/test")
+    def test_feishu():
+        if monitoring.outbox is None:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "code": "feishu_not_configured",
+                    "message": "请先设置 ASTOCK_FEISHU_WEBHOOK，可选设置 ASTOCK_FEISHU_SECRET",
+                },
+            )
+        result = monitoring.outbox.notifier.send(
+            {
+                "type": "system_test",
+                "task_name": "飞书机器人连接测试",
+                "symbol": "SYSTEM",
+                "comparator": "above",
+                "threshold": "—",
+                "price": "连接正常",
+                "triggered_at": datetime.now(SHANGHAI).isoformat(),
+            }
+        )
+        if not result.success:
+            return JSONResponse(
+                status_code=502,
+                content={"code": "feishu_delivery_failed", "message": result.error},
+            )
+        return {"success": True}
+
     resolved_frontend = frontend_dir or Path(__file__).resolve().parents[3] / "web" / "dist"
     index_file = resolved_frontend / "index.html"
     assets_dir = resolved_frontend / "assets"
@@ -286,7 +400,21 @@ def create_default_app(settings: Settings | None = None) -> FastAPI:
         feature_store,
         snapshot_provider=TencentQuoteProvider(),
     )
-    return create_app(ApiContext(database, bars, screening, market_sync))
+    repository = MonitoringRepository(database)
+    outbox = None
+    if settings.feishu_webhook is not None:
+        notifier = FeishuNotifier(
+            settings.feishu_webhook.get_secret_value(),
+            settings.feishu_secret.get_secret_value() if settings.feishu_secret else None,
+        )
+        outbox = OutboxWorker(database, notifier)
+    monitoring = MonitoringService(
+        database,
+        repository,
+        TencentQuoteProvider(),
+        outbox=outbox,
+    )
+    return create_app(ApiContext(database, bars, screening, market_sync, monitoring))
 
 
 __all__ = ["ApiContext", "create_app", "create_default_app"]

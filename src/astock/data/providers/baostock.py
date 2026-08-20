@@ -27,15 +27,30 @@ class BaoStockError(RuntimeError):
 class BaoStockProvider:
     def __init__(self, module: ModuleType = baostock) -> None:
         self.module = module
+        self._session_depth = 0
 
     @contextmanager
-    def _session(self) -> Iterator[None]:
+    def bulk_session(self) -> Iterator[None]:
+        if self._session_depth:
+            self._session_depth += 1
+            try:
+                yield
+            finally:
+                self._session_depth -= 1
+            return
         login = self.module.login()
         self._ensure_success(login)
+        self._session_depth = 1
         try:
             yield
         finally:
+            self._session_depth = 0
             self.module.logout()
+
+    @contextmanager
+    def _session(self) -> Iterator[None]:
+        with self.bulk_session():
+            yield
 
     @staticmethod
     def _ensure_success(response: object) -> None:

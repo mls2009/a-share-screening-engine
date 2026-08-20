@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date, timedelta
 from typing import Protocol
 
@@ -53,6 +55,15 @@ class MarketDataService:
         self.database = database
         self.coverage = CoverageRepository(database)
         self.calendar = calendar if calendar is not None else DatabaseCalendar(database)
+
+    @contextmanager
+    def bulk_session(self) -> Iterator[None]:
+        session = getattr(self.history_provider, "bulk_session", None)
+        if session is None:
+            yield
+            return
+        with session():
+            yield
 
     @staticmethod
     def _base_timeframe(timeframe: Timeframe) -> Timeframe:
