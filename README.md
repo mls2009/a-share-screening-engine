@@ -119,7 +119,8 @@ uvicorn astock.api.app:create_default_app --factory --host 127.0.0.1 --port 8888
 - `GET /api/screens/runs/{run_id}`：排名、特征快照和逐节点解释。
 - `GET /api/sync/jobs/{job_id}`：同步状态。
 - `GET /api/symbols/{symbol}/bars`：真实 K 线。
-- `GET /api/symbols/{symbol}/zones`：最近自动支撑/压力区域和趋势通道。
+- `GET /api/symbols/{symbol}/zones`：最近自动或手动支撑压力线。
+- `DELETE /api/symbols/{symbol}/zones/{zone_id}`：删除任意支撑压力线并记录点位。
 - `POST /api/backtests/run`：用两棵条件树运行单股或组合回测。
 - `GET /api/backtests/{run_id}`：读取持久化回测报告。
 - `GET/POST/PATCH/DELETE /api/monitor/tasks`：管理实时点位规则。
@@ -127,10 +128,11 @@ uvicorn astock.api.app:create_default_app --factory --host 127.0.0.1 --port 8888
 - `POST /api/monitor/scan`：手动执行一次扫描。
 - `GET /api/monitor/signals`：读取最近触发记录。
 
-自动区域的 `zone_kind` 为 `support` 或 `resistance`，`source` 为 `auto`。图表只绘制
-区域中心线：绿色显示支撑、红色显示压力，自动结果使用虚线，手动画线使用实线。
-水平线和趋势线都支持；自动线跌破或突破后会按现价转换支撑/压力角色，手动画线保留
-用户指定的角色。默认返回离现价最近的 3 个支撑和 3 个压力。
+图表只绘制区域中心线：绿色显示支撑、红色显示压力，正常结果统一使用实线。自动线
+和手动画线都能删除；被删除点位以后落入原价格容差并再次生成时使用虚线。水平线和
+趋势线都支持；自动线跌破或突破后会按现价转换支撑/压力角色，手动画线保留用户指定
+的角色。日线在存在足够高低拐点时分别选择一条最优趋势支撑和趋势压力；其他周期保持
+严格趋势确认规则。默认返回离现价最近的 3 个支撑和 3 个压力。
 
 ## 策略回测
 
