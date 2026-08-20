@@ -22,39 +22,71 @@ function anchors(zone: PriceZone): Array<[string, number]> {
   try { return JSON.parse(zone.anchors) as Array<[string, number]>; } catch { return []; }
 }
 
-function zoneSeries(zone: PriceZone): LineSeriesOption {
+function trendValues(zone: PriceZone, bars: Bar[]): Array<number | null> {
+  const indexed = anchors(zone)
+    .map(([day, price]) => [
+      bars.findIndex((bar) => bar.timestamp.slice(0, 10) === day),
+      price,
+    ] as const)
+    .filter(([index]) => index >= 0)
+    .sort(([left], [right]) => left - right);
+  if (indexed.length < 2) return bars.map(() => null);
+  const [firstIndex, firstPrice] = indexed[0];
+  const [lastIndex, lastPrice] = indexed.at(-1)!;
+  if (firstIndex === lastIndex) return bars.map(() => null);
+  const slope = (lastPrice - firstPrice) / (lastIndex - firstIndex);
+  return bars.map((_, index) => (
+    index < firstIndex ? null : Number((firstPrice + slope * (index - firstIndex)).toFixed(12))
+  ));
+}
+
+function zoneSeries(zone: PriceZone, bars: Bar[]): LineSeriesOption {
   const style = zonePresentation(zone);
+  const width = zone.source === "manual" ? 3 : 2;
   const base: LineSeriesOption = {
     name: style.label,
     type: "line",
     yAxisIndex: 0,
     symbol: "none",
     silent: true,
-    lineStyle: { color: style.color, type: style.lineType, width: zone.source === "manual" ? 2 : 1.2, opacity: .9 },
+    lineStyle: { color: style.color, type: style.lineType, width, opacity: 1 },
     emphasis: { disabled: true },
     z: zone.source === "manual" ? 8 : 5,
   };
   if (zone.geometry === "trend") {
+    const data = trendValues(zone, bars);
+    const currentPrice = [...data].reverse().find((value) => value !== null);
     return {
       ...base,
-      data: anchors(zone),
-      endLabel: { show: true, formatter: style.label, color: style.color, fontSize: 9 },
+      data,
+      endLabel: {
+        show: currentPrice !== undefined,
+        formatter: `${style.label} ${currentPrice?.toFixed(2) ?? ""}`,
+        color: style.color,
+        backgroundColor: "#0d1113e6",
+        padding: [3, 5],
+        borderRadius: 2,
+        fontSize: 10,
+      },
     };
   }
   return {
     ...base,
     data: [],
-    markArea: {
-      silent: true,
-      itemStyle: { color: `${style.color}18`, borderColor: style.color, borderType: style.lineType, borderWidth: zone.source === "manual" ? 1.8 : 1 },
-      label: { show: true, position: "insideTopRight", formatter: style.label, color: style.color, fontSize: 9 },
-      data: [[{ yAxis: zone.lower_price }, { yAxis: zone.upper_price }]],
-    },
     markLine: {
       silent: true,
       symbol: ["none", "none"],
-      label: { show: false },
-      lineStyle: { color: style.color, type: style.lineType, opacity: .9 },
+      label: {
+        show: true,
+        position: "insideEndTop",
+        formatter: `${style.label} ${zone.center_price.toFixed(2)}`,
+        color: style.color,
+        backgroundColor: "#0d1113e6",
+        padding: [3, 5],
+        borderRadius: 2,
+        fontSize: 10,
+      },
+      lineStyle: { color: style.color, type: style.lineType, width, opacity: 1 },
       data: [{ yAxis: zone.center_price }],
     },
   };
@@ -91,7 +123,7 @@ export function buildChartOption(bars: Bar[], zones: PriceZone[]): EChartsOption
     series: [
       { name: "K 线", type: "candlestick", data: candleData, itemStyle: { color: "#2ecf79", color0: "#ff5a67", borderColor: "#2ecf79", borderColor0: "#ff5a67" } },
       { name: "成交量", type: "bar", xAxisIndex: 1, yAxisIndex: 1, data: volumeData, barMaxWidth: 12 },
-      ...zones.map(zoneSeries),
+      ...zones.map((zone) => zoneSeries(zone, bars)),
     ],
   };
 }

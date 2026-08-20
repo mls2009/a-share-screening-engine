@@ -29,3 +29,35 @@ it("K 线、成交量和支撑压力共享时间轴", () => {
   expect(xAxis.axisLabel.formatter("2026-08-19T15:00:00+08:00")).toBe("08-19");
   expect(xAxis.axisLabel.formatter("2026-08-19T10:15:00+08:00")).toBe("08-19 10:15");
 });
+
+it("水平支撑压力只绘制带价格标签的中心线", () => {
+  const option = buildChartOption(bars, [zone("support", "auto")]);
+  const series = option.series as Array<Record<string, any>>;
+  const support = series.find((item) => item.name === "自动支撑")!;
+
+  expect(support.markArea).toBeUndefined();
+  expect(support.markLine.data).toEqual([{ yAxis: 9.8 }]);
+  expect(support.markLine.label.formatter).toContain("9.80");
+  expect(support.markLine.lineStyle.width).toBe(2);
+});
+
+it("周线趋势锚点按日期匹配并将中心线延伸到最新K线", () => {
+  const weeklyBars: Bar[] = [
+    { ...bars[0], timestamp: "2026-08-07T15:00:00+08:00" },
+    { ...bars[1], timestamp: "2026-08-14T15:00:00+08:00" },
+    { ...bars[1], timestamp: "2026-08-20T15:00:00+08:00" },
+  ];
+  const trend: PriceZone = {
+    ...zone("support", "auto"),
+    geometry: "trend",
+    center_price: 10.4,
+    anchors: [["2026-08-07", 10], ["2026-08-14", 10.2]],
+  };
+
+  const option = buildChartOption(weeklyBars, [trend]);
+  const series = option.series as Array<Record<string, any>>;
+  const support = series.find((item) => item.name === "自动支撑")!;
+
+  expect(support.data).toEqual([10, 10.2, 10.4]);
+  expect(support.endLabel.formatter).toContain("10.40");
+});
