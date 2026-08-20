@@ -54,3 +54,22 @@ class Quote(BaseModel):
     volume_shares: int
     amount_cny: float
     source: str
+
+
+class MarketSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    timestamp: datetime
+    price: float
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    previous_close: float | None = None
+    volume_shares: int
+    amount_cny: float
+    turnover_rate: float | None = None
+    volume_ratio: float | None = None
+    total_market_cap: float | None = None
+    float_market_cap: float | None = None
+    source: str

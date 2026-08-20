@@ -83,3 +83,24 @@ def test_rejects_tree_deeper_than_safety_limit() -> None:
     errors = validate_tree(parsed)
 
     assert errors[0].code == "tree_too_deep"
+
+
+def test_accepts_realtime_turnover_volume_ratio_and_market_cap_metrics() -> None:
+    payloads = [
+        ("turnover_rate", "percent"),
+        ("volume_ratio", "ratio"),
+        ("total_market_cap", "amount"),
+        ("float_market_cap", "amount"),
+    ]
+
+    for metric, unit in payloads:
+        condition = ConditionNode.model_validate(
+            {
+                "kind": "condition",
+                "metric": metric,
+                "timeframe": "1d",
+                "operator": "gt",
+                "right": {"kind": "constant", "value": 1, "unit": unit},
+            }
+        )
+        assert validate_tree(condition) == []

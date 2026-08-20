@@ -18,7 +18,7 @@ def quote_row(
     volume_lots: str = "123",
     amount_ten_thousand: str = "12.915",
 ) -> str:
-    fields = [""] * 38
+    fields = [""] * 50
     fields[0] = "1"
     fields[1] = "测试股票"
     fields[2] = code
@@ -26,6 +26,26 @@ def quote_row(
     fields[30] = timestamp
     fields[36] = volume_lots
     fields[37] = amount_ten_thousand
+    return f'v_{key}="{"~".join(fields)}";'
+
+
+def snapshot_row(key: str, code: str) -> str:
+    fields = [""] * 50
+    fields[0] = "1"
+    fields[1] = "测试股票"
+    fields[2] = code
+    fields[3] = "10.50"
+    fields[4] = "10.00"
+    fields[5] = "10.10"
+    fields[30] = "20260820100500"
+    fields[33] = "10.80"
+    fields[34] = "9.90"
+    fields[36] = "123"
+    fields[37] = "12.915"
+    fields[38] = "2.50"
+    fields[44] = "100.25"
+    fields[45] = "150.50"
+    fields[49] = "1.80"
     return f'v_{key}="{"~".join(fields)}";'
 
 
@@ -121,3 +141,39 @@ def test_empty_request_does_not_call_transport() -> None:
         raise AssertionError("transport must not be called")
 
     assert TencentQuoteProvider(transport=forbidden_transport).quotes([]) == []
+
+
+def test_parses_full_market_snapshot_fields_without_fabricating_missing_values() -> None:
+    body = snapshot_row("sh600519", "600519").encode("gbk")
+    provider = TencentQuoteProvider(transport=lambda _url, _timeout: body)
+
+    snapshots = provider.snapshots(["600519.SH"])
+
+    assert snapshots[0].previous_close == 10.0
+    assert snapshots[0].open == 10.1
+    assert snapshots[0].high == 10.8
+    assert snapshots[0].low == 9.9
+    assert snapshots[0].turnover_rate == 2.5
+    assert snapshots[0].volume_ratio == 1.8
+    assert snapshots[0].float_market_cap == 10_025_000_000
+    assert snapshots[0].total_market_cap == 15_050_000_000
+
+
+def test_snapshot_many_chunks_requests_and_reports_failed_batches() -> None:
+    calls = 0
+
+    def transport(_url: str, _timeout: float) -> bytes:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise TimeoutError("first batch failed")
+        return b""
+
+    symbols = [f"{600000 + index:06d}.SH" for index in range(61)]
+
+    result = TencentQuoteProvider(transport=transport).snapshot_many(symbols)
+
+    assert calls == 2
+    assert result.failed_batches == 1
+    assert result.requested == 61
+    assert result.snapshots == ()

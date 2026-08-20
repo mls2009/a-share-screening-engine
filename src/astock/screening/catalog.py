@@ -49,6 +49,10 @@ METRICS = [
         for window in (5, 20, 60)
     ],
     _metric("volume_ratio_20", "20周期量比", Unit.RATIO),
+    _metric("volume_ratio", "实时量比", Unit.RATIO),
+    _metric("turnover_rate", "换手率", Unit.PERCENT),
+    _metric("total_market_cap", "总市值", Unit.AMOUNT),
+    _metric("float_market_cap", "流通市值", Unit.AMOUNT),
     *[
         _metric(f"ma_{window}", f"MA{window}", Unit.PRICE)
         for window in (5, 10, 20, 30, 60, 120, 250)
