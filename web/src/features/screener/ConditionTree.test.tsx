@@ -8,7 +8,7 @@ import { createGroup } from "./treeModel";
 
 const catalog: MetricSpec[] = [
   { key: "return_20", label: "20周期涨跌幅", unit: "percent", timeframes: ["1d"], operators: ["gte", "lt"] },
-  { key: "volume", label: "成交量", unit: "shares", timeframes: ["1d"], operators: ["gt"] },
+  { key: "volume", label: "成交量", unit: "shares", timeframes: ["15m", "1d", "1w"], operators: ["gt"] },
 ];
 
 function Harness() {
@@ -31,5 +31,6 @@ describe("ConditionTree", () => {
     render(<Harness />);
     await userEvent.selectOptions(screen.getByLabelText("指标"), "volume");
     expect(screen.getByLabelText("操作符")).toHaveValue("gt");
+    expect(screen.getByLabelText("周期")).toHaveValue("1d");
   });
 });

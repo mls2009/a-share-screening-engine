@@ -4,10 +4,17 @@ import userEvent from "@testing-library/user-event";
 import type { BacktestRun, MetricSpec } from "../../types";
 import { BacktestPage } from "./BacktestPage";
 
-const catalog: MetricSpec[] = [{
-  key: "return_20", label: "近 20 周期涨跌幅", unit: "percent",
-  timeframes: ["5m", "15m", "30m", "60m", "1d", "1w", "1mo"], operators: ["gte"],
-}];
+const allTimeframes = ["15m", "1d", "1mo", "1w", "30m", "5m", "60m"] as const;
+const catalog: MetricSpec[] = [
+  {
+    key: "return_20", label: "近 20 周期涨跌幅", unit: "percent",
+    timeframes: [...allTimeframes], operators: ["gte"],
+  },
+  {
+    key: "volume", label: "成交量", unit: "shares",
+    timeframes: [...allTimeframes], operators: ["gt"],
+  },
+];
 const run: BacktestRun = {
   run_id: "run-1",
   result: {
@@ -58,6 +65,9 @@ describe("BacktestPage", () => {
 
     await screen.findByRole("heading", { name: "入场条件" });
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "回测周期" }), "5m");
+    for (const metric of screen.getAllByRole("combobox", { name: "指标" })) {
+      await userEvent.selectOptions(metric, "volume");
+    }
     await userEvent.click(screen.getByRole("button", { name: "运行策略回测" }));
 
     const payload = client.runBacktest.mock.calls[0][0];

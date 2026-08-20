@@ -41,10 +41,13 @@ function ConditionRow({
 
   const changeMetric = (metricKey: string) => {
     const next = catalog.find((metric) => metric.key === metricKey)!;
+    const timeframe = next.timeframes.includes(node.timeframe)
+      ? node.timeframe
+      : next.timeframes.includes("1d") ? "1d" : next.timeframes[0];
     onUpdate({
       ...node,
       metric: metricKey,
-      timeframe: next.timeframes[0],
+      timeframe,
       operator: next.operators[0],
       right: { kind: "constant", value: next.unit === "boolean" ? "true" : "0" },
     });
