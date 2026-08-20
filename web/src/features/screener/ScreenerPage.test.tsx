@@ -5,7 +5,7 @@ import type { MetricSpec, ScreenRunResult } from "../../types";
 import { ScreenerPage, type ScreenerClient } from "./ScreenerPage";
 
 const catalog: MetricSpec[] = [
-  { key: "return_20", label: "20周期涨跌幅", unit: "percent", timeframes: ["1d"], operators: ["gte"] },
+  { key: "return_20", label: "价格涨跌", unit: "percent", timeframes: ["1d"], operators: ["gte", "lte", "between"], group: "price", family: "price_change", period: 20, directions: [{ value: "rise", label: "上涨幅度" }, { value: "fall", label: "下跌幅度" }] },
 ];
 const result: ScreenRunResult = {
   run_id: "run-1",
@@ -53,5 +53,30 @@ describe("ScreenerPage", () => {
 
     await waitFor(() => expect(calls[0]).toMatchObject({ mode: "live" }));
     expect(open).toEqual(["600001.SH"]);
+  });
+
+  it("下跌幅度以正数输入并提交为带符号条件", async () => {
+    const calls: object[] = [];
+    const fake: ScreenerClient = {
+      catalog: async () => catalog,
+      runScreen: async (payload) => { calls.push(payload); return result; },
+    };
+    render(<ScreenerPage client={fake} onOpenChart={() => undefined} />);
+    await screen.findByLabelText("指标");
+
+    await userEvent.selectOptions(screen.getByLabelText("指标"), "price_change:fall");
+    await userEvent.clear(screen.getByLabelText("比较值"));
+    await userEvent.type(screen.getByLabelText("比较值"), "30");
+    await userEvent.click(screen.getByRole("button", { name: "运行全市场筛选" }));
+
+    await waitFor(() => expect(calls[0]).toMatchObject({
+      tree: {
+        children: [{
+          metric: "return_20",
+          operator: "lte",
+          right: { value: -30, unit: "percent" },
+        }],
+      },
+    }));
   });
 });

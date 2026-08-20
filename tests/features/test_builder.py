@@ -71,12 +71,12 @@ def test_builder_persists_automatic_support_and_resistance_zones(tmp_path: Path)
     database = Database(tmp_path / "zones.duckdb")
     database.migrate()
     bar_store = BarStore(tmp_path / "bars")
-    closes = [12, 10.5, 12.5, 14.5, 13, 10.4, 12.5, 14.6, 13, 10.3, 12.5, 14.5, 12]
+    closes = [12] * 14
     dates = pd.date_range("2026-01-01", periods=len(closes), freq="B")
     bars = []
     for index, (stamp, close) in enumerate(zip(dates, closes, strict=True)):
-        low = {1: 10.0, 5: 10.1, 9: 9.95}.get(index, close - 0.4)
-        high = {3: 15.0, 7: 15.1, 11: 14.95}.get(index, close + 0.4)
+        low = {1: 8.0, 4: 9.0, 7: 10.0, 10: 11.0}.get(index, close - 0.4)
+        high = {2: 16.0, 5: 15.0, 8: 14.0, 11: 13.0}.get(index, close + 0.4)
         bars.append(
             Bar(
                 symbol="600000.SH",
@@ -114,4 +114,4 @@ def test_builder_persists_automatic_support_and_resistance_zones(tmp_path: Path)
             """
         ).fetchall()
     }
-    assert kinds == {"support", "resistance"}
+    assert kinds == {"uptrend", "downtrend"}

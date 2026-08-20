@@ -10,10 +10,14 @@ test("workbench and chart desk render without browser errors", async ({ page }) 
   await page.route("**/api/catalog", async (route) => {
     await route.fulfill({ json: [{
       key: "return_20",
-      label: "20周期涨跌幅",
+      label: "价格涨跌",
       unit: "percent",
       timeframes: ["5m", "15m", "30m", "60m", "1d", "1w", "1mo"],
       operators: ["gte", "lt"],
+      group: "price",
+      family: "price_change",
+      period: 20,
+      directions: [{ value: "rise", label: "上涨幅度" }, { value: "fall", label: "下跌幅度" }],
     }] });
   });
 
@@ -63,7 +67,9 @@ test("workbench and chart desk render without browser errors", async ({ page }) 
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "选股工作台" })).toBeVisible();
-  await expect(page.getByLabel("指标")).toBeVisible();
+  await expect(page.getByLabel("指标分类")).toHaveValue("price");
+  await expect(page.getByLabel("指标", { exact: true })).toHaveValue("price_change:rise");
+  await expect(page.getByLabel("指标", { exact: true })).toBeVisible();
   await page.screenshot({ path: "test-results/screener-workbench.png", fullPage: true });
 
   await page.getByRole("button", { name: "K 线研究" }).click();
