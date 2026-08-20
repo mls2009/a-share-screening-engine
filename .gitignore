@@ -1,7 +1,7 @@
 .worktrees/
 .venv/
 .env
-data/
+/data/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
