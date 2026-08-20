@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -45,3 +46,17 @@ class BarStore:
         frame = pd.concat([pd.read_parquet(path) for path in paths], ignore_index=True)
         frame = frame[frame["adjustment"] == adjustment.value].sort_values("timestamp")
         return [Bar.model_validate(row) for row in frame.to_dict("records")]
+
+    def read_range(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        adjustment: Adjustment,
+        start: date,
+        end: date,
+    ) -> list[Bar]:
+        return [
+            bar
+            for bar in self.read(symbol, timeframe, adjustment)
+            if start <= bar.timestamp.date() <= end
+        ]
