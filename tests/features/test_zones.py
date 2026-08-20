@@ -120,6 +120,32 @@ def test_detects_at_most_one_trend_line_per_direction_for_every_timeframe(
     assert len(trends) == 2
 
 
+def test_intraday_trend_anchors_keep_the_full_bar_timestamp() -> None:
+    frame = _frame(
+        [12] * 14,
+        lows={1: 8, 4: 9, 7: 10, 10: 11},
+        highs={2: 16, 5: 15, 8: 14, 11: 13},
+    )
+    frame["timestamp"] = pd.date_range(
+        "2026-08-20 09:30:00+08:00", periods=len(frame), freq="15min"
+    )
+
+    trends = [
+        zone
+        for zone in detect_zones(
+            frame,
+            as_of=date(2026, 8, 20),
+            timeframe=Timeframe.MIN_15,
+            pivot_order=1,
+        )
+        if zone.geometry == "trend"
+    ]
+
+    assert trends
+    assert all(isinstance(anchor_at, datetime) for zone in trends for anchor_at, _ in zone.anchors)
+    assert all("T" in anchor_at.isoformat() for zone in trends for anchor_at, _ in zone.anchors)
+
+
 def test_directional_trends_prefer_recent_valid_windows_over_older_touch_count() -> None:
     frame = _frame(
         [100 + index * 0.01 for index in range(40)],
@@ -146,10 +172,14 @@ def test_directional_trends_prefer_recent_valid_windows_over_older_touch_count()
     downtrends = [zone for zone in trends if zone.zone_kind == "downtrend"]
 
     assert len(uptrends) == 1
-    assert uptrends[0].anchors[-1][0] == pd.Timestamp(frame.iloc[34]["timestamp"]).date()
+    assert uptrends[0].anchors[-1][0] == pd.Timestamp(
+        frame.iloc[34]["timestamp"]
+    ).to_pydatetime()
     assert uptrends[0].touches == 2
     assert len(downtrends) == 1
-    assert downtrends[0].anchors[-1][0] == pd.Timestamp(frame.iloc[35]["timestamp"]).date()
+    assert downtrends[0].anchors[-1][0] == pd.Timestamp(
+        frame.iloc[35]["timestamp"]
+    ).to_pydatetime()
     assert downtrends[0].touches == 2
     assert len(trends) == 2
 

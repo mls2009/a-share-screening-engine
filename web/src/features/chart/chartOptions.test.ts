@@ -155,6 +155,31 @@ it("自动趋势线只在直接悬停时显示当前时间和拟合价，手动�
   expect(manual.endLabel).toMatchObject({ show: true });
 });
 
+it("分钟趋势锚点按完整时间匹配同一天内的多根K线", () => {
+  const intradayBars: Bar[] = ["09:30", "09:45", "10:00", "10:15"].map((clock, index) => ({
+    ...bars[index % bars.length],
+    timestamp: `2026-08-20T${clock}:00+08:00`,
+  }));
+  const trend: PriceZone = {
+    ...autoTrendZone,
+    timeframe: "15m",
+    center_price: 13,
+    anchors: [
+      ["2026-08-20T09:30:00+08:00", 10],
+      ["2026-08-20T09:45:00+08:00", 11],
+      ["2026-08-20T10:15:00+08:00", 13],
+    ],
+  };
+
+  const option = buildChartOption(intradayBars, [trend]);
+  const automatic = (option.series as TestSeries[])
+    .find((item) => item.name === "自动上升趋势线")!;
+
+  expect(automatic.data).toEqual([10, 11, 12, 13]);
+  const formatter = automatic.tooltip!.formatter as (params: unknown) => string;
+  expect(formatter({ dataIndex: 2 })).toContain("08-20 10:00 · 12.00");
+});
+
 it("周线趋势锚点按日期匹配并将中心线延伸到最新K线", () => {
   const weeklyBars: Bar[] = [
     { ...bars[0], timestamp: "2026-08-07T15:00:00+08:00" },

@@ -12,7 +12,12 @@ from astock.domain.market import Adjustment, Bar, Timeframe
 from astock.features import builder as builder_module
 from astock.features.builder import FeatureBuilder
 from astock.features.store import MarketFeatureStore
-from astock.features.zones import PriceZone, chart_zones, replace_auto_zones
+from astock.features.zones import (
+    ZONE_RULE_VERSION,
+    PriceZone,
+    chart_zones,
+    replace_auto_zones,
+)
 from astock.storage.bars import BarStore
 from astock.storage.database import Database
 
@@ -421,7 +426,7 @@ def test_same_day_new_final_bar_refreshes_chart_zone_watermark(
     )
 
     assert (first_close, second_close, third_close) == (10.5, 11.0, 11.0)
-    assert detections == ["v2", "v2", "v2"]
+    assert detections == [ZONE_RULE_VERSION] * 3
     latest_bar_epoch = database.connection.execute(
         """
         select epoch(latest_bar_at) from zone_detection_batches
@@ -682,7 +687,7 @@ def test_fresh_chart_zone_batch_does_not_read_full_bar_history(
         Timeframe.MIN_5,
         date(2026, 8, 20),
         [],
-        rule_version="v2",
+        rule_version=ZONE_RULE_VERSION,
         latest_bar_at=timestamp,
         source_revision=bar_store.revision(
             "600000.SH", Timeframe.MIN_5, timestamp.date()

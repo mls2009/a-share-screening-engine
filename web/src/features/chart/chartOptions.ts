@@ -43,8 +43,10 @@ function anchors(zone: PriceZone): Array<[string, number]> {
 
 function trendValues(zone: PriceZone, bars: Bar[]): Array<number | null> {
   const indexed = anchors(zone)
-    .map(([day, price]) => [
-      bars.findIndex((bar) => bar.timestamp.slice(0, 10) === day),
+    .map(([anchorAt, price]) => [
+      bars.findIndex((bar) => anchorAt.includes("T")
+        ? bar.timestamp === anchorAt
+        : bar.timestamp.slice(0, 10) === anchorAt),
       price,
     ] as const)
     .filter(([index]) => index >= 0)

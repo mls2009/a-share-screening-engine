@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from astock.domain.market import Timeframe
 
 _DELETE_ZONE_LOCK = Lock()
-ZONE_RULE_VERSION = "v2"
+ZONE_RULE_VERSION = "v3"
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,7 @@ class PriceZone:
     upper_price: float
     slope: float | None
     intercept: float | None
-    anchors: tuple[tuple[date, float], ...]
+    anchors: tuple[tuple[date | datetime, float], ...]
     strength: float
     touches: int
     source: str = "auto"
@@ -141,7 +141,7 @@ def _directional_trend_zones(
         )
         anchors = tuple(
             (
-                pd.Timestamp(data.iloc[position]["timestamp"]).date(),
+                pd.Timestamp(data.iloc[position]["timestamp"]).to_pydatetime(),
                 float(data.iloc[position][column]),
             )
             for position in selected
@@ -275,8 +275,12 @@ def replace_auto_zones(
             json.dumps([[day.isoformat(), price] for day, price in zone.anchors]),
             zone.strength,
             zone.touches,
-            zone.anchors[0][0],
-            zone.anchors[-1][0],
+            zone.anchors[0][0].date()
+            if isinstance(zone.anchors[0][0], datetime)
+            else zone.anchors[0][0],
+            zone.anchors[-1][0].date()
+            if isinstance(zone.anchors[-1][0], datetime)
+            else zone.anchors[-1][0],
             zone.rule_version,
         ]
         for zone in zones
