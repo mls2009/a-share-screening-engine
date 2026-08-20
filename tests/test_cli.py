@@ -1,8 +1,12 @@
+import json
 from datetime import date, datetime
+from types import SimpleNamespace
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from astock.cli import build_quote_provider, main
 from astock.domain.market import Adjustment, Quote, Timeframe
+from astock.screening.evaluator import TruthValue
 
 
 class FakeService:
@@ -129,3 +133,89 @@ def test_auto_provider_limits_mootdx_to_best_server_attempt(monkeypatch) -> None
 
     assert quotes[0].source == "mootdx"
     assert server_arguments == [[]]
+
+
+class FakeMarketSync:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def start(self, end: date, years: int):
+        self.calls.append((end, years))
+        return SimpleNamespace(
+            job_id=UUID("00000000-0000-0000-0000-000000000001"),
+            total=2,
+            succeeded=2,
+            failed=0,
+            status="completed",
+        )
+
+
+def test_data_sync_market_dispatches_full_market_job(capsys) -> None:
+    service = FakeMarketSync()
+
+    exit_code = main(
+        ["data", "sync-market", "--years", "3", "--end", "2026-08-20"],
+        market_sync_factory=lambda: service,
+    )
+
+    assert exit_code == 0
+    assert service.calls == [(date(2026, 8, 20), 3)]
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "completed"
+    assert output["succeeded"] == 2
+
+
+class FakeScreening:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def validate(self, tree):
+        return []
+
+    def run(self, tree, *, as_of: date, mode: str, limit: int, offset: int):
+        self.calls.append((tree.metric, as_of, mode, limit, offset))
+        explanation = SimpleNamespace(result=TruthValue.TRUE, actual=35)
+        return SimpleNamespace(
+            run_id=UUID("00000000-0000-0000-0000-000000000002"),
+            universe_size=5000,
+            realtime_covered=4990,
+            failed_batches=1,
+            status="completed",
+            matches=[SimpleNamespace(symbol="600001.SH", rank=1, explanation=explanation)],
+        )
+
+
+def test_screen_run_reads_safe_condition_json_and_dispatches_live_mode(
+    tmp_path, capsys
+) -> None:
+    definition = tmp_path / "screen.json"
+    definition.write_text(
+        json.dumps(
+            {
+                "kind": "condition",
+                "metric": "return_20",
+                "timeframe": "1d",
+                "operator": "gte",
+                "right": {"kind": "constant", "value": 30, "unit": "percent"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    service = FakeScreening()
+
+    exit_code = main(
+        [
+            "screen",
+            "run",
+            str(definition),
+            "--mode",
+            "live",
+            "--as-of",
+            "2026-08-20",
+        ],
+        screening_service_factory=lambda: service,
+    )
+
+    assert exit_code == 0
+    assert service.calls == [("return_20", date(2026, 8, 20), "live", 100, 0)]
+    assert json.loads(capsys.readouterr().out)["matches"][0]["symbol"] == "600001.SH"

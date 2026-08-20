@@ -82,6 +82,25 @@ class ScreeningService:
     def validate(self, tree: Node) -> list[ScreenValidationIssue]:
         return validate_tree(tree)
 
+    def results(self, run_id: UUID, limit: int = 100, offset: int = 0) -> list[dict]:
+        cursor = self.connection.execute(
+            """
+            select symbol, match_rank, feature_snapshot, explanation
+            from screen_matches where run_id = ?
+            order by match_rank limit ? offset ?
+            """,
+            [run_id, limit, offset],
+        )
+        return [
+            {
+                "symbol": row[0],
+                "rank": row[1],
+                "features": json.loads(row[2]),
+                "explanation": json.loads(row[3]),
+            }
+            for row in cursor.fetchall()
+        ]
+
     def run(
         self,
         tree: Node,

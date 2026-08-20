@@ -69,6 +69,16 @@ class MarketSyncService:
         self.jobs.reopen(job_id)
         return self._run(job_id, symbols)
 
+    def status(self, job_id: UUID) -> SyncSummary:
+        job = self.jobs.get(job_id)
+        return SyncSummary(
+            job_id=job.job_id,
+            total=job.total,
+            succeeded=job.succeeded,
+            failed=job.failed,
+            status=job.status,
+        )
+
     def _run(self, job_id: UUID, symbols: list[str]) -> SyncSummary:
         job = self.jobs.get(job_id)
         for symbol in symbols:

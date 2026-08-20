@@ -53,3 +53,6 @@ def test_close_screen_ranks_matches_and_persists_full_explanation(tmp_path: Path
     assert database.connection.execute(
         "select count(*) from screen_matches where run_id = ?", [result.run_id]
     ).fetchone()[0] == 1
+    saved = service.results(result.run_id, limit=10, offset=0)
+    assert saved[0]["symbol"] == "600001.SH"
+    assert saved[0]["explanation"]["result"] == "true"
