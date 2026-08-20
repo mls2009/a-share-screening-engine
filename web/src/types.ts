@@ -93,23 +93,25 @@ export interface Bar {
   amount_cny: number;
 }
 
-export interface PriceZone {
+export interface PriceZoneBase {
   zone_id: string;
   timeframe: Timeframe;
   as_of_date: string;
-  zone_kind: "support" | "resistance" | "uptrend" | "downtrend";
-  geometry: "horizontal" | "trend";
   lower_price: number;
   center_price: number;
   upper_price: number;
-  slope: number | null;
-  intercept: number | null;
   anchors: string | Array<[string, number]>;
   strength: number;
   touches: number;
-  source: "auto" | "manual";
   reappeared: boolean;
 }
+
+export type PriceZone = PriceZoneBase & (
+  | { source: "auto"; geometry: "horizontal"; zone_kind: "support" | "resistance"; slope: null; intercept: null }
+  | { source: "auto"; geometry: "trend"; zone_kind: "uptrend" | "downtrend"; slope: number; intercept: number }
+  | { source: "manual"; geometry: "horizontal"; zone_kind: "support" | "resistance"; slope: null; intercept: null }
+  | { source: "manual"; geometry: "trend"; zone_kind: "support" | "resistance"; slope: number; intercept: number }
+);
 
 export interface BacktestMetrics {
   total_return: number;

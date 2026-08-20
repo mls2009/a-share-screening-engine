@@ -9,15 +9,26 @@ const compactTime = (value: string) => {
 };
 
 export function zonePresentation(zone: PriceZone) {
-  const support = zone.zone_kind === "support" || zone.zone_kind === "uptrend";
-  const role = support ? "支撑" : "压力";
-  const label = zone.source === "manual"
-    ? `手动${role}`
-    : zone.zone_kind === "uptrend"
-      ? "自动上升趋势线"
-      : zone.zone_kind === "downtrend"
-        ? "自动下降趋势线"
-        : `自动水平${role}`;
+  const kind = zone.zone_kind as string;
+  const validGeometry = zone.geometry === "horizontal"
+    ? zone.slope === null && zone.intercept === null
+    : zone.geometry === "trend" && typeof zone.slope === "number" && typeof zone.intercept === "number";
+  if (!validGeometry) throw new Error("无效的支撑压力线类型");
+
+  let support: boolean;
+  let label: string;
+  if (zone.source === "manual" && (kind === "support" || kind === "resistance")) {
+    support = kind === "support";
+    label = `手动${support ? "支撑" : "压力"}`;
+  } else if (zone.source === "auto" && zone.geometry === "horizontal" && (kind === "support" || kind === "resistance")) {
+    support = kind === "support";
+    label = `自动水平${support ? "支撑" : "压力"}`;
+  } else if (zone.source === "auto" && zone.geometry === "trend" && (kind === "uptrend" || kind === "downtrend")) {
+    support = kind === "uptrend";
+    label = support ? "自动上升趋势线" : "自动下降趋势线";
+  } else {
+    throw new Error("无效的支撑压力线类型");
+  }
   return {
     color: support ? "#2ecf79" : "#ff5a67",
     lineType: zone.reappeared ? "dashed" as const : "solid" as const,
