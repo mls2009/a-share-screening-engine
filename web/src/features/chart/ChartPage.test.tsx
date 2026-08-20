@@ -77,3 +77,26 @@ it("删除失败时保留线并显示错误", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("删除失败");
   expect(screen.getByText("2 根 K 线 / 1 条线")).toBeInTheDocument();
 });
+
+it("删除请求完成前禁止重复提交", async () => {
+  let calls = 0;
+  let finish!: () => void;
+  const client: ChartClient = {
+    bars: async () => bars,
+    zones: async () => [automatic],
+    createManualZone: async () => manual,
+    deleteZone: async () => {
+      calls += 1;
+      await new Promise<void>((resolve) => { finish = resolve; });
+    },
+  };
+  render(<ChartPage initialSymbol="600001.SH" client={client} Chart={FakeChart} />);
+
+  const button = await screen.findByRole("button", { name: "删除自动水平压力 auto-1" });
+  await userEvent.dblClick(button);
+
+  expect(calls).toBe(1);
+  expect(button).toBeDisabled();
+  finish();
+  await waitFor(() => expect(button).not.toBeInTheDocument());
+});

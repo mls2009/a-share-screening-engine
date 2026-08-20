@@ -1,6 +1,9 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
+from threading import Barrier
 
+import duckdb
 import pandas as pd
 
 from astock.domain.market import Timeframe
@@ -246,6 +249,45 @@ def test_delete_zone_persists_marker_for_automatic_line_and_checks_owner(
         from zone_deletion_markers
         """
     ).fetchone() == ("600001.SH", "1d", "horizontal", 9.8, 10.0, 10.2)
+
+
+def test_concurrent_delete_claims_zone_once_and_persists_one_marker(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "concurrent-delete.duckdb"
+    database = Database(path)
+    database.migrate()
+    zone_id = "00000000-0000-0000-0000-000000000012"
+    database.connection.execute(
+        """
+        insert into support_resistance_zones
+          (zone_id, symbol, timeframe, as_of_date, zone_kind, geometry,
+           lower_price, center_price, upper_price, strength, touches, source,
+           rule_version)
+        values (?, '600001.SH', '1d', '2026-08-20', 'support', 'horizontal',
+                9.8, 10, 10.2, 0.8, 3, 'auto', 'v1')
+        """,
+        [zone_id],
+    )
+    database.connection.close()
+
+    start = Barrier(2)
+
+    def remove(connection: duckdb.DuckDBPyConnection) -> bool:
+        start.wait(timeout=5)
+        return delete_zone(connection, "600001.SH", zone_id)
+
+    connections = [duckdb.connect(str(path)), duckdb.connect(str(path))]
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(remove, connections))
+        assert sorted(results) == [False, True]
+        assert connections[0].execute(
+            "select count(*) from zone_deletion_markers"
+        ).fetchone() == (1,)
+    finally:
+        for connection in connections:
+            connection.close()
 
 
 def test_deleting_only_latest_automatic_zone_does_not_reveal_previous_batch(

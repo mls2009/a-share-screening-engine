@@ -1,5 +1,5 @@
 import { Search, Trash2 } from "lucide-react";
-import { type ComponentType, useEffect, useState } from "react";
+import { type ComponentType, useEffect, useRef, useState } from "react";
 
 import { api } from "../../api";
 import type { Bar, PriceZone, Timeframe } from "../../types";
@@ -43,6 +43,8 @@ export function ChartPage({
   const [anchors, setAnchors] = useState<DrawingAnchor[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const deletingZoneIdsRef = useRef(new Set<string>());
+  const [deletingZoneIds, setDeletingZoneIds] = useState(new Set<string>());
 
   useEffect(() => {
     let current = true;
@@ -73,12 +75,18 @@ export function ChartPage({
   };
 
   const remove = async (zone: PriceZone) => {
+    if (deletingZoneIdsRef.current.has(zone.zone_id)) return;
+    deletingZoneIdsRef.current.add(zone.zone_id);
+    setDeletingZoneIds(new Set(deletingZoneIdsRef.current));
     setError("");
     try {
       await client.deleteZone(symbol, zone.zone_id);
       setZones((previous) => previous.filter((item) => item.zone_id !== zone.zone_id));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "支撑压力线删除失败");
+    } finally {
+      deletingZoneIdsRef.current.delete(zone.zone_id);
+      setDeletingZoneIds(new Set(deletingZoneIdsRef.current));
     }
   };
 
@@ -109,7 +117,7 @@ export function ChartPage({
         <div className="zone-list">
           {zones.map((zone) => {
             const label = `${zone.source === "manual" ? "手动" : "自动"}${zone.geometry === "trend" ? "趋势" : "水平"}${zone.zone_kind === "support" ? "支撑" : "压力"}`;
-            return <div key={zone.zone_id} className={zone.zone_kind}><span>{label}</span><b>{zone.center_price.toFixed(2)}</b><small>{zone.touches} 次触及</small><button type="button" aria-label={`删除${label} ${zone.zone_id}`} onClick={() => remove(zone)}><Trash2 size={14} /></button></div>;
+            return <div key={zone.zone_id} className={zone.zone_kind}><span>{label}</span><b>{zone.center_price.toFixed(2)}</b><small>{zone.touches} 次触及</small><button type="button" aria-label={`删除${label} ${zone.zone_id}`} disabled={deletingZoneIds.has(zone.zone_id)} onClick={() => remove(zone)}><Trash2 size={14} /></button></div>;
           })}
           {!zones.length && <div className="result-empty">当前窗口内尚未识别到有效支撑压力线。</div>}
         </div>

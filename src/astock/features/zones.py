@@ -1,6 +1,7 @@
 import json
 from dataclasses import dataclass
 from datetime import date
+from threading import Lock
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -10,6 +11,8 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from astock.domain.market import Timeframe
+
+_DELETE_ZONE_LOCK = Lock()
 
 
 @dataclass(frozen=True)
@@ -393,39 +396,35 @@ def create_manual_zone(
 def delete_zone(
     connection: duckdb.DuckDBPyConnection, symbol: str, zone_id: UUID
 ) -> bool:
-    zone = connection.execute(
-        """
-        select symbol, timeframe, geometry, lower_price, center_price, upper_price
-        from support_resistance_zones
-        where zone_id = ? and symbol = ? and state = 'active'
-        """,
-        [zone_id, symbol],
-    ).fetchone()
-    if zone is None:
-        return False
-    connection.execute("begin transaction")
-    try:
-        connection.execute(
-            """
-            insert into zone_deletion_markers
-              (marker_id, symbol, timeframe, geometry, lower_price, center_price,
-               upper_price)
-            values (?, ?, ?, ?, ?, ?, ?)
-            """,
-            [uuid4(), *zone],
-        )
-        connection.execute(
-            """
-            update support_resistance_zones set state = 'deleted'
-            where zone_id = ? and symbol = ?
-            """,
-            [zone_id, symbol],
-        )
-        connection.execute("commit")
-    except Exception:
-        connection.execute("rollback")
-        raise
-    return True
+    with _DELETE_ZONE_LOCK:
+        connection.execute("begin transaction")
+        try:
+            zone = connection.execute(
+                """
+                update support_resistance_zones set state = 'deleted'
+                where zone_id = ? and symbol = ? and state = 'active'
+                returning symbol, timeframe, geometry, lower_price, center_price,
+                          upper_price
+                """,
+                [zone_id, symbol],
+            ).fetchone()
+            if zone is None:
+                connection.execute("rollback")
+                return False
+            connection.execute(
+                """
+                insert into zone_deletion_markers
+                  (marker_id, symbol, timeframe, geometry, lower_price, center_price,
+                   upper_price)
+                values (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [uuid4(), *zone],
+            )
+            connection.execute("commit")
+        except Exception:
+            connection.execute("rollback")
+            raise
+        return True
 
 
 def nearest_zones(
