@@ -71,6 +71,24 @@ def test_daily_bars_keep_calendar_months_separate() -> None:
     result = aggregate_daily(frame, period="month")
 
     assert list(result["timestamp"]) == [
-        pd.Timestamp("2026-01-31"),
-        pd.Timestamp("2026-02-28"),
+        pd.Timestamp("2026-01-30"),
+        pd.Timestamp("2026-02-02"),
     ]
+
+
+def test_weekly_bar_uses_last_actual_trading_day() -> None:
+    frame = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-10-08", "2026-10-09"]),
+            "open": [10, 11],
+            "high": [11, 12],
+            "low": [9, 10],
+            "close": [10.5, 11.5],
+            "volume_shares": [100, 200],
+            "amount_cny": [1_000, 2_000],
+        }
+    )
+
+    result = aggregate_daily(frame.iloc[:1], period="week")
+
+    assert result.iloc[0].timestamp == pd.Timestamp("2026-10-08")

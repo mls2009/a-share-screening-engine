@@ -31,11 +31,12 @@ def aggregate_intraday(frame: pd.DataFrame, minutes: int) -> pd.DataFrame:
 def aggregate_daily(
     frame: pd.DataFrame, period: Literal["week", "month"]
 ) -> pd.DataFrame:
-    data = frame.copy().sort_values("timestamp").set_index("timestamp")
+    data = frame.copy().sort_values("timestamp")
     rule = {"week": "W-FRI", "month": "ME"}[period]
     return (
-        data.resample(rule)
+        data.groupby(pd.Grouper(key="timestamp", freq=rule))
         .agg(
+            timestamp=("timestamp", "max"),
             open=("open", "first"),
             high=("high", "max"),
             low=("low", "min"),
@@ -44,5 +45,5 @@ def aggregate_daily(
             amount_cny=("amount_cny", "sum"),
         )
         .dropna(subset=["open"])
-        .reset_index()
+        .reset_index(drop=True)
     )
