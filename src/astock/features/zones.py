@@ -249,14 +249,8 @@ def replace_auto_zones(
     timeframe: Timeframe,
     as_of: date,
     zones: list[PriceZone],
+    rule_version: str = "v1",
 ) -> None:
-    connection.execute(
-        """
-        delete from support_resistance_zones
-        where symbol = ? and timeframe = ? and as_of_date = ? and source = 'auto'
-        """,
-        [symbol, timeframe.value, as_of],
-    )
     rows = [
         [
             symbol,
@@ -278,17 +272,44 @@ def replace_auto_zones(
         ]
         for zone in zones
     ]
-    if rows:
+    batch_rule_versions = {zone.rule_version for zone in zones} or {rule_version}
+    connection.execute("begin transaction")
+    try:
+        connection.execute(
+            """
+            delete from support_resistance_zones
+            where symbol = ? and timeframe = ? and as_of_date = ? and source = 'auto'
+            """,
+            [symbol, timeframe.value, as_of],
+        )
+        if rows:
+            connection.executemany(
+                """
+                insert into support_resistance_zones
+                  (symbol, timeframe, as_of_date, zone_kind, geometry, lower_price,
+                   center_price, upper_price, slope, intercept, anchors, strength, touches,
+                   first_touched_on, last_touched_on, source, rule_version)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'auto', ?)
+                """,
+                rows,
+            )
         connection.executemany(
             """
-            insert into support_resistance_zones
-              (symbol, timeframe, as_of_date, zone_kind, geometry, lower_price,
-               center_price, upper_price, slope, intercept, anchors, strength, touches,
-               first_touched_on, last_touched_on, source, rule_version)
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'auto', ?)
+            insert into zone_detection_batches
+              (symbol, timeframe, as_of_date, rule_version, created_at)
+            values (?, ?, ?, ?, current_timestamp)
+            on conflict (symbol, timeframe, as_of_date, rule_version)
+            do update set created_at = excluded.created_at
             """,
-            rows,
+            [
+                [symbol, timeframe.value, as_of, version]
+                for version in batch_rule_versions
+            ],
         )
+        connection.execute("commit")
+    except Exception:
+        connection.execute("rollback")
+        raise
 
 
 def create_manual_zone(
@@ -427,10 +448,23 @@ def _active_zones(
             and close is not null
           order by feature_date desc limit 1
         ),
-        latest_auto as (
+        batch_state as (
+          select count(*) as batch_count,
+            max(case when as_of_date <= ? then as_of_date end) as as_of_date
+          from zone_detection_batches
+          where symbol = ? and timeframe = ?
+        ),
+        legacy_auto as (
           select max(as_of_date) as as_of_date
           from support_resistance_zones
           where symbol = ? and timeframe = ? and as_of_date <= ? and source = 'auto'
+        ),
+        latest_auto as (
+          select case
+            when batch_state.batch_count > 0 then batch_state.as_of_date
+            else legacy_auto.as_of_date
+          end as as_of_date
+          from batch_state, legacy_auto
         ),
         active as (
           select zones.*
@@ -456,6 +490,9 @@ def _active_zones(
             symbol,
             timeframe.value,
             as_of,
+            as_of,
+            symbol,
+            timeframe.value,
             symbol,
             timeframe.value,
             as_of,

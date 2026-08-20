@@ -11,6 +11,7 @@ from astock.domain.market import Timeframe
 from astock.features import zones as zones_module
 from astock.features.zones import (
     ManualZoneInput,
+    PriceZone,
     create_manual_zone,
     delete_zone,
     detect_zones,
@@ -219,6 +220,133 @@ def test_persists_auto_zones_and_returns_nearest_support_and_resistance(tmp_path
 
     assert {row["zone_kind"] for row in nearest} == {"support", "resistance"}
     assert all(row["source"] == "auto" for row in nearest)
+
+
+def test_empty_auto_batch_hides_previous_automatic_zones(tmp_path: Path) -> None:
+    database = Database(tmp_path / "empty-auto-batch.duckdb")
+    database.migrate()
+    previous = date(2026, 8, 19)
+    latest = date(2026, 8, 20)
+    database.connection.execute(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, close)
+        values ('600001.SH', '1d', ?, 'v1', 12)
+        """,
+        [latest],
+    )
+    replace_auto_zones(
+        database.connection,
+        "600001.SH",
+        Timeframe.DAY,
+        previous,
+        [
+            PriceZone(
+                as_of_date=previous,
+                zone_kind="support",
+                geometry="horizontal",
+                lower_price=9.8,
+                center_price=10,
+                upper_price=10.2,
+                slope=None,
+                intercept=None,
+                anchors=((previous, 10),),
+                strength=0.8,
+                touches=1,
+            )
+        ],
+    )
+
+    replace_auto_zones(
+        database.connection, "600001.SH", Timeframe.DAY, latest, []
+    )
+
+    assert zones_module.chart_zones(
+        database.connection, "600001.SH", Timeframe.DAY, latest
+    ) == []
+    assert database.connection.execute(
+        """
+        select max(as_of_date) from zone_detection_batches
+        where symbol = '600001.SH' and timeframe = '1d'
+        """
+    ).fetchone() == (latest,)
+
+
+def test_auto_zone_replacement_rolls_back_rows_and_batch_on_insert_failure(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "auto-zone-rollback.duckdb")
+    database.migrate()
+    as_of = date(2026, 8, 20)
+    original = PriceZone(
+        as_of_date=as_of,
+        zone_kind="support",
+        geometry="horizontal",
+        lower_price=9.8,
+        center_price=10,
+        upper_price=10.2,
+        slope=None,
+        intercept=None,
+        anchors=((as_of, 10),),
+        strength=0.8,
+        touches=1,
+    )
+    replacement = PriceZone(
+        as_of_date=as_of,
+        zone_kind="resistance",
+        geometry="horizontal",
+        lower_price=12.8,
+        center_price=13,
+        upper_price=13.2,
+        slope=None,
+        intercept=None,
+        anchors=((as_of, 13),),
+        strength=0.9,
+        touches=1,
+    )
+    replace_auto_zones(
+        database.connection, "600001.SH", Timeframe.DAY, as_of, [original]
+    )
+    tables = {row[0] for row in database.connection.execute("show tables").fetchall()}
+    assert "zone_detection_batches" in tables
+    batch_before = database.connection.execute(
+        """
+        select rule_version, created_at from zone_detection_batches
+        where symbol = '600001.SH' and timeframe = '1d' and as_of_date = ?
+        """,
+        [as_of],
+    ).fetchone()
+
+    class FailingConnection:
+        def execute(self, *args, **kwargs):
+            return database.connection.execute(*args, **kwargs)
+
+        def executemany(self, *_args, **_kwargs):
+            raise RuntimeError("injected zone insert failure")
+
+    with pytest.raises(RuntimeError, match="injected zone insert failure"):
+        replace_auto_zones(
+            FailingConnection(),  # type: ignore[arg-type]
+            "600001.SH",
+            Timeframe.DAY,
+            as_of,
+            [replacement],
+        )
+
+    assert database.connection.execute(
+        """
+        select zone_kind, center_price from support_resistance_zones
+        where symbol = '600001.SH' and timeframe = '1d' and as_of_date = ?
+        """,
+        [as_of],
+    ).fetchall() == [("support", 10.0)]
+    assert database.connection.execute(
+        """
+        select rule_version, created_at from zone_detection_batches
+        where symbol = '600001.SH' and timeframe = '1d' and as_of_date = ?
+        """,
+        [as_of],
+    ).fetchone() == batch_before
 
 
 def test_distance_and_chart_zone_selectors_keep_trends_separate(tmp_path: Path) -> None:

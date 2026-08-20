@@ -195,6 +195,55 @@ def test_ensure_chart_zones_returns_none_without_base_bars(tmp_path: Path) -> No
     )
 
 
+def test_empty_chart_zone_detection_is_not_repeated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "empty-detection.duckdb")
+    database.migrate()
+    bar_store = BarStore(tmp_path / "empty-detection-bars")
+    bar_store.upsert(
+        [
+            Bar(
+                symbol="600000.SH",
+                timestamp=datetime(2026, 8, 20, 9, 35, tzinfo=TZ),
+                timeframe=Timeframe.MIN_5,
+                open=10,
+                high=10.6,
+                low=9.8,
+                close=10.5,
+                volume_shares=1_000,
+                amount_cny=10_000,
+                adjustment=Adjustment.QFQ,
+                source="test",
+            )
+        ]
+    )
+    detections = []
+
+    def detect_empty(*_args, **_kwargs) -> list[PriceZone]:
+        detections.append(True)
+        return []
+
+    monkeypatch.setattr(builder_module, "detect_zones", detect_empty)
+    builder = FeatureBuilder(bar_store, MarketFeatureStore(database), database)
+
+    first = builder.ensure_chart_zones(
+        "600000.SH", Timeframe.MIN_5, as_of=date(2026, 8, 20)
+    )
+    second = builder.ensure_chart_zones(
+        "600000.SH", Timeframe.MIN_5, as_of=date(2026, 8, 20)
+    )
+
+    assert first == second == 10.5
+    assert len(detections) == 1
+    assert database.connection.execute(
+        """
+        select max(as_of_date) from zone_detection_batches
+        where symbol = '600000.SH' and timeframe = '5m'
+        """
+    ).fetchone() == (date(2026, 8, 20),)
+
+
 def test_concurrent_chart_zone_builds_persist_one_batch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -154,6 +154,23 @@ create table if not exists support_resistance_zones (
   created_at timestamp not null default current_timestamp
 );
 
+create table if not exists zone_detection_batches (
+  symbol varchar not null,
+  timeframe varchar not null,
+  as_of_date date not null,
+  rule_version varchar not null,
+  created_at timestamp not null default current_timestamp,
+  primary key(symbol, timeframe, as_of_date, rule_version)
+);
+
+insert into zone_detection_batches
+  (symbol, timeframe, as_of_date, rule_version, created_at)
+select symbol, timeframe, as_of_date, rule_version, min(created_at)
+from support_resistance_zones
+where source = 'auto'
+group by symbol, timeframe, as_of_date, rule_version
+on conflict do nothing;
+
 create table if not exists zone_deletion_markers (
   marker_id uuid primary key,
   symbol varchar not null,

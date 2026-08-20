@@ -77,11 +77,19 @@ class FeatureBuilder:
         with _CHART_ZONE_BUILD_LOCK:
             latest_auto = self.connection.execute(
                 """
-                select max(as_of_date) from support_resistance_zones
-                where symbol = ? and timeframe = ? and source = 'auto'
+                select max(as_of_date) from zone_detection_batches
+                where symbol = ? and timeframe = ?
                 """,
                 [symbol, timeframe.value],
             ).fetchone()[0]
+            if latest_auto is None:
+                latest_auto = self.connection.execute(
+                    """
+                    select max(as_of_date) from support_resistance_zones
+                    where symbol = ? and timeframe = ? and source = 'auto'
+                    """,
+                    [symbol, timeframe.value],
+                ).fetchone()[0]
             if latest_auto is None or latest_auto < zone_date:
                 replace_auto_zones(
                     self.connection,
