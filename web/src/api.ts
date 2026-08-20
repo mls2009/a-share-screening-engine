@@ -33,8 +33,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  deleteManualZone: (symbol: string, zoneId: string) =>
-    request<void>(`/api/symbols/${encodeURIComponent(symbol)}/zones/manual/${zoneId}`, {
+  deleteZone: (symbol: string, zoneId: string) =>
+    request<void>(`/api/symbols/${encodeURIComponent(symbol)}/zones/${zoneId}`, {
       method: "DELETE",
     }),
   runBacktest: (payload: object) =>

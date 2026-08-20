@@ -12,7 +12,7 @@ export interface ChartClient {
   bars(symbol: string, timeframe: Timeframe, start: string, end: string): Promise<Bar[]>;
   zones(symbol: string, timeframe: Timeframe, asOf: string): Promise<PriceZone[]>;
   createManualZone(symbol: string, payload: object): Promise<PriceZone>;
-  deleteManualZone(symbol: string, zoneId: string): Promise<void>;
+  deleteZone(symbol: string, zoneId: string): Promise<void>;
 }
 
 const date = (value: Date) => value.toISOString().slice(0, 10);
@@ -73,8 +73,13 @@ export function ChartPage({
   };
 
   const remove = async (zone: PriceZone) => {
-    await client.deleteManualZone(symbol, zone.zone_id);
-    setZones((previous) => previous.filter((item) => item.zone_id !== zone.zone_id));
+    setError("");
+    try {
+      await client.deleteZone(symbol, zone.zone_id);
+      setZones((previous) => previous.filter((item) => item.zone_id !== zone.zone_id));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "支撑压力线删除失败");
+    }
   };
 
   return (
@@ -100,9 +105,12 @@ export function ChartPage({
         </div>
       </section>
       <section className="zone-ledger">
-        <div className="section-title"><div><span>支撑压力线</span><em>{zones.length}</em></div><p><i className="support-dot" />支撑<i className="resistance-dot" />压力<span className="auto-line" />自动虚线<span className="manual-line" />手动实线</p></div>
+        <div className="section-title"><div><span>支撑压力线</span><em>{zones.length}</em></div><p><i className="support-dot" />支撑<i className="resistance-dot" />压力<span className="normal-line" />正常实线<span className="reappeared-line" />删除后重现虚线</p></div>
         <div className="zone-list">
-          {zones.map((zone) => <div key={zone.zone_id} className={zone.zone_kind}><span>{zone.source === "manual" ? "手动" : "自动"}{zone.geometry === "trend" ? "趋势" : "水平"}{zone.zone_kind === "support" ? "支撑" : "压力"}</span><b>{zone.center_price.toFixed(2)}</b><small>{zone.touches} 次触及</small>{zone.source === "manual" && <button type="button" aria-label={`删除手动画线 ${zone.zone_id}`} onClick={() => remove(zone)}><Trash2 size={14} /></button>}</div>)}
+          {zones.map((zone) => {
+            const label = `${zone.source === "manual" ? "手动" : "自动"}${zone.geometry === "trend" ? "趋势" : "水平"}${zone.zone_kind === "support" ? "支撑" : "压力"}`;
+            return <div key={zone.zone_id} className={zone.zone_kind}><span>{label}</span><b>{zone.center_price.toFixed(2)}</b><small>{zone.touches} 次触及</small><button type="button" aria-label={`删除${label} ${zone.zone_id}`} onClick={() => remove(zone)}><Trash2 size={14} /></button></div>;
+          })}
           {!zones.length && <div className="result-empty">当前窗口内尚未识别到有效支撑压力线。</div>}
         </div>
       </section>

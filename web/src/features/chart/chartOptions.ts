@@ -12,7 +12,7 @@ export function zonePresentation(zone: PriceZone) {
   const support = zone.zone_kind === "support";
   return {
     color: support ? "#2ecf79" : "#ff5a67",
-    lineType: zone.source === "auto" ? "dashed" as const : "solid" as const,
+    lineType: zone.reappeared ? "dashed" as const : "solid" as const,
     label: `${zone.source === "auto" ? "自动" : "手动"}${support ? "支撑" : "压力"}`,
   };
 }

@@ -94,6 +94,7 @@ export interface PriceZone {
   strength: number;
   touches: number;
   source: "auto" | "manual";
+  reappeared: boolean;
 }
 
 export interface BacktestMetrics {

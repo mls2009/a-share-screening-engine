@@ -227,6 +227,7 @@ def test_manual_zone_create_and_delete_api(tmp_path: Path) -> None:
     created = client.post("/api/symbols/600001.SH/zones/manual", json=payload)
     assert created.status_code == 201
     assert created.json()["source"] == "manual"
+    assert created.json()["reappeared"] is False
     zone_id = created.json()["zone_id"]
 
     zones = client.get(

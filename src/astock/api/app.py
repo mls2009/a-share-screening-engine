@@ -218,7 +218,24 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         )
         values = row.fetchone()
         columns = [column[0] for column in row.description]
-        return jsonable_encoder(dict(zip(columns, values, strict=True)))
+        created = dict(zip(columns, values, strict=True))
+        created["reappeared"] = context.database.connection.execute(
+            """
+            select exists(
+              select 1 from zone_deletion_markers
+              where symbol = ? and timeframe = ? and geometry = ?
+                and lower_price <= ? and upper_price >= ?
+            )
+            """,
+            [
+                symbol,
+                zone.timeframe.value,
+                zone.geometry,
+                zone.center_price,
+                zone.center_price,
+            ],
+        ).fetchone()[0]
+        return jsonable_encoder(created)
 
     @app.delete("/api/symbols/{symbol}/zones/{zone_id}")
     def remove_zone(symbol: str, zone_id: UUID):
