@@ -1,6 +1,29 @@
 import type { Bar, PriceZone } from "../../types";
 import { buildChartOption, zonePresentation } from "./chartOptions";
 
+type TestTooltip = {
+  show?: boolean;
+  trigger?: string;
+  formatter?: unknown;
+};
+
+type TestSeries = {
+  name?: string;
+  silent?: boolean;
+  triggerEvent?: string;
+  data?: unknown;
+  markArea?: unknown;
+  tooltip?: TestTooltip;
+  endLabel?: { show?: boolean; formatter?: unknown };
+  markLine?: {
+    silent?: boolean;
+    data?: unknown;
+    tooltip?: TestTooltip;
+    label?: { show?: boolean; formatter?: unknown };
+    lineStyle?: { width?: number };
+  };
+};
+
 const bars: Bar[] = [
   { symbol: "600001.SH", timestamp: "2026-08-19T15:00:00+08:00", open: 10, high: 11, low: 9.8, close: 10.8, volume_shares: 1000, amount_cny: 10800 },
   { symbol: "600001.SH", timestamp: "2026-08-20T15:00:00+08:00", open: 10.8, high: 11.2, low: 10.5, close: 10.6, volume_shares: 1800, amount_cny: 19080 },
@@ -66,29 +89,69 @@ it("K 线、成交量和支撑压力共享时间轴", () => {
   expect(xAxis.axisLabel.formatter("2026-08-19T10:15:00+08:00")).toBe("08-19 10:15");
 });
 
-it("水平支撑压力只绘制带价格标签的中心线", () => {
-  const option = buildChartOption(bars, [autoHorizontalZone]);
-  const series = option.series as Array<Record<string, any>>;
+it("自动水平线只在直接悬停时显示中心价，手动水平线保持常驻标签", () => {
+  const option = buildChartOption(bars, [autoHorizontalZone, manualHorizontalZone]);
+  const series = option.series as TestSeries[];
   const support = series.find((item) => item.name === "自动水平支撑")!;
+  const resistance = series.find((item) => item.name === "手动压力")!;
+  const supportLine = support.markLine!;
+  const resistanceLine = resistance.markLine!;
 
+  expect(option.tooltip).toMatchObject({ trigger: "axis" });
   expect(support.markArea).toBeUndefined();
-  expect(support.markLine.data).toEqual([{ yAxis: 9.8 }]);
-  expect(support.markLine.label.formatter).toContain("9.80");
-  expect(support.markLine.label.show).toBe(false);
-  expect(support.markLine.lineStyle.width).toBe(2);
+  expect(supportLine.data).toEqual([{ yAxis: 9.8 }]);
+  expect(supportLine.silent).toBe(false);
+  expect(supportLine.label).toMatchObject({ show: false });
+  expect(supportLine.tooltip).toMatchObject({ show: true, trigger: "item" });
+  const formatter = supportLine.tooltip!.formatter as (params: unknown) => string;
+  expect(formatter({})).toContain("自动水平支撑");
+  expect(formatter({})).toContain("9.80");
+  expect(supportLine.lineStyle).toMatchObject({ width: 2 });
+  expect(resistance.silent).toBe(true);
+  expect(resistanceLine.silent).toBe(true);
+  expect(resistanceLine.label).toMatchObject({ show: true });
+  expect(resistanceLine.label!.formatter).toContain("11.80");
 });
 
-it("自动趋势线隐藏末端常驻标签，手动水平线和趋势线仍显示常驻标签", () => {
-  const option = buildChartOption(bars, [
+it("自动趋势线只在直接悬停时显示当前时间和拟合价，手动趋势线保持常驻标签", () => {
+  const minuteBars = bars.map((bar, index) => ({
+    ...bar,
+    timestamp: index === 1 ? "2026-08-20T10:15:00+08:00" : bar.timestamp,
+  }));
+  const option = buildChartOption(minuteBars, [
     autoTrendZone,
-    manualHorizontalZone,
     manualTrendZone,
   ]);
-  const series = option.series as Array<Record<string, any>>;
+  const series = option.series as TestSeries[];
+  const automatic = series.find((item) => item.name === "自动上升趋势线")!;
+  const manual = series.find((item) => item.name === "手动支撑")!;
 
-  expect(series.find((item) => item.name === "自动上升趋势线")!.endLabel.show).toBe(false);
-  expect(series.find((item) => item.name === "手动压力")!.markLine.label.show).toBe(true);
-  expect(series.find((item) => item.name === "手动支撑")!.endLabel.show).toBe(true);
+  expect(option.tooltip).toMatchObject({ trigger: "axis" });
+  expect(automatic).toMatchObject({
+    silent: false,
+    triggerEvent: "line",
+    endLabel: { show: false },
+    tooltip: { show: true, trigger: "item" },
+  });
+  const formatter = automatic.tooltip!.formatter as (params: unknown) => string;
+  expect(formatter({ dataIndex: 1 })).toContain("自动上升趋势线 · 08-20 10:15 · 10.40");
+  expect(() => formatter({ dataIndex: -1 })).not.toThrow();
+  expect(() => formatter({ dataIndex: 99 })).not.toThrow();
+  expect(() => formatter({ dataIndex: "1" })).not.toThrow();
+  expect(formatter({ dataIndex: 99 })).toContain("自动上升趋势线");
+
+  const noValueOption = buildChartOption(minuteBars, [{
+    ...autoTrendZone,
+    anchors: [["2026-08-19", 10]],
+  }]);
+  const noValueSeries = (noValueOption.series as TestSeries[])
+    .find((item) => item.name === "自动上升趋势线")!;
+  const noValueFormatter = noValueSeries.tooltip!.formatter as (params: unknown) => string;
+  expect(() => noValueFormatter({ dataIndex: 1 })).not.toThrow();
+  expect(noValueFormatter({ dataIndex: 1 })).toContain("自动上升趋势线");
+
+  expect(manual.silent).toBe(true);
+  expect(manual.endLabel).toMatchObject({ show: true });
 });
 
 it("周线趋势锚点按日期匹配并将中心线延伸到最新K线", () => {
@@ -105,9 +168,9 @@ it("周线趋势锚点按日期匹配并将中心线延伸到最新K线", () => 
   };
 
   const option = buildChartOption(weeklyBars, [trend]);
-  const series = option.series as Array<Record<string, any>>;
+  const series = option.series as TestSeries[];
   const support = series.find((item) => item.name === "自动上升趋势线")!;
 
   expect(support.data).toEqual([10.1, 10.2, 10.3, 10.4]);
-  expect(support.endLabel.formatter).toContain("10.40");
+  expect(support.endLabel!.formatter).toContain("10.40");
 });

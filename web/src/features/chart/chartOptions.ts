@@ -65,6 +65,28 @@ function trendValues(zone: PriceZone, bars: Bar[]): Array<number | null> {
   ));
 }
 
+function tooltipDataIndex(params: unknown): number | undefined {
+  if (typeof params !== "object" || params === null || !("dataIndex" in params)) return undefined;
+  const dataIndex = (params as { dataIndex?: unknown }).dataIndex;
+  return typeof dataIndex === "number" && Number.isInteger(dataIndex) && dataIndex >= 0
+    ? dataIndex
+    : undefined;
+}
+
+function trendTooltip(
+  label: string,
+  bars: Bar[],
+  values: Array<number | null>,
+  params: unknown,
+): string {
+  const dataIndex = tooltipDataIndex(params);
+  if (dataIndex === undefined) return label;
+  const timestamp = bars[dataIndex]?.timestamp;
+  const value = values[dataIndex];
+  const price = typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "";
+  return [label, timestamp ? compactTime(timestamp) : "", price].filter(Boolean).join(" · ");
+}
+
 function zoneSeries(zone: PriceZone, bars: Bar[]): LineSeriesOption {
   const style = zonePresentation(zone);
   const width = zone.source === "manual" ? 3 : 2;
@@ -83,6 +105,15 @@ function zoneSeries(zone: PriceZone, bars: Bar[]): LineSeriesOption {
     const currentPrice = [...data].reverse().find((value) => value !== null);
     return {
       ...base,
+      ...(zone.source === "auto" ? {
+        silent: false,
+        triggerEvent: "line" as const,
+        tooltip: {
+          show: true,
+          trigger: "item" as const,
+          formatter: (params: unknown) => trendTooltip(style.label, bars, data, params),
+        },
+      } : {}),
       data,
       endLabel: {
         show: zone.source === "manual" && currentPrice !== undefined,
@@ -99,8 +130,15 @@ function zoneSeries(zone: PriceZone, bars: Bar[]): LineSeriesOption {
     ...base,
     data: [],
     markLine: {
-      silent: true,
+      silent: zone.source === "manual",
       symbol: ["none", "none"],
+      ...(zone.source === "auto" ? {
+        tooltip: {
+          show: true,
+          trigger: "item" as const,
+          formatter: () => `${style.label} · ${zone.center_price.toFixed(2)}`,
+        },
+      } : {}),
       label: {
         show: zone.source === "manual",
         position: "insideEndTop",
