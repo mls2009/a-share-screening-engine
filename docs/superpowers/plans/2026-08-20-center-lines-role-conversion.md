@@ -162,4 +162,3 @@ Expected: JSON includes the trend support and reclassified automatic horizontal 
 Run: `git status --short`
 
 Expected: no output after any required final commit.
-
