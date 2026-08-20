@@ -107,6 +107,25 @@ def test_bulk_session_reuses_one_login_for_multiple_history_queries() -> None:
     assert fake.logout_calls == 1
 
 
+def test_history_skips_suspended_rows_with_empty_ohlc() -> None:
+    fake = FakeBaoStock()
+    fake.history_rows = [
+        ["2026-08-19", "sh.600519", "", "", "", "", "", "", "2"],
+        ["2026-08-20", "sh.600519", "10", "11", "9", "10.5", "12300", "129150", "2"],
+    ]
+
+    bars = BaoStockProvider(fake).history(
+        "600519.SH",
+        Timeframe.DAY,
+        date(2026, 8, 19),
+        date(2026, 8, 20),
+        Adjustment.QFQ,
+    )
+
+    assert len(bars) == 1
+    assert bars[0].timestamp.date() == date(2026, 8, 20)
+
+
 def test_baostock_normalizes_five_minute_history() -> None:
     fake = FakeBaoStock()
     fake.history_rows = [

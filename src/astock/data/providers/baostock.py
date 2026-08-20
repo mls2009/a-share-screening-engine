@@ -117,6 +117,11 @@ class BaoStockProvider:
                 tzinfo=SHANGHAI
             )
 
+        rows = [
+            row
+            for row in rows
+            if all(row.get(field) for field in ("open", "high", "low", "close", "volume", "amount"))
+        ]
         return [
             Bar(
                 symbol=self._symbol(row["code"]),
