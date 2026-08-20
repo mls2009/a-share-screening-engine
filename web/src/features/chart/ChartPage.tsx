@@ -68,7 +68,7 @@ export function ChartPage({
       setZones((previous) => [...previous, created]);
       setAnchors([]);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "手动区间保存失败");
+      setError(cause instanceof Error ? cause.message : "手动画线保存失败");
     }
   };
 
@@ -100,10 +100,10 @@ export function ChartPage({
         </div>
       </section>
       <section className="zone-ledger">
-        <div className="section-title"><div><span>图上区间</span><em>{zones.length}</em></div><p><i className="support-dot" />支撑<i className="resistance-dot" />压力<span className="auto-line" />自动虚线<span className="manual-line" />手动实线</p></div>
+        <div className="section-title"><div><span>支撑压力线</span><em>{zones.length}</em></div><p><i className="support-dot" />支撑<i className="resistance-dot" />压力<span className="auto-line" />自动虚线<span className="manual-line" />手动实线</p></div>
         <div className="zone-list">
-          {zones.map((zone) => <div key={zone.zone_id} className={zone.zone_kind}><span>{zone.source === "manual" ? "手动" : "自动"}{zone.geometry === "trend" ? "趋势" : "水平"}{zone.zone_kind === "support" ? "支撑" : "压力"}</span><b>{zone.lower_price.toFixed(2)} — {zone.upper_price.toFixed(2)}</b><small>{zone.touches} 次触及</small>{zone.source === "manual" && <button type="button" aria-label={`删除手动区间 ${zone.zone_id}`} onClick={() => remove(zone)}><Trash2 size={14} /></button>}</div>)}
-          {!zones.length && <div className="result-empty">当前窗口内尚未识别到有效区间。</div>}
+          {zones.map((zone) => <div key={zone.zone_id} className={zone.zone_kind}><span>{zone.source === "manual" ? "手动" : "自动"}{zone.geometry === "trend" ? "趋势" : "水平"}{zone.zone_kind === "support" ? "支撑" : "压力"}</span><b>{zone.center_price.toFixed(2)}</b><small>{zone.touches} 次触及</small>{zone.source === "manual" && <button type="button" aria-label={`删除手动画线 ${zone.zone_id}`} onClick={() => remove(zone)}><Trash2 size={14} /></button>}</div>)}
+          {!zones.length && <div className="result-empty">当前窗口内尚未识别到有效支撑压力线。</div>}
         </div>
       </section>
     </main>

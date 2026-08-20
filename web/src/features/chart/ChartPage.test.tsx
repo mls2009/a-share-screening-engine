@@ -17,7 +17,7 @@ const manual: PriceZone = {
 };
 
 function FakeChart({ bars: chartBars, zones, onAnchor }: StockChartProps) {
-  return <div><span>{chartBars.length} 根 K 线 / {zones.length} 个区间</span><button onClick={() => onAnchor?.({ date: "2026-08-01", price: 10 })}>锚点1</button><button onClick={() => onAnchor?.({ date: "2026-08-20", price: 11 })}>锚点2</button></div>;
+  return <div><span>{chartBars.length} 根 K 线 / {zones.length} 条线</span><button onClick={() => onAnchor?.({ date: "2026-08-01", price: 10 })}>锚点1</button><button onClick={() => onAnchor?.({ date: "2026-08-20", price: 11 })}>锚点2</button></div>;
 }
 
 it("切换周期、用两个锚点保存手动趋势支撑并可删除", async () => {
@@ -32,15 +32,18 @@ it("切换周期、用两个锚点保存手动趋势支撑并可删除", async (
   };
   render(<ChartPage initialSymbol="600001.SH" client={client} Chart={FakeChart} />);
 
-  expect(await screen.findByText("2 根 K 线 / 0 个区间")).toBeInTheDocument();
+  expect(await screen.findByText("2 根 K 线 / 0 条线")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "画支撑" }));
-  await userEvent.click(screen.getByRole("button", { name: "趋势区间" }));
+  await userEvent.click(screen.getByRole("button", { name: "趋势线" }));
   await userEvent.click(screen.getByRole("button", { name: "锚点1" }));
   await userEvent.click(screen.getByRole("button", { name: "锚点2" }));
 
   await waitFor(() => expect(created).toHaveLength(1));
   expect(created[0]).toMatchObject({ zone_kind: "support", geometry: "trend" });
+  expect(screen.getByText("支撑压力线")).toBeInTheDocument();
   expect(await screen.findByText("手动趋势支撑")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "删除手动区间 manual-1" }));
+  expect(screen.getByText("11.00")).toBeInTheDocument();
+  expect(screen.queryByText("10.90 — 11.10")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "删除手动画线 manual-1" }));
   expect(deleted).toEqual(["manual-1"]);
 });

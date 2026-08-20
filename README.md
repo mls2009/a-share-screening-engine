@@ -127,9 +127,10 @@ uvicorn astock.api.app:create_default_app --factory --host 127.0.0.1 --port 8888
 - `POST /api/monitor/scan`：手动执行一次扫描。
 - `GET /api/monitor/signals`：读取最近触发记录。
 
-自动区域的 `zone_kind` 为 `support` 或 `resistance`，`source` 为 `auto`。图表使用
-绿色显示支撑、红色显示压力；自动结果使用虚线和半透明色带，手动画线使用实线。
-水平区间和趋势区间都支持，默认返回离现价最近的 3 个支撑和 3 个压力。
+自动区域的 `zone_kind` 为 `support` 或 `resistance`，`source` 为 `auto`。图表只绘制
+区域中心线：绿色显示支撑、红色显示压力，自动结果使用虚线，手动画线使用实线。
+水平线和趋势线都支持；自动线跌破或突破后会按现价转换支撑/压力角色，手动画线保留
+用户指定的角色。默认返回离现价最近的 3 个支撑和 3 个压力。
 
 ## 策略回测
 
