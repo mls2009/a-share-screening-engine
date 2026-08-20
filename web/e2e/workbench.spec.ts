@@ -76,7 +76,7 @@ test("workbench and chart desk render without browser errors", async ({ page }) 
   await expect(page.getByRole("heading", { name: "K 线研究" })).toBeVisible();
   await expect(page.getByRole("img", { name: "K 线与成交量图" })).toBeVisible();
   await expect(page.getByText("自动水平支撑")).toBeVisible();
-  await expect(page.getByText("手动水平压力")).toBeVisible();
+  await expect(page.getByText("手动压力")).toBeVisible();
   await page.screenshot({ path: "test-results/chart-desk.png", fullPage: true });
 
   await page.getByRole("button", { name: "策略回测" }).click();

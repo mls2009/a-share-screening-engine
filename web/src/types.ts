@@ -97,7 +97,7 @@ export interface PriceZone {
   zone_id: string;
   timeframe: Timeframe;
   as_of_date: string;
-  zone_kind: "support" | "resistance";
+  zone_kind: "support" | "resistance" | "uptrend" | "downtrend";
   geometry: "horizontal" | "trend";
   lower_price: number;
   center_price: number;
