@@ -5,7 +5,10 @@ from zoneinfo import ZoneInfo
 
 from astock.config import Settings
 from astock.data.providers.baostock import BaoStockProvider
-from astock.data.providers.mootdx import MootdxProvider
+from astock.data.providers.base import QuoteProvider
+from astock.data.providers.fallback import FallbackQuoteProvider
+from astock.data.providers.mootdx import MootdxProvider, create_mootdx_client
+from astock.data.providers.tencent import TencentQuoteProvider
 from astock.data.service import MarketDataService
 from astock.domain.market import Adjustment, Timeframe
 from astock.storage.bars import BarStore
@@ -28,6 +31,24 @@ def build_market_data_service() -> MarketDataService:
     )
 
 
+def build_quote_provider(name: str) -> QuoteProvider:
+    providers: dict[str, Callable[[], QuoteProvider]] = {
+        "mootdx": MootdxProvider,
+        "tencent": TencentQuoteProvider,
+    }
+    if name == "auto":
+        return FallbackQuoteProvider(
+            [
+                (
+                    "mootdx",
+                    lambda: MootdxProvider(client=create_mootdx_client(servers=[])),
+                ),
+                ("tencent", providers["tencent"]),
+            ]
+        )
+    return providers[name]()
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="astock")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -46,14 +67,18 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     smoke = data_commands.add_parser("smoke", help="在线数据源冒烟测试")
-    smoke.add_argument("--provider", choices=["baostock", "mootdx"], required=True)
+    smoke.add_argument(
+        "--provider",
+        choices=["auto", "baostock", "mootdx", "tencent"],
+        default="auto",
+    )
     return parser
 
 
 def main(
     argv: Sequence[str] | None = None,
     service_factory: Callable[[], MarketDataService] = build_market_data_service,
-    quote_provider_factory: Callable[[], MootdxProvider] = MootdxProvider,
+    quote_provider_factory: Callable[[str], QuoteProvider] = build_quote_provider,
 ) -> int:
     args = _parser().parse_args(argv)
     if args.command != "data":
@@ -83,8 +108,9 @@ def main(
         print(f"BaoStock 正常：最新日线 {bars[-1].timestamp.isoformat()}")
         return 0
 
-    quotes = quote_provider_factory().quotes(["600519.SH"])
+    quotes = quote_provider_factory(args.provider).quotes(["600519.SH"])
     if not quotes:
-        raise RuntimeError("mootdx 未返回实时报价")
-    print(f"mootdx 正常：价格 {quotes[0].price}，时间 {quotes[0].timestamp.isoformat()}")
+        raise RuntimeError(f"{args.provider} 未返回实时报价")
+    quote = quotes[0]
+    print(f"{quote.source} 正常：价格 {quote.price}，时间 {quote.timestamp.isoformat()}")
     return 0
