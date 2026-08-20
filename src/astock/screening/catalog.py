@@ -25,74 +25,166 @@ ALL_TIMEFRAMES = frozenset(Timeframe)
 
 
 @dataclass(frozen=True)
+class ChoiceSpec:
+    value: str
+    label: str
+
+
+@dataclass(frozen=True)
 class MetricSpec:
     key: str
     label: str
     unit: Unit
     timeframes: frozenset[Timeframe] = SCREEN_TIMEFRAMES
     operators: frozenset[Operator] = NUMERIC_OPERATORS
+    group: str = "technical"
+    family: str | None = None
+    period: int | None = None
+    directions: tuple[ChoiceSpec, ...] = ()
+    choices: tuple[ChoiceSpec, ...] = ()
+    multiple: bool = False
 
 
-def _metric(key: str, label: str, unit: Unit) -> MetricSpec:
-    return MetricSpec(key=key, label=label, unit=unit, timeframes=ALL_TIMEFRAMES)
+def _metric(
+    key: str,
+    label: str,
+    unit: Unit,
+    *,
+    group: str = "technical",
+    family: str | None = None,
+    period: int | None = None,
+    directions: tuple[ChoiceSpec, ...] = (),
+) -> MetricSpec:
+    return MetricSpec(
+        key=key,
+        label=label,
+        unit=unit,
+        timeframes=ALL_TIMEFRAMES,
+        group=group,
+        family=family,
+        period=period,
+        directions=directions,
+    )
+
+
+RISE_FALL = (
+    ChoiceSpec("rise", "上涨幅度"),
+    ChoiceSpec("fall", "下跌幅度"),
+)
+INCREASE_DECREASE = (
+    ChoiceSpec("increase", "成交量增加"),
+    ChoiceSpec("decrease", "成交量减少"),
+)
+BOARD_CHOICES = (
+    ChoiceSpec("main", "主板"),
+    ChoiceSpec("chinext", "创业板"),
+    ChoiceSpec("star", "科创板"),
+    ChoiceSpec("beijing", "北交所"),
+)
+PATTERN_CHOICES = (
+    ChoiceSpec("doji", "十字星"),
+    ChoiceSpec("long_upper_shadow", "长上影线"),
+    ChoiceSpec("long_lower_shadow", "长下影线"),
+    ChoiceSpec("hammer", "锤头线"),
+    ChoiceSpec("bullish_engulfing", "看涨吞没"),
+    ChoiceSpec("bearish_engulfing", "看跌吞没"),
+    ChoiceSpec("piercing", "刺透形态"),
+    ChoiceSpec("dark_cloud_cover", "乌云盖顶"),
+    ChoiceSpec("three_white_soldiers", "红三兵"),
+    ChoiceSpec("three_black_crows", "三只乌鸦"),
+    ChoiceSpec("morning_star", "早晨之星"),
+    ChoiceSpec("evening_star", "黄昏之星"),
+    ChoiceSpec("consolidation_breakout", "盘整突破"),
+)
 
 
 METRICS = [
-    *[_metric(key, key, Unit.PRICE) for key in ("open", "high", "low", "close")],
     *[
-        _metric(f"return_{window}", f"{window}周期涨跌幅", Unit.PERCENT)
+        _metric(key, label, Unit.PRICE, group="price", family=key)
+        for key, label in (
+            ("open", "开盘价"),
+            ("high", "最高价"),
+            ("low", "最低价"),
+            ("close", "收盘价"),
+        )
+    ],
+    *[
+        _metric(
+            f"return_{window}",
+            "价格涨跌",
+            Unit.PERCENT,
+            group="price",
+            family="price_change",
+            period=window,
+            directions=RISE_FALL,
+        )
         for window in (1, 3, 5, 10, 20, 60, 120, 250)
     ],
-    _metric("volume", "成交量", Unit.SHARES),
-    _metric("amount", "成交额", Unit.AMOUNT),
+    _metric("volume", "成交量", Unit.SHARES, group="activity", family="volume"),
+    _metric("amount", "成交额", Unit.AMOUNT, group="activity", family="amount"),
     *[
-        _metric(f"volume_ma_{window}", f"{window}周期均量", Unit.SHARES)
+        _metric(
+            f"volume_ma_{window}",
+            "平均成交量",
+            Unit.SHARES,
+            group="activity",
+            family="volume_average",
+            period=window,
+        )
         for window in (5, 20, 60)
     ],
-    _metric("volume_ratio_20", "20周期量比", Unit.RATIO),
-    MetricSpec("volume_ratio", "实时量比", Unit.RATIO),
+    _metric("volume_ratio_20", "20周期量比", Unit.RATIO, group="activity", family="volume_ratio"),
+    MetricSpec("volume_ratio", "实时量比", Unit.RATIO, group="activity", family="live_volume_ratio"),
     *[
-        _metric(f"volume_change_{window}", f"成交量{window}周期增减", Unit.PERCENT)
+        _metric(
+            f"volume_change_{window}",
+            "成交量增减",
+            Unit.PERCENT,
+            group="activity",
+            family="volume_change",
+            period=window,
+            directions=INCREASE_DECREASE,
+        )
         for window in (1, 5, 20)
     ],
-    MetricSpec("turnover_rate", "换手率", Unit.PERCENT),
-    MetricSpec("total_market_cap", "总市值", Unit.AMOUNT),
-    MetricSpec("float_market_cap", "流通市值", Unit.AMOUNT),
+    MetricSpec("turnover_rate", "换手率", Unit.PERCENT, group="activity", family="turnover_rate"),
+    MetricSpec("total_market_cap", "总市值", Unit.AMOUNT, group="attributes", family="total_market_cap"),
+    MetricSpec("float_market_cap", "流通市值", Unit.AMOUNT, group="attributes", family="float_market_cap"),
     *[
-        _metric(f"ma_{window}", f"MA{window}", Unit.PRICE)
+        _metric(f"ma_{window}", "移动平均线", Unit.PRICE, family="ma", period=window)
         for window in (5, 10, 20, 30, 60, 120, 250)
     ],
-    *[_metric(key, key, Unit.PRICE) for key in ("macd", "macd_signal", "macd_hist")],
-    *[_metric(key, key, Unit.SCORE) for key in ("kdj_k", "kdj_d", "kdj_j", "rsi_14")],
+    *[_metric(key, label, Unit.PRICE, family=key) for key, label in (("macd", "MACD"), ("macd_signal", "MACD 信号线"), ("macd_hist", "MACD 柱"))],
+    *[_metric(key, label, Unit.SCORE, family=key) for key, label in (("kdj_k", "KDJ K"), ("kdj_d", "KDJ D"), ("kdj_j", "KDJ J"), ("rsi_14", "RSI 14"))],
     *[
-        _metric(key, key, Unit.PRICE)
-        for key in ("boll_upper", "boll_middle", "boll_lower", "atr_14", "obv")
+        _metric(key, label, Unit.PRICE, family=key)
+        for key, label in (("boll_upper", "布林上轨"), ("boll_middle", "布林中轨"), ("boll_lower", "布林下轨"), ("atr_14", "ATR 14"), ("obv", "OBV"))
     ],
-    *[_metric(key, key, Unit.PERCENT) for key in ("amplitude", "volatility_20")],
+    *[_metric(key, label, Unit.PERCENT, group="price", family=key) for key, label in (("amplitude", "振幅"), ("volatility_20", "20周期波动率"))],
     *[
-        _metric(f"high_{window}", f"{window}周期最高价", Unit.PRICE)
+        _metric(f"high_{window}", "阶段最高价", Unit.PRICE, group="price", family="period_high", period=window)
         for window in (20, 60, 250)
     ],
     *[
-        _metric(f"low_{window}", f"{window}周期最低价", Unit.PRICE)
+        _metric(f"low_{window}", "阶段最低价", Unit.PRICE, group="price", family="period_low", period=window)
         for window in (20, 60, 250)
     ],
     *[
-        _metric(f"max_drawdown_{window}", f"{window}周期最大回撤", Unit.PERCENT)
+        _metric(f"max_drawdown_{window}", "最大回撤", Unit.PERCENT, group="trend", family="max_drawdown", period=window)
         for window in (20, 60, 250)
     ],
-    _metric("up_streak", "连续上涨周期数", Unit.DAYS),
-    _metric("down_streak", "连续下跌周期数", Unit.DAYS),
-    MetricSpec("listing_trade_days", "上市交易日数", Unit.DAYS),
-    MetricSpec("is_new", "新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS),
-    MetricSpec("is_secondary_new", "次新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS),
-    MetricSpec("is_st", "ST", Unit.BOOLEAN, operators=EQUALITY_OPERATORS),
-    MetricSpec("is_suspended", "停牌", Unit.BOOLEAN, operators=EQUALITY_OPERATORS),
-    MetricSpec("board", "板块", Unit.CATEGORY, operators=EQUALITY_OPERATORS),
-    MetricSpec("pattern_type", "K线形态", Unit.CATEGORY, operators=EQUALITY_OPERATORS),
-    MetricSpec("pattern_strength", "形态强度", Unit.SCORE),
-    MetricSpec("support_distance", "距支撑区", Unit.PERCENT),
-    MetricSpec("resistance_distance", "距压力区", Unit.PERCENT),
+    _metric("up_streak", "连续上涨周期数", Unit.DAYS, group="trend", family="up_streak"),
+    _metric("down_streak", "连续下跌周期数", Unit.DAYS, group="trend", family="down_streak"),
+    MetricSpec("listing_trade_days", "上市交易日数", Unit.DAYS, group="attributes", family="listing_days"),
+    MetricSpec("is_new", "新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="attributes", family="is_new"),
+    MetricSpec("is_secondary_new", "次新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="attributes", family="is_secondary_new"),
+    MetricSpec("is_st", "ST 状态", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="status", family="st_status", choices=(ChoiceSpec("true", "ST"), ChoiceSpec("false", "非 ST"))),
+    MetricSpec("is_suspended", "交易状态", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="status", family="suspension_status", choices=(ChoiceSpec("false", "正常交易"), ChoiceSpec("true", "停牌"))),
+    MetricSpec("board", "所属板块", Unit.CATEGORY, operators=EQUALITY_OPERATORS, group="attributes", family="board", choices=BOARD_CHOICES, multiple=True),
+    MetricSpec("pattern_type", "K 线形态", Unit.CATEGORY, operators=EQUALITY_OPERATORS, group="candlestick", family="pattern", choices=PATTERN_CHOICES, multiple=True),
+    MetricSpec("pattern_strength", "形态强度", Unit.SCORE, group="candlestick", family="pattern_strength"),
+    MetricSpec("support_distance", "距支撑位", Unit.PERCENT, group="trend", family="support_distance"),
+    MetricSpec("resistance_distance", "距压力位", Unit.PERCENT, group="trend", family="resistance_distance"),
 ]
 
 

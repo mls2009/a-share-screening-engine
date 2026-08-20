@@ -117,6 +117,34 @@ def test_catalog_validate_and_run_screen_endpoints(tmp_path: Path) -> None:
     assert run.json()["matches"][0]["symbol"] == "600001.SH"
 
 
+def test_catalog_exposes_hierarchical_filter_metadata(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    catalog = {
+        metric["key"]: metric for metric in client.get("/api/catalog").json()
+    }
+
+    assert catalog["return_20"]["group"] == "price"
+    assert catalog["return_20"]["family"] == "price_change"
+    assert catalog["return_20"]["period"] == 20
+    assert catalog["return_20"]["directions"] == [
+        {"value": "rise", "label": "上涨幅度"},
+        {"value": "fall", "label": "下跌幅度"},
+    ]
+    assert catalog["board"]["multiple"] is True
+    assert catalog["board"]["choices"] == [
+        {"value": "main", "label": "主板"},
+        {"value": "chinext", "label": "创业板"},
+        {"value": "star", "label": "科创板"},
+        {"value": "beijing", "label": "北交所"},
+    ]
+    assert catalog["pattern_type"]["multiple"] is True
+    assert {choice["value"] for choice in catalog["pattern_type"]["choices"]} >= {
+        "morning_star",
+        "hammer",
+        "bullish_engulfing",
+    }
+
+
 def test_bars_zones_run_results_and_sync_status_contracts(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
     run = client.post(

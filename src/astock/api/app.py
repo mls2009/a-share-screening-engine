@@ -61,6 +61,18 @@ def _catalog() -> list[dict]:
             "unit": metric.unit.value,
             "timeframes": sorted(item.value for item in metric.timeframes),
             "operators": sorted(item.value for item in metric.operators),
+            "group": metric.group,
+            "family": metric.family or metric.key,
+            "period": metric.period,
+            "directions": [
+                {"value": item.value, "label": item.label}
+                for item in metric.directions
+            ],
+            "choices": [
+                {"value": item.value, "label": item.label}
+                for item in metric.choices
+            ],
+            "multiple": metric.multiple,
         }
         for metric in DEFAULT_CATALOG.all()
     ]
