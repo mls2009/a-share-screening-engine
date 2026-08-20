@@ -1,0 +1,70 @@
+import {
+  BellRing,
+  CandlestickChart,
+  Database,
+  FlaskConical,
+  ScanSearch,
+} from "lucide-react";
+import { useState } from "react";
+
+import { ScreenerPage } from "./features/screener/ScreenerPage";
+
+type Page = "screener" | "chart" | "backtest" | "monitor";
+
+const pages = [
+  { id: "screener" as const, label: "条件选股", icon: ScanSearch },
+  { id: "chart" as const, label: "K 线研究", icon: CandlestickChart },
+  { id: "backtest" as const, label: "策略回测", icon: FlaskConical },
+  { id: "monitor" as const, label: "实时监控", icon: BellRing },
+];
+
+function Placeholder({ page }: { page: Exclude<Page, "screener"> }) {
+  const title = pages.find((item) => item.id === page)?.label ?? "";
+  return (
+    <main className="empty-page">
+      <p className="eyebrow">RESEARCH MODULE</p>
+      <h1>{title}</h1>
+      <p>模块已进入当前实施队列。</p>
+    </main>
+  );
+}
+
+export function App() {
+  const [page, setPage] = useState<Page>("screener");
+  const [chartSymbol, setChartSymbol] = useState("600519.SH");
+  return (
+    <div className="app-frame">
+      <aside className="rail">
+        <div className="brand" aria-label="AStock">
+          <span className="brand-mark">A</span>
+          <div><strong>ASTOCK</strong><small>LOCAL TERMINAL</small></div>
+        </div>
+        <nav aria-label="主导航">
+          {pages.map(({ id, label, icon: Icon }, index) => (
+            <button
+              key={id}
+              className={page === id ? "active" : ""}
+              onClick={() => setPage(id)}
+              type="button"
+              aria-label={label}
+            >
+              <span className="nav-index">0{index + 1}</span>
+              <Icon size={18} strokeWidth={1.7} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="rail-foot">
+          <Database size={16} />
+          <span>DuckDB</span>
+          <i />
+        </div>
+      </aside>
+      {page === "screener" ? (
+        <ScreenerPage onOpenChart={(symbol) => { setChartSymbol(symbol); setPage("chart"); }} />
+      ) : (
+        <Placeholder page={page} key={page === "chart" ? chartSymbol : page} />
+      )}
+    </div>
+  );
+}

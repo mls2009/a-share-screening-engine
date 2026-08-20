@@ -7,3 +7,6 @@ __pycache__/
 .ruff_cache/
 .coverage
 *.pyc
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo

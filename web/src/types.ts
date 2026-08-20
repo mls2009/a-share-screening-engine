@@ -1,0 +1,97 @@
+export type Timeframe = "5m" | "15m" | "30m" | "60m" | "1d" | "1w" | "1mo";
+export type Unit = "price" | "percent" | "ratio" | "shares" | "amount" | "days" | "boolean" | "category" | "score";
+
+export interface MetricSpec {
+  key: string;
+  label: string;
+  unit: Unit;
+  timeframes: Timeframe[];
+  operators: string[];
+}
+
+export interface UiConstantOperand {
+  kind: "constant";
+  value: string;
+}
+
+export interface UiMetricOperand {
+  kind: "metric";
+  metric: string;
+  timeframe: Timeframe;
+  multiplier: number;
+}
+
+export type UiOperand = UiConstantOperand | UiMetricOperand;
+
+export interface UiConditionNode {
+  id: string;
+  kind: "condition";
+  metric: string;
+  timeframe: Timeframe;
+  operator: string;
+  right: UiOperand;
+  lookback?: number;
+  occurrences?: number;
+}
+
+export interface UiGroupNode {
+  id: string;
+  kind: "group";
+  logic: "and" | "or" | "not";
+  children: UiNode[];
+}
+
+export type UiNode = UiConditionNode | UiGroupNode;
+
+export interface ScreenMatch {
+  symbol: string;
+  rank: number;
+  features: Record<string, unknown>;
+  explanation: Evaluation;
+}
+
+export interface Evaluation {
+  path: string;
+  result: "true" | "false" | "unknown";
+  actual?: unknown;
+  expected?: unknown;
+  unit?: string;
+  children: Evaluation[];
+}
+
+export interface ScreenRunResult {
+  run_id: string;
+  status: string;
+  universe_size: number;
+  realtime_covered: number;
+  failed_batches: number;
+  matches: ScreenMatch[];
+}
+
+export interface Bar {
+  symbol: string;
+  timestamp: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume_shares: number;
+  amount_cny: number;
+}
+
+export interface PriceZone {
+  zone_id: string;
+  timeframe: Timeframe;
+  as_of_date: string;
+  zone_kind: "support" | "resistance";
+  geometry: "horizontal" | "trend";
+  lower_price: number;
+  center_price: number;
+  upper_price: number;
+  slope: number | null;
+  intercept: number | null;
+  anchors: string | Array<[string, number]>;
+  strength: number;
+  touches: number;
+  source: "auto" | "manual";
+}
