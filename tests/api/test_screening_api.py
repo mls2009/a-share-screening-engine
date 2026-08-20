@@ -1,0 +1,161 @@
+from datetime import date, datetime
+from pathlib import Path
+from types import SimpleNamespace
+from uuid import UUID
+from zoneinfo import ZoneInfo
+
+from fastapi.testclient import TestClient
+
+from astock.api.app import ApiContext, create_app
+from astock.domain.market import Adjustment, Bar, Timeframe
+from astock.features.store import MarketFeatureStore
+from astock.features.zones import PriceZone, replace_auto_zones
+from astock.screening.service import ScreeningService
+from astock.storage.bars import BarStore
+from astock.storage.database import Database
+
+
+class FakeSync:
+    def status(self, job_id: UUID):
+        return SimpleNamespace(
+            job_id=job_id,
+            status="running",
+            total=5000,
+            succeeded=100,
+            failed=2,
+        )
+
+
+def _client(tmp_path: Path) -> tuple[TestClient, Database]:
+    database = Database(tmp_path / "api.duckdb")
+    database.migrate()
+    bar_store = BarStore(tmp_path / "bars")
+    database.connection.execute(
+        """
+        insert into symbols (symbol, name, exchange, board, is_listed)
+        values ('600001.SH', '股票一', 'SH', 'main', true)
+        """
+    )
+    database.connection.execute(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, close, return_20)
+        values ('600001.SH', '1d', '2026-08-20', 'v1', 12, 35)
+        """
+    )
+    bar_store.upsert(
+        [
+            Bar(
+                symbol="600001.SH",
+                timestamp=datetime(2026, 8, 20, 15, tzinfo=ZoneInfo("Asia/Shanghai")),
+                timeframe=Timeframe.DAY,
+                open=10,
+                high=12.5,
+                low=9.8,
+                close=12,
+                volume_shares=1000,
+                amount_cny=12000,
+                adjustment=Adjustment.QFQ,
+                source="test",
+            )
+        ]
+    )
+    replace_auto_zones(
+        database.connection,
+        "600001.SH",
+        Timeframe.DAY,
+        date(2026, 8, 20),
+        [
+            PriceZone(
+                as_of_date=date(2026, 8, 20),
+                zone_kind="support",
+                geometry="horizontal",
+                lower_price=9.8,
+                center_price=10,
+                upper_price=10.2,
+                slope=None,
+                intercept=None,
+                anchors=((date(2026, 8, 1), 10), (date(2026, 8, 10), 10.1)),
+                strength=0.8,
+                touches=2,
+            )
+        ],
+    )
+    context = ApiContext(
+        database=database,
+        bar_store=bar_store,
+        screening=ScreeningService(database, MarketFeatureStore(database)),
+        market_sync=FakeSync(),
+    )
+    return TestClient(create_app(context)), database
+
+
+CONDITION = {
+    "kind": "condition",
+    "metric": "return_20",
+    "timeframe": "1d",
+    "operator": "gte",
+    "right": {"kind": "constant", "value": 30, "unit": "percent"},
+}
+
+
+def test_catalog_validate_and_run_screen_endpoints(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    catalog = client.get("/api/catalog")
+    validation = client.post("/api/screens/validate", json=CONDITION)
+    run = client.post(
+        "/api/screens/run",
+        json={"tree": CONDITION, "mode": "close", "as_of": "2026-08-20"},
+    )
+
+    assert catalog.status_code == 200
+    assert any(metric["key"] == "return_20" for metric in catalog.json())
+    assert validation.json() == {"valid": True, "errors": []}
+    assert run.status_code == 200
+    assert run.json()["matches"][0]["symbol"] == "600001.SH"
+
+
+def test_bars_zones_run_results_and_sync_status_contracts(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    run = client.post(
+        "/api/screens/run",
+        json={"tree": CONDITION, "mode": "close", "as_of": "2026-08-20"},
+    ).json()
+    run_id = run["run_id"]
+    job_id = "00000000-0000-0000-0000-000000000009"
+
+    bars = client.get(
+        "/api/symbols/600001.SH/bars",
+        params={"timeframe": "1d", "start": "2026-08-01", "end": "2026-08-20"},
+    )
+    zones = client.get(
+        "/api/symbols/600001.SH/zones",
+        params={"timeframe": "1d", "as_of": "2026-08-20"},
+    )
+    results = client.get(f"/api/screens/runs/{run_id}")
+    sync = client.get(f"/api/sync/jobs/{job_id}")
+
+    assert bars.json()[0]["close"] == 12
+    assert zones.json()[0]["zone_kind"] == "support"
+    assert zones.json()[0]["source"] == "auto"
+    assert results.json()["matches"][0]["symbol"] == "600001.SH"
+    assert sync.json()["succeeded"] == 100
+
+
+def test_validation_errors_have_stable_code_message_and_path(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    invalid = {**CONDITION, "metric": "not_a_metric"}
+
+    response = client.post("/api/screens/validate", json=invalid)
+
+    assert response.json() == {
+        "valid": False,
+        "errors": [
+            {
+                "code": "unknown_metric",
+                "message": "unknown metric: not_a_metric",
+                "path": "root",
+            }
+        ],
+    }
