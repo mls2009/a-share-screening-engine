@@ -23,7 +23,7 @@ from astock.features.store import MarketFeatureStore
 from astock.features.zones import (
     ManualZoneInput,
     create_manual_zone,
-    delete_manual_zone,
+    delete_zone,
     nearest_zones,
 )
 from astock.live.calendar import SHANGHAI
@@ -220,19 +220,12 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         columns = [column[0] for column in row.description]
         return jsonable_encoder(dict(zip(columns, values, strict=True)))
 
-    @app.delete("/api/symbols/{symbol}/zones/manual/{zone_id}")
-    def remove_manual_zone(symbol: str, zone_id: UUID):
-        owned = context.database.connection.execute(
-            """
-            select 1 from support_resistance_zones
-            where zone_id = ? and symbol = ? and source = 'manual'
-            """,
-            [zone_id, symbol],
-        ).fetchone()
-        if owned is None or not delete_manual_zone(context.database.connection, zone_id):
+    @app.delete("/api/symbols/{symbol}/zones/{zone_id}")
+    def remove_zone(symbol: str, zone_id: UUID):
+        if not delete_zone(context.database.connection, symbol, zone_id):
             return JSONResponse(
                 status_code=404,
-                content={"code": "zone_not_found", "message": "manual zone not found"},
+                content={"code": "zone_not_found", "message": "zone not found"},
             )
         return Response(status_code=204)
 

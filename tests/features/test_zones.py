@@ -216,12 +216,27 @@ def test_nearest_zones_converts_automatic_roles_but_preserves_manual_choice(
             ["00000000-0000-0000-0000-000000000003", as_of, "support", 10.9, 11, 11.1, "manual"],
         ],
     )
+    database.connection.executemany(
+        """
+        insert into zone_deletion_markers
+          (marker_id, symbol, timeframe, geometry, lower_price, center_price, upper_price)
+        values (?, '600001.SH', '1w', ?, ?, ?, ?)
+        """,
+        [
+            ["00000000-0000-0000-0000-000000000021", "horizontal", 11.9, 12, 12.1],
+            ["00000000-0000-0000-0000-000000000022", "trend", 10.9, 11, 11.1],
+        ],
+    )
 
     rows = nearest_zones(
         database.connection, "600001.SH", Timeframe.WEEK, as_of, limit_each=10
     )
     roles = {str(row["zone_id"]): row["zone_kind"] for row in rows}
+    reappeared = {str(row["zone_id"]): row["reappeared"] for row in rows}
 
     assert roles["00000000-0000-0000-0000-000000000001"] == "resistance"
     assert roles["00000000-0000-0000-0000-000000000002"] == "support"
     assert roles["00000000-0000-0000-0000-000000000003"] == "support"
+    assert reappeared["00000000-0000-0000-0000-000000000001"] is True
+    assert reappeared["00000000-0000-0000-0000-000000000002"] is False
+    assert reappeared["00000000-0000-0000-0000-000000000003"] is False

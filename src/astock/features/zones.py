@@ -342,11 +342,23 @@ def nearest_zones(
     )
     columns = [column[0] for column in cursor.description]
     rows = [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+    markers = connection.execute(
+        """
+        select geometry, lower_price, upper_price
+        from zone_deletion_markers
+        where symbol = ? and timeframe = ?
+        """,
+        [symbol, timeframe.value],
+    ).fetchall()
     for row in rows:
-        if row["source"] != "auto" or row["center_price"] == close_row[0]:
-            continue
-        row["zone_kind"] = (
-            "support" if row["center_price"] < close_row[0] else "resistance"
+        if row["source"] == "auto" and row["center_price"] != close_row[0]:
+            row["zone_kind"] = (
+                "support" if row["center_price"] < close_row[0] else "resistance"
+            )
+        row["reappeared"] = any(
+            geometry == row["geometry"]
+            and lower_price <= row["center_price"] <= upper_price
+            for geometry, lower_price, upper_price in markers
         )
     selected = []
     for kind in ("support", "resistance"):

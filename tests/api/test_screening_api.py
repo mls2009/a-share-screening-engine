@@ -235,10 +235,26 @@ def test_manual_zone_create_and_delete_api(tmp_path: Path) -> None:
     ).json()
     assert any(row["zone_id"] == zone_id for row in zones)
 
-    deleted = client.delete(f"/api/symbols/600001.SH/zones/manual/{zone_id}")
-    missing = client.delete(f"/api/symbols/600001.SH/zones/manual/{zone_id}")
+    deleted = client.delete(f"/api/symbols/600001.SH/zones/{zone_id}")
+    missing = client.delete(f"/api/symbols/600001.SH/zones/{zone_id}")
     assert deleted.status_code == 204
     assert missing.status_code == 404
+
+
+def test_automatic_zone_can_be_deleted_only_by_its_symbol(tmp_path: Path) -> None:
+    client, database = _client(tmp_path)
+    zone_id = database.connection.execute(
+        "select zone_id from support_resistance_zones where source = 'auto'"
+    ).fetchone()[0]
+
+    wrong_symbol = client.delete(f"/api/symbols/000001.SZ/zones/{zone_id}")
+    deleted = client.delete(f"/api/symbols/600001.SH/zones/{zone_id}")
+
+    assert wrong_symbol.status_code == 404
+    assert deleted.status_code == 204
+    assert database.connection.execute(
+        "select count(*) from zone_deletion_markers where symbol = '600001.SH'"
+    ).fetchone() == (1,)
 
 
 def test_api_serves_built_frontend_and_spa_routes(tmp_path: Path) -> None:
