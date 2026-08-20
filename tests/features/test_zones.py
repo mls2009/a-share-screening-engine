@@ -116,6 +116,40 @@ def test_detects_at_most_one_trend_line_per_direction_for_every_timeframe(
     assert len(trends) == 2
 
 
+def test_directional_trends_prefer_recent_valid_windows_over_older_touch_count() -> None:
+    frame = _frame(
+        [100 + index * 0.01 for index in range(40)],
+        lows={1: 95, 4: 96, 7: 97, 10: 98, 13: 99, 28: 94, 34: 98},
+        highs={
+            2: 105.2,
+            5: 104.2,
+            8: 103.2,
+            11: 102.2,
+            14: 101.2,
+            29: 106,
+            35: 102,
+        },
+    )
+
+    zones = detect_zones(
+        frame,
+        as_of=pd.Timestamp(frame.iloc[-1]["timestamp"]).date(),
+        timeframe=Timeframe.DAY,
+        pivot_order=1,
+    )
+    trends = [zone for zone in zones if zone.geometry == "trend"]
+    uptrends = [zone for zone in trends if zone.zone_kind == "uptrend"]
+    downtrends = [zone for zone in trends if zone.zone_kind == "downtrend"]
+
+    assert len(uptrends) == 1
+    assert uptrends[0].anchors[-1][0] == pd.Timestamp(frame.iloc[34]["timestamp"]).date()
+    assert uptrends[0].touches == 2
+    assert len(downtrends) == 1
+    assert downtrends[0].anchors[-1][0] == pd.Timestamp(frame.iloc[35]["timestamp"]).date()
+    assert downtrends[0].touches == 2
+    assert len(trends) == 2
+
+
 def test_nearly_horizontal_pivots_do_not_create_a_trend_line() -> None:
     frame = _frame(
         [11] * 10,
