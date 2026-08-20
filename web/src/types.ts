@@ -95,3 +95,47 @@ export interface PriceZone {
   touches: number;
   source: "auto" | "manual";
 }
+
+export interface BacktestMetrics {
+  total_return: number;
+  annualized_return: number;
+  max_drawdown: number;
+  sharpe_ratio: number;
+  win_rate: number;
+  profit_loss_ratio: number;
+  trade_count: number;
+  total_fees: number;
+}
+
+export interface BacktestTrade {
+  symbol: string;
+  side: "buy" | "sell";
+  signal_at: string;
+  timestamp: string;
+  quantity: number;
+  price: number;
+  gross: number;
+  commission: number;
+  tax: number;
+  transfer_fee: number;
+  reason: string;
+}
+
+export interface EquityPoint {
+  timestamp: string;
+  cash: number;
+  market_value: number;
+  equity: number;
+  drawdown: number;
+}
+
+export interface BacktestRun {
+  run_id: string;
+  result: {
+    request: { symbols: string[]; [key: string]: unknown };
+    metrics: BacktestMetrics;
+    trades: BacktestTrade[];
+    equity_curve: EquityPoint[];
+    rejected_orders: string[];
+  };
+}

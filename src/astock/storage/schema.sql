@@ -220,3 +220,38 @@ create table if not exists screen_matches (
   created_at timestamp not null default current_timestamp,
   primary key(run_id, symbol)
 );
+
+create table if not exists backtest_runs (
+  run_id uuid primary key,
+  status varchar not null,
+  request json not null,
+  metrics json not null,
+  result json not null,
+  created_at timestamp not null default current_timestamp,
+  finished_at timestamp
+);
+
+create table if not exists backtest_trades (
+  run_id uuid not null,
+  sequence integer not null,
+  symbol varchar not null,
+  side varchar not null,
+  signal_at timestamp not null,
+  executed_at timestamp not null,
+  quantity integer not null,
+  price double not null,
+  gross double not null,
+  fees double not null,
+  reason varchar not null,
+  primary key(run_id, sequence)
+);
+
+create table if not exists backtest_equity (
+  run_id uuid not null,
+  timestamp timestamp not null,
+  cash double not null,
+  market_value double not null,
+  equity double not null,
+  drawdown double not null,
+  primary key(run_id, timestamp)
+);

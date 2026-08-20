@@ -10,6 +10,7 @@ import { lazy, Suspense, useState } from "react";
 import { ScreenerPage } from "./features/screener/ScreenerPage";
 
 const ChartPage = lazy(() => import("./features/chart/ChartPage").then((module) => ({ default: module.ChartPage })));
+const BacktestPage = lazy(() => import("./features/backtest/BacktestPage").then((module) => ({ default: module.BacktestPage })));
 
 type Page = "screener" | "chart" | "backtest" | "monitor";
 
@@ -20,7 +21,7 @@ const pages = [
   { id: "monitor" as const, label: "实时监控", icon: BellRing },
 ];
 
-function Placeholder({ page }: { page: "backtest" | "monitor" }) {
+function Placeholder({ page }: { page: "monitor" }) {
   const title = pages.find((item) => item.id === page)?.label ?? "";
   return (
     <main className="empty-page">
@@ -67,6 +68,10 @@ export function App() {
       ) : page === "chart" ? (
         <Suspense fallback={<main className="empty-page"><p className="eyebrow">LOADING CHART DESK</p></main>}>
           <ChartPage initialSymbol={chartSymbol} />
+        </Suspense>
+      ) : page === "backtest" ? (
+        <Suspense fallback={<main className="empty-page"><p className="eyebrow">LOADING BACKTEST ENGINE</p></main>}>
+          <BacktestPage />
         </Suspense>
       ) : (
         <Placeholder page={page} />

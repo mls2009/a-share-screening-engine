@@ -10,6 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from astock.api.dependencies import ApiContext
+from astock.backtest.models import BacktestRequest
+from astock.backtest.service import BacktestDataError, BacktestService
 from astock.config import Settings
 from astock.data.market_sync import MarketSyncService
 from astock.data.providers.routing import build_default_market_providers
@@ -213,6 +215,32 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
                 content={"code": "zone_not_found", "message": "manual zone not found"},
             )
         return Response(status_code=204)
+
+    @app.post("/api/backtests/run")
+    def run_backtest(request: BacktestRequest):
+        service = BacktestService(context.database, context.bar_store)
+        try:
+            run = service.run(request)
+        except BacktestDataError as error:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "code": "missing_backtest_data",
+                    "message": "本地数据库缺少回测行情，请先同步对应股票和周期",
+                    "symbols": error.symbols,
+                },
+            )
+        return jsonable_encoder(run)
+
+    @app.get("/api/backtests/{run_id}")
+    def backtest_result(run_id: UUID):
+        run = BacktestService(context.database, context.bar_store).get(run_id)
+        if run is None:
+            return JSONResponse(
+                status_code=404,
+                content={"code": "run_not_found", "message": "backtest run not found"},
+            )
+        return jsonable_encoder(run)
 
     resolved_frontend = frontend_dir or Path(__file__).resolve().parents[3] / "web" / "dist"
     index_file = resolved_frontend / "index.html"

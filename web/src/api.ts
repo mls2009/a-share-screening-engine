@@ -1,4 +1,4 @@
-import type { Bar, MetricSpec, PriceZone, ScreenRunResult, Timeframe } from "./types";
+import type { BacktestRun, Bar, MetricSpec, PriceZone, ScreenRunResult, Timeframe } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -36,5 +36,10 @@ export const api = {
   deleteManualZone: (symbol: string, zoneId: string) =>
     request<void>(`/api/symbols/${encodeURIComponent(symbol)}/zones/manual/${zoneId}`, {
       method: "DELETE",
+    }),
+  runBacktest: (payload: object) =>
+    request<BacktestRun>("/api/backtests/run", {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
 };

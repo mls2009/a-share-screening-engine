@@ -254,3 +254,45 @@ def test_api_serves_built_frontend_and_spa_routes(tmp_path: Path) -> None:
     assert "ASTOCK WORKBENCH" in spa.get("/chart/600001.SH").text
     assert "console.log" in spa.get("/assets/app.js").text
     database.connection.close()
+
+
+def test_backtest_run_and_result_endpoints(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    payload = {
+        "symbols": ["600001.SH"],
+        "timeframe": "1d",
+        "start": "2026-08-01",
+        "end": "2026-08-20",
+        "entry_tree": CONDITION,
+        "exit_tree": CONDITION,
+        "initial_cash": 100000,
+        "position_size": 1,
+        "mode": "simple",
+        "adjustment": "qfq",
+    }
+
+    created = client.post("/api/backtests/run", json=payload)
+
+    assert created.status_code == 200
+    run_id = created.json()["run_id"]
+    stored = client.get(f"/api/backtests/{run_id}")
+    assert stored.status_code == 200
+    assert stored.json()["result"]["request"]["symbols"] == ["600001.SH"]
+
+
+def test_backtest_endpoint_reports_missing_local_history(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    payload = {
+        "symbols": ["000001.SZ"],
+        "timeframe": "1d",
+        "start": "2026-08-01",
+        "end": "2026-08-20",
+        "entry_tree": CONDITION,
+        "exit_tree": CONDITION,
+        "initial_cash": 100000,
+    }
+
+    response = client.post("/api/backtests/run", json=payload)
+
+    assert response.status_code == 422
+    assert response.json()["symbols"] == ["000001.SZ"]
