@@ -17,6 +17,7 @@ describe("App", () => {
   it("可以切换到 K 线研究页", async () => {
     render(<App />);
     await userEvent.click(screen.getByRole("button", { name: "K 线研究" }));
-    expect(screen.getByRole("heading", { name: "K 线研究" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "K 线研究" })).toBeInTheDocument();
+    expect(await screen.findByLabelText("证券代码")).toHaveValue("600519.SH");
   });
 });

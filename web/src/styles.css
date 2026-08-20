@@ -70,6 +70,69 @@ h1 { margin: 0; font-size: clamp(34px, 4.5vw, 66px); line-height: .96; letter-sp
   .shell-grid { grid-template-columns: 1fr; }
 }
 
+/* Chart desk: a drafting table for price structure, not a generic dashboard card. */
+.chart-page { min-width: 0; padding: 34px clamp(22px, 3.2vw, 54px) 70px; }
+.chart-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.chart-heading h1 { font-size: clamp(34px, 3.7vw, 54px); }
+.chart-heading form { height: 36px; display: flex; align-items: center; border: 1px solid #374044; background: #0d1012; }
+.chart-heading form svg { margin-left: 10px; color: var(--muted); }
+.chart-heading form input { width: 155px; border: 0; box-shadow: none; font: 500 12px "IBM Plex Mono", monospace; }
+.chart-heading form button { align-self: stretch; border: 0; border-left: 1px solid #374044; padding: 0 13px; background: #171c1e; color: var(--paper); cursor: pointer; }
+.chart-desk, .zone-ledger { margin-top: 16px; border: 1px solid var(--line); background: #0e1113; }
+.chart-topline { height: 52px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+.chart-topline > div:first-child { display: flex; align-items: baseline; gap: 14px; }
+.chart-topline strong { font: 600 13px "IBM Plex Mono", monospace; letter-spacing: .06em; }
+.chart-topline span { color: var(--paper); font: 500 18px "IBM Plex Mono", monospace; }
+.timeframe-toolbar { display: flex; align-items: center; gap: 2px; }
+.timeframe-toolbar button { width: 42px; height: 28px; border: 0; background: transparent; color: #7d888d; font: 500 10px "IBM Plex Mono", monospace; cursor: pointer; }
+.timeframe-toolbar button:hover { color: var(--paper); background: #171c1e; }
+.timeframe-toolbar button.active { color: #101314; background: var(--signal); }
+.drawing-toolbar { min-height: 47px; padding: 8px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; background: #111517; }
+.drawing-kinds, .geometry-kinds { display: flex; gap: 5px; }
+.drawing-toolbar button { height: 29px; border: 1px solid #343d41; background: #0e1113; color: #909a9e; padding: 0 9px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 10px; }
+.drawing-kinds button span { width: 13px; height: 2px; background: currentColor; }
+.drawing-kinds .support { color: #279f62; }
+.drawing-kinds .resistance { color: #bd4c57; }
+.drawing-kinds .support.active { border-color: var(--support); color: var(--support); background: rgba(46, 207, 121, .08); }
+.drawing-kinds .resistance.active { border-color: var(--resistance); color: var(--resistance); background: rgba(255, 90, 103, .08); }
+.geometry-kinds button.active { color: var(--paper); border-color: #758187; }
+.drawing-toolbar p { margin: 0 auto 0 4px; color: var(--signal); font-size: 10px; }
+.drawing-toolbar .cancel-drawing { color: #8f666a; }
+.chart-canvas-wrap { position: relative; min-height: 560px; }
+.stock-chart { width: 100%; height: 560px; cursor: crosshair; }
+.stock-chart:not(.drawing) { cursor: default; }
+.chart-loading { min-height: 560px; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+.zone-ledger .section-title p { margin: 0; display: flex; align-items: center; gap: 7px; color: var(--muted); letter-spacing: 0; }
+.support-dot, .resistance-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--support); }
+.resistance-dot { background: var(--resistance); margin-left: 6px; }
+.auto-line, .manual-line { display: inline-block; width: 20px; border-top: 1px dashed #8d989c; margin-left: 6px; }
+.manual-line { border-top-style: solid; border-top-width: 2px; }
+.zone-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 1px; background: var(--line); }
+.zone-list > div:not(.result-empty) { position: relative; min-height: 82px; background: #111517; padding: 14px 44px 12px 15px; border-left: 2px solid var(--support); display: grid; gap: 5px; }
+.zone-list > div.resistance { border-left-color: var(--resistance); }
+.zone-list span { color: #99a2a5; font-size: 10px; }
+.zone-list b { font: 500 13px "IBM Plex Mono", monospace; }
+.zone-list small { color: #687378; font-size: 9px; }
+.zone-list button { position: absolute; right: 10px; top: 10px; width: 28px; height: 28px; border: 1px solid #343d41; background: transparent; color: #875d62; display: grid; place-items: center; cursor: pointer; }
+.zone-list button:hover { color: var(--resistance); border-color: var(--resistance); }
+
+@media (max-width: 900px) {
+  .chart-heading { align-items: flex-start; flex-direction: column; }
+  .chart-topline { height: auto; min-height: 86px; align-items: flex-start; flex-direction: column; justify-content: center; gap: 10px; }
+  .timeframe-toolbar { width: 100%; overflow-x: auto; }
+  .drawing-toolbar { align-items: flex-start; flex-wrap: wrap; }
+  .drawing-toolbar p { flex-basis: 100%; order: 5; }
+}
+
+@media (max-width: 760px) {
+  .chart-page { padding: 26px 12px; }
+  .chart-heading form { width: 100%; }
+  .chart-heading form input { flex: 1; }
+  .stock-chart, .chart-loading, .chart-canvas-wrap { min-height: 440px; height: 440px; }
+  .drawing-kinds, .geometry-kinds { width: 100%; }
+  .drawing-kinds button, .geometry-kinds button { flex: 1; justify-content: center; }
+}
+
 /* Screener: dense, explicit and inspectable like an exchange blotter. */
 .screener-page { min-width: 0; padding: 34px clamp(22px, 3.2vw, 54px) 70px; }
 .compact-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }

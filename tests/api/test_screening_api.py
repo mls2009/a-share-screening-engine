@@ -239,3 +239,18 @@ def test_manual_zone_create_and_delete_api(tmp_path: Path) -> None:
     missing = client.delete(f"/api/symbols/600001.SH/zones/manual/{zone_id}")
     assert deleted.status_code == 204
     assert missing.status_code == 404
+
+
+def test_api_serves_built_frontend_and_spa_routes(tmp_path: Path) -> None:
+    client, database = _client(tmp_path)
+    frontend = tmp_path / "dist"
+    (frontend / "assets").mkdir(parents=True)
+    (frontend / "index.html").write_text("<html><body>ASTOCK WORKBENCH</body></html>")
+    (frontend / "assets" / "app.js").write_text("console.log('astock')")
+    context = client.app.state.context
+    spa = TestClient(create_app(context, frontend_dir=frontend))
+
+    assert "ASTOCK WORKBENCH" in spa.get("/").text
+    assert "ASTOCK WORKBENCH" in spa.get("/chart/600001.SH").text
+    assert "console.log" in spa.get("/assets/app.js").text
+    database.connection.close()

@@ -1,10 +1,12 @@
 from datetime import date
+from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
 from fastapi import FastAPI, Query, Response
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from astock.api.dependencies import ApiContext
@@ -70,8 +72,9 @@ def _run_response(result: object) -> dict:
     }
 
 
-def create_app(context: ApiContext) -> FastAPI:
+def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="AStock Internal API", version="0.1.0")
+    app.state.context = context
 
     @app.get("/api/catalog")
     def catalog() -> list[dict]:
@@ -210,6 +213,22 @@ def create_app(context: ApiContext) -> FastAPI:
                 content={"code": "zone_not_found", "message": "manual zone not found"},
             )
         return Response(status_code=204)
+
+    resolved_frontend = frontend_dir or Path(__file__).resolve().parents[3] / "web" / "dist"
+    index_file = resolved_frontend / "index.html"
+    assets_dir = resolved_frontend / "assets"
+    if index_file.is_file():
+        if assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
+        @app.get("/{spa_path:path}", include_in_schema=False)
+        def frontend(spa_path: str):
+            if spa_path.startswith("api/"):
+                return JSONResponse(
+                    status_code=404,
+                    content={"code": "api_not_found", "message": "API route not found"},
+                )
+            return FileResponse(index_file)
 
     return app
 

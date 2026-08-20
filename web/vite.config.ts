@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [react()],
+  build: { chunkSizeWarningLimit: 700 },
   server: {
     host: "127.0.0.1",
     port: 5173,
@@ -13,5 +14,6 @@ export default defineConfig({
     setupFiles: "./src/test/setup.ts",
     css: true,
     globals: true,
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
   },
 });

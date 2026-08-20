@@ -5,9 +5,11 @@ import {
   FlaskConical,
   ScanSearch,
 } from "lucide-react";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 
 import { ScreenerPage } from "./features/screener/ScreenerPage";
+
+const ChartPage = lazy(() => import("./features/chart/ChartPage").then((module) => ({ default: module.ChartPage })));
 
 type Page = "screener" | "chart" | "backtest" | "monitor";
 
@@ -18,7 +20,7 @@ const pages = [
   { id: "monitor" as const, label: "实时监控", icon: BellRing },
 ];
 
-function Placeholder({ page }: { page: Exclude<Page, "screener"> }) {
+function Placeholder({ page }: { page: "backtest" | "monitor" }) {
   const title = pages.find((item) => item.id === page)?.label ?? "";
   return (
     <main className="empty-page">
@@ -62,8 +64,12 @@ export function App() {
       </aside>
       {page === "screener" ? (
         <ScreenerPage onOpenChart={(symbol) => { setChartSymbol(symbol); setPage("chart"); }} />
+      ) : page === "chart" ? (
+        <Suspense fallback={<main className="empty-page"><p className="eyebrow">LOADING CHART DESK</p></main>}>
+          <ChartPage initialSymbol={chartSymbol} />
+        </Suspense>
       ) : (
-        <Placeholder page={page} key={page === "chart" ? chartSymbol : page} />
+        <Placeholder page={page} />
       )}
     </div>
   );
