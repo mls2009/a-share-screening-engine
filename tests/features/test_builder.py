@@ -58,6 +58,9 @@ def test_builder_persists_idempotent_daily_weekly_monthly_features(tmp_path: Pat
     assert counts["1d"] == 40
     assert counts["1w"] > 1
     assert counts["1mo"] == 2
+    assert database.connection.execute(
+        "select count(*) from pattern_events where symbol = '600000.SH'"
+    ).fetchone()[0] > 0
     assert latest is not None
     assert latest["listing_trade_days"] == 40
     assert latest["is_new"] is False

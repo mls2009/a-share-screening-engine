@@ -5,6 +5,7 @@ import pandas as pd
 
 from astock.data.aggregate import aggregate_daily
 from astock.domain.market import Adjustment, Bar, Timeframe
+from astock.features.patterns import detect_patterns, persist_pattern_events
 from astock.features.store import MarketFeatureStore
 from astock.features.technical import compute_technical_features
 from astock.storage.bars import BarStore
@@ -71,3 +72,9 @@ class FeatureBuilder:
             features["is_new"] = features["listing_trade_days"] <= 30
             features["is_secondary_new"] = features["listing_trade_days"].between(31, 250)
             self.feature_store.upsert(symbol, timeframe, features)
+            persist_pattern_events(
+                self.connection,
+                symbol,
+                timeframe,
+                detect_patterns(frame),
+            )
