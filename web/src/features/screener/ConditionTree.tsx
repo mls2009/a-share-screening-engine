@@ -163,7 +163,7 @@ function ConditionRow({
   const periods = familyMetrics.filter((metric) => metric.period != null).sort((a, b) => Number(a.period) - Number(b.period));
   const metricPeers = catalog.filter((metric) => metric.unit === spec.unit);
   const metricOperand = node.right.kind === "metric" ? node.right : null;
-  const directionalOperators = new Set(["gte", "lte", "between", "not_between"]);
+  const directionalOperators = new Set(["gt", "gte", "between"]);
   const operators = node.direction
     ? spec.operators.filter((operator) => directionalOperators.has(operator))
     : spec.operators;
@@ -229,7 +229,15 @@ function ConditionRow({
           ><option value="constant">固定值</option><option value="metric">另一指标</option></select>}
           {node.right.kind === "constant" ? (
             <label className="value-field">
-              <input aria-label="比较值" value={node.right.value} placeholder={node.operator.includes("between") ? "10, 30" : "0"} onChange={(event) => onUpdate({ ...node, right: { kind: "constant", value: event.target.value } })} />
+              <input
+                aria-label="比较值"
+                type={node.direction && !node.operator.includes("between") ? "number" : undefined}
+                min={node.direction ? "0" : undefined}
+                step={node.direction ? "any" : undefined}
+                value={node.right.value}
+                placeholder={node.operator.includes("between") ? "10, 30" : "0"}
+                onChange={(event) => onUpdate({ ...node, right: { kind: "constant", value: event.target.value } })}
+              />
               <span>{unitLabels[spec.unit]}</span>
             </label>
           ) : metricOperand ? (

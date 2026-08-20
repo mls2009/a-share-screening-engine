@@ -3,6 +3,7 @@ import { createCondition, toApiNode } from "./treeModel";
 
 const metrics: MetricSpec[] = [
   { key: "return_20", label: "价格涨跌", unit: "percent", timeframes: ["1d"], operators: ["gte", "between"], group: "price", family: "price_change", period: 20, directions: [{ value: "rise", label: "上涨幅度" }, { value: "fall", label: "下跌幅度" }] },
+  { key: "volume_change_20", label: "成交量增减", unit: "percent", timeframes: ["1d"], operators: ["gte", "between"], group: "activity", family: "volume_change", period: 20, directions: [{ value: "increase", label: "成交量增加" }, { value: "decrease", label: "成交量减少" }] },
   { key: "board", label: "所属板块", unit: "category", timeframes: ["1d"], operators: ["in", "not_in"], group: "attributes", family: "board", choices: [{ value: "main", label: "主板" }, { value: "chinext", label: "创业板" }], multiple: true },
   { key: "is_new", label: "新股", unit: "boolean", timeframes: ["1d"], operators: ["eq"] },
 ];
@@ -41,6 +42,52 @@ it("把下跌幅度的正数输入转换为负数底层条件", () => {
     operator: "between",
     right: { value: [-30, -10], unit: "percent" },
   });
+});
+
+it("把成交量减少的正数输入转换为负数底层条件", () => {
+  const decrease = {
+    ...createCondition("volume_change_20"),
+    direction: "decrease" as const,
+    operator: "gte",
+    right: { kind: "constant" as const, value: "30" },
+  };
+
+  expect(toApiNode(decrease, metrics)).toMatchObject({
+    metric: "volume_change_20",
+    operator: "lte",
+    right: { value: -30, unit: "percent" },
+  });
+});
+
+it.each(["-30", "0", "abc"])("拒绝无效的方向幅度输入 %s", (value) => {
+  const condition = {
+    ...createCondition(),
+    direction: "fall" as const,
+    right: { kind: "constant" as const, value },
+  };
+
+  expect(() => toApiNode(condition, metrics)).toThrow("幅度必须是大于 0 的数字");
+});
+
+it("拒绝倒序的方向幅度区间", () => {
+  const condition = {
+    ...createCondition(),
+    direction: "rise" as const,
+    operator: "between",
+    right: { kind: "constant" as const, value: "30, 10" },
+  };
+
+  expect(() => toApiNode(condition, metrics)).toThrow("幅度区间必须从小到大填写");
+});
+
+it("拒绝会混入反方向结果的操作符", () => {
+  const condition = {
+    ...createCondition(),
+    direction: "fall" as const,
+    operator: "lte",
+  };
+
+  expect(() => toApiNode(condition, metrics)).toThrow("方向条件只支持大于、至少或介于");
 });
 
 it("把多选枚举转换为包含条件", () => {

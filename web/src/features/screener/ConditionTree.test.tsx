@@ -8,8 +8,8 @@ import { createGroup } from "./treeModel";
 
 const directions = [{ value: "rise", label: "上涨幅度" }, { value: "fall", label: "下跌幅度" }];
 const catalog: MetricSpec[] = [
-  { key: "return_5", label: "价格涨跌", unit: "percent", timeframes: ["1d"], operators: ["gte", "lte", "between"], group: "price", family: "price_change", period: 5, directions },
-  { key: "return_20", label: "价格涨跌", unit: "percent", timeframes: ["1d"], operators: ["gte", "lte", "between"], group: "price", family: "price_change", period: 20, directions },
+  { key: "return_5", label: "价格涨跌", unit: "percent", timeframes: ["1d"], operators: ["gt", "gte", "lte", "between", "not_between"], group: "price", family: "price_change", period: 5, directions },
+  { key: "return_20", label: "价格涨跌", unit: "percent", timeframes: ["1d"], operators: ["gt", "gte", "lte", "between", "not_between"], group: "price", family: "price_change", period: 20, directions },
   { key: "volume", label: "成交量", unit: "shares", timeframes: ["15m", "1d", "1w"], operators: ["gt"], group: "activity", family: "volume" },
   { key: "board", label: "所属板块", unit: "category", timeframes: ["1d"], operators: ["in", "not_in"], group: "attributes", family: "board", multiple: true, choices: [{ value: "main", label: "主板" }, { value: "chinext", label: "创业板" }, { value: "star", label: "科创板" }] },
   { key: "is_new", label: "新股（旧条件）", unit: "boolean", timeframes: ["1d"], operators: ["eq"], group: "attributes", family: "is_new", visible: false },
@@ -46,6 +46,11 @@ describe("ConditionTree", () => {
 
     expect(screen.getByLabelText("指标")).toHaveValue("price_change:fall");
     expect(screen.getByLabelText("计算周期")).toHaveValue("5");
+    expect(screen.getByRole("option", { name: "大于" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "至少" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "介于" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "至多" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "不介于" })).not.toBeInTheDocument();
   });
 
   it("切换分类后只显示该类条件并保留兼容 K 线周期", async () => {
