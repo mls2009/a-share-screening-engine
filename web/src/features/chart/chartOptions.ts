@@ -95,7 +95,7 @@ function zoneSeries(zone: PriceZone, bars: Bar[]): LineSeriesOption {
     type: "line",
     yAxisIndex: 0,
     symbol: "none",
-    silent: true,
+    silent: zone.source === "manual",
     lineStyle: { color: style.color, type: style.lineType, width, opacity: 1 },
     emphasis: { disabled: true },
     z: zone.source === "manual" ? 8 : 5,
@@ -107,6 +107,9 @@ function zoneSeries(zone: PriceZone, bars: Bar[]): LineSeriesOption {
       ...base,
       ...(zone.source === "auto" ? {
         silent: false,
+        symbol: "circle",
+        symbolSize: 1,
+        itemStyle: { opacity: 0 },
         triggerEvent: "line" as const,
         tooltip: {
           show: true,

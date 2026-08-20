@@ -99,6 +99,7 @@ it("自动水平线只在直接悬停时显示中心价，手动水平线保持�
 
   expect(option.tooltip).toMatchObject({ trigger: "axis" });
   expect(support.markArea).toBeUndefined();
+  expect(support.silent).toBe(false);
   expect(supportLine.data).toEqual([{ yAxis: 9.8 }]);
   expect(supportLine.silent).toBe(false);
   expect(supportLine.label).toMatchObject({ show: false });

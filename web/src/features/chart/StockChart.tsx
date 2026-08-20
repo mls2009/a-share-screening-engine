@@ -35,6 +35,29 @@ export interface StockChartProps {
   onAnchor?: (anchor: DrawingAnchor) => void;
 }
 
+type ChartLinePointerParams = {
+  seriesType?: unknown;
+  selfType?: unknown;
+  seriesIndex?: unknown;
+  event?: {
+    offsetX?: unknown;
+    offsetY?: unknown;
+  };
+};
+
+function linePointerParams(params: unknown): ChartLinePointerParams | undefined {
+  if (typeof params !== "object" || params === null) return undefined;
+  const candidate = params as ChartLinePointerParams;
+  if (
+    candidate.seriesType !== "line"
+    || candidate.selfType !== "line"
+    || typeof candidate.seriesIndex !== "number"
+    || !Number.isInteger(candidate.seriesIndex)
+    || candidate.seriesIndex < 0
+  ) return undefined;
+  return candidate;
+}
+
 export function StockChart({ bars, zones, drawing = false, onAnchor }: StockChartProps) {
   const element = useRef<HTMLDivElement>(null);
   const anchorCallback = useRef(onAnchor);
@@ -54,9 +77,40 @@ export function StockChart({ bars, zones, drawing = false, onAnchor }: StockChar
       const bar = bars[index];
       if (bar) anchorCallback.current({ date: bar.timestamp.slice(0, 10), price: Number(Number(point[1]).toFixed(3)) });
     };
+    const showLineTooltip = (params: unknown) => {
+      const line = linePointerParams(params);
+      if (!line) return;
+      const offsetX = line.event?.offsetX;
+      const offsetY = line.event?.offsetY;
+      if (
+        bars.length === 0
+        || typeof offsetX !== "number"
+        || !Number.isFinite(offsetX)
+        || typeof offsetY !== "number"
+        || !Number.isFinite(offsetY)
+      ) return;
+      const point = chart.convertFromPixel({ gridIndex: 0 }, [offsetX, offsetY]);
+      if (
+        !Array.isArray(point)
+        || typeof point[0] !== "number"
+        || !Number.isFinite(point[0])
+        || typeof point[1] !== "number"
+        || !Number.isFinite(point[1])
+      ) return;
+      const dataIndex = Math.max(0, Math.min(bars.length - 1, Math.round(point[0])));
+      chart.dispatchAction({ type: "showTip", seriesIndex: line.seriesIndex, dataIndex });
+    };
+    const hideLineTooltip = (params: unknown) => {
+      if (!linePointerParams(params)) return;
+      chart.dispatchAction({ type: "hideTip" });
+    };
     chart.getZr().on("click", click);
+    chart.on("mousemove", showLineTooltip);
+    chart.on("mouseout", hideLineTooltip);
     return () => {
       chart.getZr().off("click", click);
+      chart.off("mousemove", showLineTooltip);
+      chart.off("mouseout", hideLineTooltip);
       window.removeEventListener("resize", resize);
       chart.dispose();
     };
