@@ -344,7 +344,54 @@ git add web/src/features/chart/chartOptions.ts web/src/features/chart/chartOptio
 git commit -m "feat: reveal automatic line values on hover"
 ```
 
-### Task 5: Rebuild real chart data, document behavior, and verify end to end
+### Task 5: Build automatic trends for the requested chart timeframe
+
+**Files:**
+- Modify: `src/astock/features/builder.py`
+- Modify: `src/astock/features/zones.py`
+- Modify: `src/astock/api/app.py`
+- Test: `tests/features/test_builder.py`
+- Test: `tests/api/test_screening_api.py`
+
+- [ ] **Step 1: Write failing minute-timeframe API tests**
+
+Store final 5-minute bars containing valid rising and falling pivot windows, request `15m` zones, and assert the endpoint derives 15-minute bars, persists one automatic `uptrend` and one automatic `downtrend`, and returns them without requiring a pre-existing `market_features.close`. Request the endpoint a second time and assert the same automatic batch and zone ids are reused instead of rebuilt.
+
+- [ ] **Step 2: Run focused tests and verify RED**
+
+Run:
+
+```bash
+uv run pytest tests/features/test_builder.py tests/api/test_screening_api.py -k "requested_timeframe or minute_chart" -q
+```
+
+Expected: FAIL because the chart endpoint only reads previously persisted zones and the builder has no timeframe-specific zone method.
+
+- [ ] **Step 3: Add incremental chart-timeframe zone building**
+
+Add a `FeatureBuilder.ensure_chart_zones(symbol, timeframe, as_of)` method that reads QFQ daily bars for daily/weekly/monthly or base 5-minute bars for minute timeframes, derives the requested aggregate with `MarketDataService.derive`, and returns the latest completed bar close. Only call `replace_auto_zones()` when the requested timeframe has no automatic batch or its latest `as_of_date` is older than the latest completed bar, so repeated GET requests are stable.
+
+Allow `chart_zones()` to accept that latest-bar close as an optional override for horizontal distance and role conversion; keep `nearest_zones()` unchanged for screening. In the zones endpoint, call `ensure_chart_zones()` before `chart_zones()`. If no bars exist, preserve current manual-line behavior and return no new automatic lines.
+
+- [ ] **Step 4: Run focused tests and verify GREEN**
+
+Run:
+
+```bash
+uv run pytest tests/features/test_builder.py tests/api/test_screening_api.py tests/features/test_zones.py -q
+uv run ruff check src/astock/features/builder.py src/astock/features/zones.py src/astock/api/app.py tests/features/test_builder.py tests/api/test_screening_api.py
+```
+
+Expected: focused tests pass and Ruff reports no errors.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/astock/features/builder.py src/astock/features/zones.py src/astock/api/app.py tests/features/test_builder.py tests/api/test_screening_api.py
+git commit -m "feat: build trends for chart timeframes"
+```
+
+### Task 6: Rebuild real chart data, document behavior, and verify end to end
 
 **Files:**
 - Modify: `README.md`
