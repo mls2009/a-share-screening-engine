@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
+import pandas as pd
 from fastapi import FastAPI, Query, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse
@@ -20,6 +21,7 @@ from astock.data.service import MarketDataService
 from astock.domain.market import Adjustment, Timeframe
 from astock.features.builder import FeatureBuilder, chart_base_timeframe
 from astock.features.store import MarketFeatureStore
+from astock.features.technical import compute_technical_features
 from astock.features.zones import (
     ManualZoneInput,
     chart_zones,
@@ -253,6 +255,57 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
                 "instrument_type": row[3],
             }
             for row in rows
+        ]
+
+    @app.get("/api/symbols/{symbol}/indicators")
+    def symbol_indicators(
+        symbol: str,
+        timeframe: Timeframe,
+        start: date,
+        end: date,
+    ) -> list[dict]:
+        base = chart_base_timeframe(timeframe)
+        source = [
+            bar
+            for bar in context.bar_store.read(symbol, base, Adjustment.QFQ)
+            if bar.timestamp.date() <= end and bar.is_final
+        ]
+        bars = source if timeframe == base else MarketDataService.derive(source, timeframe)
+        if not bars:
+            return []
+        frame = pd.DataFrame(
+            [
+                {
+                    "timestamp": bar.timestamp,
+                    "open": bar.open,
+                    "high": bar.high,
+                    "low": bar.low,
+                    "close": bar.close,
+                    "volume_shares": bar.volume_shares,
+                    "amount_cny": bar.amount_cny,
+                }
+                for bar in bars
+            ]
+        )
+        fields = (
+            "ma_5", "ma_10", "ma_20", "boll_upper", "boll_middle",
+            "boll_lower", "macd", "macd_signal", "macd_hist", "kdj_k",
+            "kdj_d", "kdj_j", "rsi_14", "volume_ma_5", "volume_ma_20",
+            "obv", "atr_14",
+        )
+        features = compute_technical_features(frame)
+        visible = features[
+            features["timestamp"].dt.date.between(start, end)
+        ]
+        return [
+            {
+                "timestamp": row["timestamp"],
+                **{
+                    field: None if pd.isna(row[field]) else float(row[field])
+                    for field in fields
+                },
+            }
+            for _, row in visible.iterrows()
         ]
 
     @app.get("/api/symbols/{symbol}/bars")

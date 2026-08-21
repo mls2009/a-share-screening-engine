@@ -1,4 +1,4 @@
-import type { BacktestRun, Bar, MetricSpec, MonitorSignal, MonitorStatus, MonitorTask, PriceZone, ScreenRunResult, SymbolSearchResult, Timeframe } from "./types";
+import type { BacktestRun, Bar, ChartIndicatorPoint, MetricSpec, MonitorSignal, MonitorStatus, MonitorTask, PriceZone, ScreenRunResult, SymbolSearchResult, Timeframe } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -35,6 +35,10 @@ export const api = {
   bars: (symbol: string, timeframe: Timeframe, start: string, end: string) =>
     request<Bar[]>(
       `/api/symbols/${encodeURIComponent(symbol)}/bars?${new URLSearchParams({ timeframe, start, end })}`,
+    ),
+  indicators: (symbol: string, timeframe: Timeframe, start: string, end: string) =>
+    request<ChartIndicatorPoint[]>(
+      `/api/symbols/${encodeURIComponent(symbol)}/indicators?${new URLSearchParams({ timeframe, start, end })}`,
     ),
   zones: (symbol: string, timeframe: Timeframe, asOf: string) =>
     request<PriceZone[]>(

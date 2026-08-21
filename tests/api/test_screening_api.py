@@ -211,6 +211,44 @@ def test_symbol_search_treats_wildcards_literally_and_blank_as_empty(
     assert client.get("/api/symbols/search", params={"q": "%"}).json() == []
 
 
+def test_chart_indicators_use_history_before_visible_window(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    bar_store = BarStore(tmp_path / "bars")
+    history = [
+        Bar(
+            symbol="600001.SH",
+            timestamp=datetime(2026, 7, day, 15, tzinfo=ZoneInfo("Asia/Shanghai")),
+            timeframe=Timeframe.DAY,
+            open=day,
+            high=day + 1,
+            low=day - 1,
+            close=day,
+            volume_shares=day * 100,
+            amount_cny=day * 1_000,
+            adjustment=Adjustment.QFQ,
+            source="test",
+        )
+        for day in range(1, 26)
+    ]
+    bar_store.upsert(history)
+
+    response = client.get(
+        "/api/symbols/600001.SH/indicators",
+        params={"timeframe": "1d", "start": "2026-07-25", "end": "2026-07-25"},
+    )
+
+    assert response.status_code == 200
+    result = response.json()[0]
+    assert result["timestamp"] == "2026-07-25T15:00:00+08:00"
+    assert result["ma_5"] == 23.0
+    assert result["ma_10"] == 20.5
+    assert result["ma_20"] == 15.5
+    assert result["boll_middle"] == 15.5
+    assert result["rsi_14"] == 100.0
+    assert result["volume_ma_20"] == 1550.0
+    assert result["atr_14"] == 2.0
+
+
 def test_screen_run_and_saved_results_report_total_matches_with_pagination(
     tmp_path: Path,
 ) -> None:

@@ -35,3 +35,19 @@ it("按代码或中文名称搜索证券", async () => {
     "/api/symbols/search?q=%E5%88%9B%E4%B8%9A%E6%9D%BF+ETF",
   );
 });
+
+it("K线页面按当前周期读取技术指标", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  await api.indicators("600519.SH", "1d", "2026-01-01", "2026-08-21");
+
+  expect(fetchMock.mock.calls[0][0]).toBe(
+    "/api/symbols/600519.SH/indicators?timeframe=1d&start=2026-01-01&end=2026-08-21",
+  );
+});

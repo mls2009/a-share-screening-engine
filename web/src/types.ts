@@ -14,7 +14,7 @@ export interface MetricSpec {
   operators: string[];
   group?: string;
   family?: string;
-  period?: number | null;
+  period?: number | "history" | null;
   directions?: MetricChoice[];
   choices?: MetricChoice[];
   multiple?: boolean;
@@ -92,6 +92,29 @@ export interface Bar {
   close: number;
   volume_shares: number;
   amount_cny: number;
+}
+
+export type ChartIndicator = "ma" | "boll" | "macd" | "kdj" | "rsi" | "volume_ma" | "obv" | "atr";
+
+export interface ChartIndicatorPoint {
+  timestamp: string;
+  ma_5: number | null;
+  ma_10: number | null;
+  ma_20: number | null;
+  boll_upper: number | null;
+  boll_middle: number | null;
+  boll_lower: number | null;
+  macd: number | null;
+  macd_signal: number | null;
+  macd_hist: number | null;
+  kdj_k: number | null;
+  kdj_d: number | null;
+  kdj_j: number | null;
+  rsi_14: number | null;
+  volume_ma_5: number | null;
+  volume_ma_20: number | null;
+  obv: number | null;
+  atr_14: number | null;
 }
 
 export interface SymbolSearchResult {

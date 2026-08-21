@@ -2,7 +2,7 @@ import { Search, Trash2 } from "lucide-react";
 import { type ComponentType, useEffect, useRef, useState } from "react";
 
 import { api } from "../../api";
-import type { Bar, PriceZone, SymbolSearchResult, Timeframe } from "../../types";
+import type { Bar, ChartIndicator, ChartIndicatorPoint, PriceZone, SymbolSearchResult, Timeframe } from "../../types";
 import { DrawingToolbar } from "./DrawingToolbar";
 import { zonePresentation } from "./chartOptions";
 import { type DrawingAnchor, type DrawingGeometry, type DrawingKind, buildManualZonePayload } from "./drawing";
@@ -12,10 +12,22 @@ import { TimeframeToolbar } from "./TimeframeToolbar";
 export interface ChartClient {
   searchSymbols(query: string): Promise<SymbolSearchResult[]>;
   bars(symbol: string, timeframe: Timeframe, start: string, end: string): Promise<Bar[]>;
+  indicators?(symbol: string, timeframe: Timeframe, start: string, end: string): Promise<ChartIndicatorPoint[]>;
   zones(symbol: string, timeframe: Timeframe, asOf: string): Promise<PriceZone[]>;
   createManualZone(symbol: string, payload: object): Promise<PriceZone>;
   deleteZone(symbol: string, zoneId: string): Promise<void>;
 }
+
+const indicatorOptions: Array<{ value: ChartIndicator; label: string }> = [
+  { value: "ma", label: "MA 5/10/20" },
+  { value: "boll", label: "BOLL" },
+  { value: "macd", label: "MACD" },
+  { value: "kdj", label: "KDJ" },
+  { value: "rsi", label: "RSI" },
+  { value: "volume_ma", label: "成交量均线" },
+  { value: "obv", label: "OBV" },
+  { value: "atr", label: "ATR" },
+];
 
 const date = (value: Date) => value.toISOString().slice(0, 10);
 const range = (timeframe: Timeframe) => {
@@ -41,6 +53,9 @@ export function ChartPage({
   const [searchActive, setSearchActive] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [bars, setBars] = useState<Bar[]>([]);
+  const [indicators, setIndicators] = useState<ChartIndicatorPoint[]>([]);
+  const [selectedIndicators, setSelectedIndicators] = useState<ChartIndicator[]>(["ma"]);
+  const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
   const [zones, setZones] = useState<PriceZone[]>([]);
   const [kind, setKind] = useState<DrawingKind | null>(null);
   const [geometry, setGeometry] = useState<DrawingGeometry>("horizontal");
@@ -78,8 +93,16 @@ export function ChartPage({
     let current = true;
     const [start, end] = range(timeframe);
     setLoading(true); setError("");
-    Promise.all([client.bars(symbol, timeframe, start, end), client.zones(symbol, timeframe, end)])
-      .then(([nextBars, nextZones]) => { if (current) { setBars(nextBars); setZones(nextZones); } })
+    Promise.all([
+      client.bars(symbol, timeframe, start, end),
+      client.zones(symbol, timeframe, end),
+      client.indicators?.(symbol, timeframe, start, end) ?? Promise.resolve([]),
+    ])
+      .then(([nextBars, nextZones, nextIndicators]) => {
+        if (current) {
+          setBars(nextBars); setZones(nextZones); setIndicators(nextIndicators);
+        }
+      })
       .catch((cause: Error) => { if (current) setError(cause.message); })
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
@@ -154,6 +177,15 @@ export function ChartPage({
     }
   };
 
+  const addIndicator = (indicator: ChartIndicator) => {
+    setSelectedIndicators((previous) => previous.includes(indicator) ? previous : [...previous, indicator]);
+    setIndicatorMenuOpen(false);
+  };
+
+  const removeIndicator = (indicator: ChartIndicator) => {
+    setSelectedIndicators((previous) => previous.filter((item) => item !== indicator));
+  };
+
   return (
     <main className="chart-page">
       <header className="chart-heading">
@@ -195,6 +227,21 @@ export function ChartPage({
       </header>
       <section className="chart-desk">
         <div className="chart-topline"><div><strong>{symbol}</strong><span>{bars.length ? `${bars.at(-1)?.close.toFixed(2)} 元` : "—"}</span></div><TimeframeToolbar value={timeframe} onChange={(next) => { setTimeframe(next); setAnchors([]); }} /></div>
+        <div className="indicator-toolbar">
+          <span>技术指标</span>
+          {selectedIndicators.map((indicator) => {
+            const option = indicatorOptions.find((item) => item.value === indicator);
+            return <button key={indicator} type="button" className="indicator-chip" aria-label={`删除指标 ${option?.label}`} onClick={() => removeIndicator(indicator)}>{option?.label} ×</button>;
+          })}
+          <div className="indicator-menu-wrap">
+            <button type="button" className="add-indicator" aria-expanded={indicatorMenuOpen} onClick={() => setIndicatorMenuOpen((open) => !open)}>+ 指标</button>
+            {indicatorMenuOpen && <div className="indicator-menu" role="menu">
+              {indicatorOptions.filter((option) => !selectedIndicators.includes(option.value)).map((option) => (
+                <button key={option.value} type="button" role="menuitem" onClick={() => addIndicator(option.value)}>{option.label}</button>
+              ))}
+            </div>}
+          </div>
+        </div>
         <DrawingToolbar kind={kind} geometry={geometry} anchors={anchors.length} onKindChange={(next) => { setKind(next); setAnchors([]); }} onGeometryChange={(next) => { setGeometry(next); setAnchors([]); }} onCancel={() => { setKind(null); setAnchors([]); }} />
         {error && <div className="error-banner" role="alert">{error}</div>}
         <div className="chart-canvas-wrap">
@@ -203,7 +250,7 @@ export function ChartPage({
           ) : !bars.length ? (
             <div className="chart-loading">该周期暂无本地 K 线数据</div>
           ) : (
-            <Chart bars={bars} zones={zones} drawing={kind !== null} onAnchor={addAnchor} />
+            <Chart bars={bars} zones={zones} indicators={indicators} selectedIndicators={selectedIndicators} drawing={kind !== null} onAnchor={addAnchor} />
           )}
         </div>
       </section>

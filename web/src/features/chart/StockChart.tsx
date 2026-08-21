@@ -11,7 +11,7 @@ import * as echarts from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import { useEffect, useRef } from "react";
 
-import type { Bar, PriceZone } from "../../types";
+import type { Bar, ChartIndicator, ChartIndicatorPoint, PriceZone } from "../../types";
 import { buildChartOption } from "./chartOptions";
 import type { DrawingAnchor } from "./drawing";
 
@@ -31,6 +31,8 @@ echarts.use([
 export interface StockChartProps {
   bars: Bar[];
   zones: PriceZone[];
+  indicators?: ChartIndicatorPoint[];
+  selectedIndicators?: ChartIndicator[];
   drawing?: boolean;
   onAnchor?: (anchor: DrawingAnchor) => void;
 }
@@ -58,7 +60,7 @@ function linePointerParams(params: unknown): ChartLinePointerParams | undefined 
   return candidate;
 }
 
-export function StockChart({ bars, zones, drawing = false, onAnchor }: StockChartProps) {
+export function StockChart({ bars, zones, indicators = [], selectedIndicators, drawing = false, onAnchor }: StockChartProps) {
   const element = useRef<HTMLDivElement>(null);
   const anchorCallback = useRef(onAnchor);
   anchorCallback.current = onAnchor;
@@ -66,7 +68,7 @@ export function StockChart({ bars, zones, drawing = false, onAnchor }: StockChar
   useEffect(() => {
     if (!element.current) return;
     const chart = echarts.init(element.current, undefined, { renderer: "canvas" });
-    chart.setOption(buildChartOption(bars, zones), true);
+    chart.setOption(buildChartOption(bars, zones, indicators, selectedIndicators), true);
     const resize = () => chart.resize();
     window.addEventListener("resize", resize);
     const click = (event: { offsetX: number; offsetY: number }) => {
@@ -114,7 +116,8 @@ export function StockChart({ bars, zones, drawing = false, onAnchor }: StockChar
       window.removeEventListener("resize", resize);
       chart.dispose();
     };
-  }, [bars, zones]);
+  }, [bars, indicators, selectedIndicators, zones]);
 
-  return <div ref={element} className={`stock-chart ${drawing ? "drawing" : ""}`} role="img" aria-label="K 线与成交量图" />;
+  const subPaneCount = selectedIndicators?.filter((item) => ["macd", "kdj", "rsi", "obv", "atr"].includes(item)).length ?? 0;
+  return <div ref={element} style={{ height: `${560 + subPaneCount * 120}px` }} className={`stock-chart ${drawing ? "drawing" : ""}`} role="img" aria-label="K 线与成交量图" />;
 }

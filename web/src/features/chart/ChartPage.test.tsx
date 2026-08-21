@@ -41,9 +41,30 @@ const automaticDowntrend: PriceZone = {
   source: "auto",
 };
 
-function FakeChart({ bars: chartBars, zones, onAnchor }: StockChartProps) {
-  return <div><span>{chartBars.length} 根 K 线 / {zones.length} 条线</span><button onClick={() => onAnchor?.({ date: "2026-08-01", price: 10 })}>锚点1</button><button onClick={() => onAnchor?.({ date: "2026-08-20", price: 11 })}>锚点2</button></div>;
+function FakeChart({ bars: chartBars, zones, selectedIndicators, onAnchor }: StockChartProps) {
+  return <div><span>{chartBars.length} 根 K 线 / {zones.length} 条线</span><span>指标：{selectedIndicators?.join(",")}</span><button onClick={() => onAnchor?.({ date: "2026-08-01", price: 10 })}>锚点1</button><button onClick={() => onAnchor?.({ date: "2026-08-20", price: 11 })}>锚点2</button></div>;
 }
+
+it("默认显示 MA，可从菜单添加和移除副图指标", async () => {
+  const requested: string[][] = [];
+  const client: ChartClient = {
+    searchSymbols: async () => [],
+    bars: async () => bars,
+    indicators: async (...args) => { requested.push(args); return []; },
+    zones: async () => [],
+    createManualZone: async () => manual,
+    deleteZone: async () => undefined,
+  };
+  render(<ChartPage initialSymbol="600001.SH" client={client} Chart={FakeChart} />);
+
+  expect(await screen.findByText("指标：ma")).toBeInTheDocument();
+  expect(requested[0]).toEqual(["600001.SH", "1d", expect.any(String), expect.any(String)]);
+  await userEvent.click(screen.getByRole("button", { name: "+ 指标" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "MACD" }));
+  expect(screen.getByText("指标：ma,macd")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "删除指标 MACD" }));
+  expect(screen.getByText("指标：ma")).toBeInTheDocument();
+});
 
 it("切换周期、用两个锚点保存手动趋势支撑并可删除自动和手动线", async () => {
   const created: object[] = [];
