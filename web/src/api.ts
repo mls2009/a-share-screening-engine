@@ -20,6 +20,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  screenResults: (runId: string, limit: number, offset: number) =>
+    request<ScreenRunResult>(
+      `/api/screens/runs/${encodeURIComponent(runId)}?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`,
+    ),
   bars: (symbol: string, timeframe: Timeframe, start: string, end: string) =>
     request<Bar[]>(
       `/api/symbols/${encodeURIComponent(symbol)}/bars?${new URLSearchParams({ timeframe, start, end })}`,

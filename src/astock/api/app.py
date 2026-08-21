@@ -84,6 +84,7 @@ def _run_response(result: object) -> dict:
         "run_id": str(result.run_id),
         "status": result.status,
         "universe_size": result.universe_size,
+        "match_count": result.match_count,
         "realtime_covered": result.realtime_covered,
         "failed_batches": result.failed_batches,
         "matches": [
@@ -163,7 +164,10 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
     ) -> dict:
         row = context.database.connection.execute(
             """
-            select status, mode, as_of_date, universe_size, realtime_covered, failed_batches
+            select status, mode, as_of_date, universe_size, realtime_covered,
+                   failed_batches,
+                   (select count(*) from screen_matches
+                    where screen_matches.run_id = screen_runs.run_id)
             from screen_runs where run_id = ?
             """,
             [run_id],
@@ -181,6 +185,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             "universe_size": row[3],
             "realtime_covered": row[4],
             "failed_batches": row[5],
+            "match_count": row[6],
             "matches": context.screening.results(run_id, limit, offset),
         }
 

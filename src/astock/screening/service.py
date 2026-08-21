@@ -33,6 +33,7 @@ class ScreenMatch:
 class ScreenRunResult:
     run_id: UUID
     universe_size: int
+    match_count: int
     matches: list[ScreenMatch]
     status: str = "completed"
     realtime_covered: int = 0
@@ -214,6 +215,7 @@ class ScreeningService:
         return ScreenRunResult(
             run_id=run_id,
             universe_size=len(symbols),
+            match_count=len(matches),
             matches=matches[offset : offset + limit],
             realtime_covered=len(batch.snapshots),
             failed_batches=batch.failed_batches,

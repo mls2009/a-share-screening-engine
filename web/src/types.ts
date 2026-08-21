@@ -77,6 +77,7 @@ export interface ScreenRunResult {
   run_id: string;
   status: string;
   universe_size: number;
+  match_count: number;
   realtime_covered: number;
   failed_batches: number;
   matches: ScreenMatch[];

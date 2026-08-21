@@ -199,6 +199,12 @@ select:focus, input:focus { border-color: #7c8a8f; box-shadow: inset 2px 0 var(-
 .results-table td strong { display: block; font-family: "IBM Plex Sans Variable", "PingFang SC", sans-serif; font-size: 12px; }
 .results-table td small { display: block; color: #667176; margin-top: 2px; }
 .results-table td button { border: 0; background: transparent; color: #879196; cursor: pointer; }
+.results-pagination { min-height: 50px; padding: 8px 14px; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: flex-end; gap: 9px; color: var(--muted); font: 500 10px "IBM Plex Mono", monospace; }
+.results-pagination label { display: flex; align-items: center; gap: 7px; margin-right: 8px; }
+.results-pagination select { min-height: 30px; padding: 4px 8px; font-size: 10px; }
+.results-pagination button { min-height: 30px; border: 1px solid #343c40; background: transparent; color: #abb3b5; padding: 0 10px; cursor: pointer; }
+.results-pagination button:hover:not(:disabled) { border-color: var(--signal); color: var(--signal); }
+.results-pagination button:disabled { opacity: .3; cursor: default; }
 .positive { color: var(--support) !important; }
 .negative { color: var(--resistance) !important; }
 .explanation-panel { border-left: 1px solid var(--line); padding: 22px 18px; background: #111517; }

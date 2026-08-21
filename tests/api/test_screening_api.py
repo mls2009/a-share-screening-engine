@@ -164,6 +164,49 @@ def test_catalog_validate_and_run_screen_endpoints(tmp_path: Path) -> None:
     assert run.json()["matches"][0]["symbol"] == "600001.SH"
 
 
+def test_screen_run_and_saved_results_report_total_matches_with_pagination(
+    tmp_path: Path,
+) -> None:
+    client, database = _client(tmp_path)
+    database.connection.executemany(
+        """
+        insert into symbols (symbol, name, exchange, board, is_listed)
+        values (?, ?, 'SH', 'main', true)
+        """,
+        [["600002.SH", "股票二"], ["600003.SH", "股票三"]],
+    )
+    database.connection.executemany(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, close, return_20)
+        values (?, '1d', '2026-08-20', 'v1', 12, ?)
+        """,
+        [["600002.SH", 40], ["600003.SH", 45]],
+    )
+
+    first = client.post(
+        "/api/screens/run",
+        json={
+            "tree": CONDITION,
+            "mode": "close",
+            "as_of": "2026-08-20",
+            "limit": 2,
+            "offset": 0,
+        },
+    )
+    run_id = first.json()["run_id"]
+    last = client.get(
+        f"/api/screens/runs/{run_id}", params={"limit": 1, "offset": 2}
+    )
+
+    assert first.status_code == 200
+    assert first.json()["match_count"] == 3
+    assert len(first.json()["matches"]) == 2
+    assert last.status_code == 200
+    assert last.json()["match_count"] == 3
+    assert [match["rank"] for match in last.json()["matches"]] == [3]
+
+
 def test_catalog_exposes_hierarchical_filter_metadata(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
     catalog = {

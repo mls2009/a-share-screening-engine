@@ -11,6 +11,7 @@ const result: ScreenRunResult = {
   run_id: "run-1",
   status: "completed",
   universe_size: 5547,
+  match_count: 1,
   realtime_covered: 0,
   failed_batches: 0,
   matches: [{
@@ -22,7 +23,7 @@ const result: ScreenRunResult = {
 };
 
 function client(): ScreenerClient {
-  return { catalog: async () => catalog, runScreen: async () => result };
+  return { catalog: async () => catalog, runScreen: async () => result, screenResults: async () => result };
 }
 
 describe("ScreenerPage", () => {
@@ -44,6 +45,7 @@ describe("ScreenerPage", () => {
     const fake: ScreenerClient = {
       catalog: async () => catalog,
       runScreen: async (payload) => { calls.push(payload); return result; },
+      screenResults: async () => result,
     };
     render(<ScreenerPage client={fake} onOpenChart={(symbol) => open.push(symbol)} />);
     await screen.findByLabelText("指标");
@@ -60,6 +62,7 @@ describe("ScreenerPage", () => {
     const fake: ScreenerClient = {
       catalog: async () => catalog,
       runScreen: async (payload) => { calls.push(payload); return result; },
+      screenResults: async () => result,
     };
     render(<ScreenerPage client={fake} onOpenChart={() => undefined} />);
     await screen.findByLabelText("指标");
@@ -78,5 +81,39 @@ describe("ScreenerPage", () => {
         }],
       },
     }));
+  });
+
+  it("显示总命中数并通过已保存结果翻页和切换每页数量", async () => {
+    const secondPage: ScreenRunResult = {
+      ...result,
+      match_count: 450,
+      matches: [{
+        ...result.matches[0],
+        symbol: "830001.BJ",
+        rank: 201,
+        features: { ...result.matches[0].features, name: "北交样本" },
+      }],
+    };
+    const firstPage = { ...result, match_count: 450 };
+    const fetchPage = vi.fn().mockResolvedValue(secondPage);
+    const fake: ScreenerClient = {
+      catalog: async () => catalog,
+      runScreen: async () => firstPage,
+      screenResults: fetchPage,
+    };
+    render(<ScreenerPage client={fake} onOpenChart={() => undefined} />);
+    await screen.findByLabelText("指标");
+
+    await userEvent.click(screen.getByRole("button", { name: "运行全市场筛选" }));
+    expect(await screen.findByText("共命中 450 只")).toBeInTheDocument();
+    expect(screen.getByText("第 1 / 3 页")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "下一页" }));
+    await waitFor(() => expect(fetchPage).toHaveBeenCalledWith("run-1", 200, 200));
+    expect((await screen.findAllByText("北交样本")).length).toBeGreaterThanOrEqual(1);
+
+    await userEvent.selectOptions(screen.getByLabelText("每页数量"), "50");
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 50, 0));
+    expect(screen.getByText("第 1 / 9 页")).toBeInTheDocument();
   });
 });
