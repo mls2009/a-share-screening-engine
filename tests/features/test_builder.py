@@ -82,12 +82,12 @@ def test_builder_persists_automatic_support_and_resistance_zones(tmp_path: Path)
     database = Database(tmp_path / "zones.duckdb")
     database.migrate()
     bar_store = BarStore(tmp_path / "bars")
-    closes = [12] * 14
+    closes = [12] * 15
     dates = pd.date_range("2026-01-01", periods=len(closes), freq="B")
     bars = []
     for index, (stamp, close) in enumerate(zip(dates, closes, strict=True)):
-        low = {1: 8.0, 4: 9.0, 7: 10.0, 10: 11.0}.get(index, close - 0.4)
-        high = {2: 16.0, 5: 15.0, 8: 14.0, 11: 13.0}.get(index, close + 0.4)
+        low = {2: 10.0, 6: 10.0, 10: 10.0}.get(index, close - 0.4)
+        high = {4: 15.0, 8: 15.0, 12: 15.0}.get(index, close + 0.4)
         bars.append(
             Bar(
                 symbol="600000.SH",
@@ -116,16 +116,19 @@ def test_builder_persists_automatic_support_and_resistance_zones(tmp_path: Path)
         "600000.SH", dates[-1].date()
     )
 
-    kinds = {
-        row[0]
+    zones = {
+        tuple(row)
         for row in database.connection.execute(
             """
-            select distinct zone_kind from support_resistance_zones
-            where timeframe = '1d' and geometry = 'trend'
+            select distinct zone_kind, geometry from support_resistance_zones
+            where timeframe = '1d' and source = 'auto'
             """
         ).fetchall()
     }
-    assert kinds == {"uptrend", "downtrend"}
+    assert zones == {
+        ("support", "horizontal"),
+        ("resistance", "horizontal"),
+    }
 
 
 def test_builder_records_the_latest_source_bar_as_zone_watermark(tmp_path: Path) -> None:
@@ -472,14 +475,14 @@ def test_same_timestamp_bar_revision_rebuilds_chart_zones(
         return [
             PriceZone(
                 as_of_date=as_of,
-                zone_kind="uptrend",
-                geometry="trend",
+                zone_kind="support",
+                geometry="horizontal",
                 lower_price=center - 0.1,
                 center_price=center,
                 upper_price=center + 0.1,
-                slope=0.1,
-                intercept=center - 1,
-                anchors=((as_of, center - 1), (as_of, center)),
+                slope=None,
+                intercept=None,
+                anchors=((as_of, center),),
                 strength=0.8,
                 touches=2,
                 rule_version=kwargs["rule_version"],
@@ -497,7 +500,11 @@ def test_same_timestamp_bar_revision_rebuilds_chart_zones(
     assert [
         row["center_price"]
         for row in chart_zones(
-            database.connection, "600000.SH", Timeframe.MIN_5, timestamp.date()
+            database.connection,
+            "600000.SH",
+            Timeframe.MIN_5,
+            timestamp.date(),
+            close_override=11.0,
         )
     ] == [11.0]
 
@@ -618,14 +625,14 @@ def test_historical_chart_zone_request_builds_its_own_batch_after_future_request
         return [
             PriceZone(
                 as_of_date=as_of,
-                zone_kind="uptrend",
-                geometry="trend",
+                zone_kind="support",
+                geometry="horizontal",
                 lower_price=center - 0.1,
                 center_price=center,
                 upper_price=center + 0.1,
-                slope=0.1,
-                intercept=center - 1,
-                anchors=((as_of, center - 1), (as_of, center)),
+                slope=None,
+                intercept=None,
+                anchors=((as_of, center),),
                 strength=0.8,
                 touches=2,
                 rule_version=kwargs.get("rule_version", "v1"),
@@ -650,7 +657,11 @@ def test_historical_chart_zone_request_builds_its_own_batch_after_future_request
         """
     ).fetchall() == [(date(2026, 8, 19),), (date(2026, 8, 20),)]
     historical = chart_zones(
-        database.connection, "600000.SH", Timeframe.MIN_5, date(2026, 8, 19)
+        database.connection,
+        "600000.SH",
+        Timeframe.MIN_5,
+        date(2026, 8, 19),
+        close_override=19.0,
     )
     assert [(row["as_of_date"], row["center_price"]) for row in historical] == [
         (date(2026, 8, 19), 19.0)

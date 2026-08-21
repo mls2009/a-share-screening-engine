@@ -230,7 +230,9 @@ def test_bars_zones_run_results_and_sync_status_contracts(tmp_path: Path) -> Non
     assert sync.json()["succeeded"] == 100
 
 
-def test_zones_api_returns_trends_independently_of_horizontal_limit(tmp_path: Path) -> None:
+def test_zones_api_hides_legacy_auto_trends_and_keeps_horizontal_limit(
+    tmp_path: Path,
+) -> None:
     client, database = _client(tmp_path)
     database.connection.executemany(
         """
@@ -271,11 +273,8 @@ def test_zones_api_returns_trends_independently_of_horizontal_limit(tmp_path: Pa
     )
 
     assert response.status_code == 200
-    assert {row["zone_kind"] for row in response.json()} == {
-        "support",
-        "uptrend",
-        "downtrend",
-    }
+    assert {row["zone_kind"] for row in response.json()} == {"support"}
+    assert all(row["geometry"] == "horizontal" for row in response.json())
 
 
 def test_zones_api_uses_latest_non_null_close(tmp_path: Path) -> None:
@@ -334,8 +333,11 @@ def test_zones_api_builds_and_reuses_requested_minute_timeframe(tmp_path: Path) 
         where symbol = '600001.SH' and timeframe = '15m' and close is not null
         """
     ).fetchone() == (0,)
-    assert [row["zone_kind"] for row in first.json()].count("uptrend") == 1
-    assert [row["zone_kind"] for row in first.json()].count("downtrend") == 1
+    assert first.json()
+    assert all(
+        row["source"] == "auto" and row["geometry"] == "horizontal"
+        for row in first.json()
+    )
     assert first_rows
     assert second_rows == first_rows
 
@@ -371,8 +373,11 @@ def test_zones_api_builds_and_reuses_requested_minute_timeframe(tmp_path: Path) 
         where symbol = '600001.SH' and timeframe = '15m' and source = 'auto'
         """
     ).fetchone() == (date(2026, 8, 21),)
-    assert [row["zone_kind"] for row in refreshed.json()].count("uptrend") == 1
-    assert [row["zone_kind"] for row in refreshed.json()].count("downtrend") == 1
+    assert refreshed.json()
+    assert all(
+        row["source"] == "auto" and row["geometry"] == "horizontal"
+        for row in refreshed.json()
+    )
 
 
 def test_minute_chart_uses_bar_close_and_does_not_rebuild_deleted_latest_batch(

@@ -345,25 +345,6 @@ def chart_zones(
         selected.extend(
             _nearest_horizontal_zones(rows, close, limit_each, source="auto")
         )
-    auto_trends = [
-        row
-        for row in rows
-        if row["source"] == "auto" and row["geometry"] == "trend"
-    ]
-    for kind in ("uptrend", "downtrend"):
-        matching = [row for row in auto_trends if row["zone_kind"] == kind]
-        if matching:
-            selected.append(
-                max(
-                    matching,
-                    key=lambda row: (
-                        row["last_touched_on"] or date.min,
-                        row["touches"],
-                        row["strength"],
-                        str(row["zone_id"]),
-                    ),
-                )
-            )
     return selected
 
 

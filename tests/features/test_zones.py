@@ -414,24 +414,119 @@ def test_auto_zone_replacement_keeps_one_rule_version_per_date(tmp_path: Path) -
     ).fetchall() == [(11.0, "v2")]
 
 
-def test_chart_zones_uses_rule_version_recorded_by_latest_batch(tmp_path: Path) -> None:
-    database = Database(tmp_path / "latest-batch-rule.duckdb")
+def test_chart_zones_excludes_auto_trends_but_keeps_manual_trends(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "chart-zone-sources.duckdb")
     database.migrate()
     as_of = date(2026, 8, 20)
+    database.connection.execute(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, close)
+        values ('600001.SH', '1d', ?, 'v1', 10)
+        """,
+        [as_of],
+    )
     database.connection.executemany(
         """
         insert into support_resistance_zones
           (zone_id, symbol, timeframe, as_of_date, zone_kind, geometry,
            lower_price, center_price, upper_price, slope, intercept, strength,
            touches, last_touched_on, source, rule_version)
-        values (?, '600001.SH', '5m', ?, ?, 'trend', ?, ?, ?, ?, ?, 0.8, 2,
+        values (?, '600001.SH', '1d', ?, ?, ?, ?, ?, ?, ?, ?, 0.8, 3,
+                ?, ?, 'v1')
+        """,
+        [
+            [
+                "00000000-0000-0000-0000-000000000091",
+                as_of,
+                "support",
+                "horizontal",
+                9.8,
+                9.9,
+                10.0,
+                None,
+                None,
+                as_of,
+                "auto",
+            ],
+            [
+                "00000000-0000-0000-0000-000000000092",
+                as_of,
+                "uptrend",
+                "trend",
+                10.8,
+                11.0,
+                11.2,
+                0.1,
+                9.0,
+                as_of,
+                "auto",
+            ],
+            [
+                "00000000-0000-0000-0000-000000000093",
+                as_of,
+                "support",
+                "trend",
+                9.7,
+                9.8,
+                9.9,
+                0.05,
+                9.0,
+                as_of,
+                "manual",
+            ],
+        ],
+    )
+
+    rows = zones_module.chart_zones(
+        database.connection, "600001.SH", Timeframe.DAY, as_of
+    )
+
+    assert not [
+        row
+        for row in rows
+        if row["source"] == "auto" and row["geometry"] == "trend"
+    ]
+    assert [
+        row
+        for row in rows
+        if row["source"] == "manual" and row["geometry"] == "trend"
+    ]
+    assert [
+        row
+        for row in rows
+        if row["source"] == "auto" and row["geometry"] == "horizontal"
+    ]
+
+
+def test_chart_zones_uses_rule_version_recorded_by_latest_batch(tmp_path: Path) -> None:
+    database = Database(tmp_path / "latest-batch-rule.duckdb")
+    database.migrate()
+    as_of = date(2026, 8, 20)
+    database.connection.execute(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, close)
+        values ('600001.SH', '5m', ?, 'v1', 12)
+        """,
+        [as_of],
+    )
+    database.connection.executemany(
+        """
+        insert into support_resistance_zones
+          (zone_id, symbol, timeframe, as_of_date, zone_kind, geometry,
+           lower_price, center_price, upper_price, slope, intercept, strength,
+           touches, last_touched_on, source, rule_version)
+        values (?, '600001.SH', '5m', ?, ?, 'horizontal', ?, ?, ?, ?, ?, 0.8, 2,
                 ?, 'auto', ?)
         """,
         [
             [
                 "00000000-0000-0000-0000-000000000401",
                 as_of,
-                "downtrend",
+                "support",
                 9.8,
                 10.0,
                 10.2,
@@ -443,7 +538,7 @@ def test_chart_zones_uses_rule_version_recorded_by_latest_batch(tmp_path: Path) 
             [
                 "00000000-0000-0000-0000-000000000402",
                 as_of,
-                "uptrend",
+                "support",
                 10.8,
                 11.0,
                 11.2,
@@ -468,11 +563,11 @@ def test_chart_zones_uses_rule_version_recorded_by_latest_batch(tmp_path: Path) 
     )
 
     assert [(row["zone_kind"], row["rule_version"]) for row in rows] == [
-        ("uptrend", "v2")
+        ("support", "v2")
     ]
 
 
-def test_distance_and_chart_zone_selectors_keep_trends_separate(tmp_path: Path) -> None:
+def test_distance_and_chart_zone_selectors_hide_auto_trends(tmp_path: Path) -> None:
     database = Database(tmp_path / "zone-selectors.duckdb")
     database.migrate()
     as_of = date(2026, 8, 20)
@@ -537,22 +632,18 @@ def test_distance_and_chart_zone_selectors_keep_trends_separate(tmp_path: Path) 
     assert {str(row["zone_id"]) for row in chart} == {
         "00000000-0000-0000-0000-000000000101",
         "00000000-0000-0000-0000-000000000103",
-        "00000000-0000-0000-0000-000000000105",
-        "00000000-0000-0000-0000-000000000112",
         "00000000-0000-0000-0000-000000000109",
         "00000000-0000-0000-0000-000000000110",
     }
     chart_by_id = {str(row["zone_id"]): row for row in chart}
     assert chart_by_id["00000000-0000-0000-0000-000000000101"]["zone_kind"] == "support"
     assert chart_by_id["00000000-0000-0000-0000-000000000103"]["zone_kind"] == "resistance"
-    assert chart_by_id["00000000-0000-0000-0000-000000000105"]["zone_kind"] == "uptrend"
-    assert chart_by_id["00000000-0000-0000-0000-000000000112"]["zone_kind"] == "downtrend"
     assert chart_by_id["00000000-0000-0000-0000-000000000103"]["reappeared"] is True
     assert chart_by_id["00000000-0000-0000-0000-000000000110"]["reappeared"] is True
 
 
 @pytest.mark.parametrize("close_state", ["missing", "null"])
-def test_chart_zones_returns_trends_without_a_non_null_close(
+def test_chart_zones_keeps_only_manual_trends_without_a_non_null_close(
     tmp_path: Path, close_state: str
 ) -> None:
     database = Database(tmp_path / f"zones-with-{close_state}-close.duckdb")
@@ -588,14 +679,13 @@ def test_chart_zones_returns_trends_without_a_non_null_close(
 
     assert {str(row["zone_id"]) for row in chart} == {
         "00000000-0000-0000-0000-000000000131",
-        "00000000-0000-0000-0000-000000000132",
     }
     assert nearest_zones(
         database.connection, "600001.SH", Timeframe.DAY, as_of, limit_each=1
     ) == []
 
 
-def test_chart_zones_breaks_fully_tied_auto_trends_by_zone_id(tmp_path: Path) -> None:
+def test_chart_zones_hides_fully_tied_auto_trends(tmp_path: Path) -> None:
     database = Database(tmp_path / "tied-chart-trends.duckdb")
     database.migrate()
     as_of = date(2026, 8, 20)
@@ -626,9 +716,7 @@ def test_chart_zones_breaks_fully_tied_auto_trends_by_zone_id(tmp_path: Path) ->
         database.connection, "600001.SH", Timeframe.DAY, as_of
     )
 
-    assert [str(row["zone_id"]) for row in chart] == [
-        "00000000-0000-0000-0000-000000000142"
-    ]
+    assert chart == []
 
 
 def test_manual_zone_survives_auto_replacement_and_can_be_deleted(tmp_path: Path) -> None:
