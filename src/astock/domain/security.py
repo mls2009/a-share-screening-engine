@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -10,6 +11,7 @@ class Security(BaseModel):
     name: str
     exchange: str
     board: str
+    instrument_type: Literal["stock", "etf"] = "stock"
     listed_on: date | None = None
     delisted_on: date | None = None
     is_listed: bool = True

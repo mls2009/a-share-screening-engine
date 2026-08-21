@@ -29,7 +29,7 @@ def test_screening_schema_contains_required_tables_and_symbol_columns(tmp_path: 
         "screen_runs",
         "screen_matches",
     } <= tables
-    assert {"board", "is_listed"} <= symbol_columns
+    assert {"board", "is_listed", "instrument_type"} <= symbol_columns
     assert {row[1] for row in batch_info} >= {
         "symbol",
         "timeframe",
@@ -155,6 +155,9 @@ def test_migration_upgrades_an_existing_symbols_table(tmp_path: Path) -> None:
         "create table symbols (symbol varchar primary key, name varchar not null, "
         "exchange varchar not null, listed_on date, delisted_on date)"
     )
+    db.connection.execute(
+        "insert into symbols values ('600519.SH', '贵州茅台', 'SH', null, null)"
+    )
 
     db.migrate()
 
@@ -162,4 +165,7 @@ def test_migration_upgrades_an_existing_symbols_table(tmp_path: Path) -> None:
         row[1]
         for row in db.connection.execute("pragma table_info('symbols')").fetchall()
     }
-    assert {"board", "is_listed"} <= columns
+    assert {"board", "is_listed", "instrument_type"} <= columns
+    assert db.connection.execute(
+        "select instrument_type from symbols where symbol = '600519.SH'"
+    ).fetchone() == ("stock",)

@@ -137,14 +137,16 @@ class MarketDataService:
                 connection.executemany(
                     """
                     insert into symbols
-                      (symbol, name, exchange, listed_on, delisted_on, board, is_listed)
-                    values (?, ?, ?, ?, ?, ?, ?)
+                      (symbol, name, exchange, listed_on, delisted_on, board,
+                       instrument_type, is_listed)
+                    values (?, ?, ?, ?, ?, ?, ?, ?)
                     on conflict (symbol) do update set
                       name = excluded.name,
                       exchange = excluded.exchange,
                       listed_on = excluded.listed_on,
                       delisted_on = excluded.delisted_on,
                       board = excluded.board,
+                      instrument_type = excluded.instrument_type,
                       is_listed = excluded.is_listed
                     """,
                     [
@@ -155,6 +157,7 @@ class MarketDataService:
                             security.listed_on,
                             security.delisted_on,
                             security.board,
+                            security.instrument_type,
                             security.is_listed,
                         ]
                         for security in securities
@@ -200,14 +203,16 @@ class MarketDataService:
                 connection.executemany(
                     """
                     insert into symbols
-                      (symbol, name, exchange, listed_on, delisted_on, board, is_listed)
-                    values (?, ?, ?, ?, ?, ?, ?)
+                      (symbol, name, exchange, listed_on, delisted_on, board,
+                       instrument_type, is_listed)
+                    values (?, ?, ?, ?, ?, ?, ?, ?)
                     on conflict (symbol) do update set
                       name = excluded.name,
                       exchange = excluded.exchange,
                       listed_on = excluded.listed_on,
                       delisted_on = excluded.delisted_on,
                       board = excluded.board,
+                      instrument_type = excluded.instrument_type,
                       is_listed = excluded.is_listed
                     """,
                     [
@@ -218,6 +223,7 @@ class MarketDataService:
                             security.listed_on,
                             security.delisted_on,
                             security.board,
+                            security.instrument_type,
                             security.is_listed,
                         ]
                         for security in securities

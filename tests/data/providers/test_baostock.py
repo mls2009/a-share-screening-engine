@@ -251,6 +251,32 @@ def test_baostock_builds_complete_listed_security_universe() -> None:
     assert securities[1].is_suspended is True
 
 
+def test_baostock_keeps_etfs_and_filters_other_non_stock_instruments() -> None:
+    fake = FakeBaoStock()
+    fake.results["all_stock"] = FakeResult(
+        ["code", "tradeStatus", "code_name"],
+        [
+            ["sh.600519", "1", "贵州茅台"],
+            ["sz.159558", "1", "创业板中盘ETF"],
+            ["sz.160106", "1", "南方高增LOF"],
+            ["sh.113001", "1", "转债样例"],
+        ],
+    )
+    fake.basic_rows = [
+        ["sh.600519", "贵州茅台", "2001-08-27", "", "1", "1"],
+        ["sz.159558", "创业板中盘ETF", "2024-01-01", "", "3", "1"],
+        ["sz.160106", "南方高增LOF", "2005-01-01", "", "3", "1"],
+        ["sh.113001", "转债样例", "2010-01-01", "", "3", "1"],
+    ]
+
+    securities = BaoStockProvider(fake).securities_on(date(2026, 8, 20))
+
+    assert [(item.symbol, item.instrument_type) for item in securities] == [
+        ("600519.SH", "stock"),
+        ("159558.SZ", "etf"),
+    ]
+
+
 def test_security_universe_falls_back_to_latest_completed_trading_day() -> None:
     class IntradayBaoStock(FakeBaoStock):
         def __init__(self) -> None:

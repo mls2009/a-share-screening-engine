@@ -5,10 +5,12 @@ create table if not exists symbols (
   listed_on date,
   delisted_on date,
   board varchar,
+  instrument_type varchar not null default 'stock',
   is_listed boolean not null default true
 );
 
 alter table symbols add column if not exists board varchar;
+alter table symbols add column if not exists instrument_type varchar default 'stock';
 alter table symbols add column if not exists is_listed boolean default true;
 
 create table if not exists trading_calendar (

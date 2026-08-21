@@ -18,6 +18,24 @@ ADJUST_FLAGS = {
 }
 DAILY_FIELDS = "date,code,open,high,low,close,volume,amount,adjustflag"
 MINUTE_FIELDS = "date,time,code,open,high,low,close,volume,amount,adjustflag"
+SH_ETF_PREFIXES = (
+    "510",
+    "511",
+    "512",
+    "513",
+    "515",
+    "516",
+    "517",
+    "518",
+    "520",
+    "521",
+    "560",
+    "561",
+    "562",
+    "563",
+    "588",
+    "589",
+)
 
 
 class BaoStockError(RuntimeError):
@@ -67,6 +85,17 @@ class BaoStockProvider:
     def _symbol(provider_symbol: str) -> str:
         exchange, code = provider_symbol.split(".")
         return f"{code}.{exchange.upper()}"
+
+    @staticmethod
+    def _instrument_type(provider_symbol: str, basic_type: str | None) -> str | None:
+        exchange, code = provider_symbol.split(".")
+        if exchange == "sz" and code.startswith("159"):
+            return "etf"
+        if exchange == "sh" and code.startswith(SH_ETF_PREFIXES):
+            return "etf"
+        if basic_type in {None, "", "1"}:
+            return "stock"
+        return None
 
     def _query_rows(self, method_name: str, **kwargs: str) -> list[dict[str, str]]:
         with self._session():
@@ -177,7 +206,10 @@ class BaoStockProvider:
         for row in trade_rows:
             provider_symbol = row["code"]
             basic = basics.get(provider_symbol, {})
-            if basic.get("type") not in {None, "", "1"}:
+            instrument_type = self._instrument_type(
+                provider_symbol, basic.get("type")
+            )
+            if instrument_type is None:
                 continue
             symbol = self._symbol(provider_symbol)
             listed_on = (
@@ -197,6 +229,7 @@ class BaoStockProvider:
                     name=row.get("code_name") or basic.get("code_name") or symbol,
                     exchange=symbol.split(".")[1],
                     board=self._board(symbol),
+                    instrument_type=instrument_type,
                     listed_on=listed_on,
                     delisted_on=delisted_on,
                     is_listed=is_listed,

@@ -200,3 +200,32 @@ def test_sync_universe_is_lightweight_and_skips_per_symbol_reference_calls(
     assert reference.detail_calls == 0
     assert database.connection.execute("select count(*) from symbols").fetchone()[0] == 1
     assert database.connection.execute("select count(*) from trading_calendar").fetchone()[0] == 1
+
+
+def test_sync_universe_persists_etf_instrument_type(tmp_path: Path) -> None:
+    class EtfReference(FakeReference):
+        def securities_on(self, on_date: date) -> list[Security]:
+            return [
+                Security(
+                    symbol="159558.SZ",
+                    name="创业板中盘ETF",
+                    exchange="SZ",
+                    board="main",
+                    instrument_type="etf",
+                )
+            ]
+
+    database = Database(tmp_path / "etf-universe.duckdb")
+    database.migrate()
+    service = MarketDataService(
+        history_provider=FakeHistory([]),
+        bar_store=BarStore(tmp_path / "bars"),
+        database=database,
+        reference_provider=EtfReference(),
+    )
+
+    service.sync_universe(START, END)
+
+    assert database.connection.execute(
+        "select instrument_type from symbols where symbol = '159558.SZ'"
+    ).fetchone() == ("etf",)
