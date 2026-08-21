@@ -154,6 +154,9 @@ create table if not exists support_resistance_zones (
   created_at timestamp not null default current_timestamp
 );
 
+delete from support_resistance_zones
+where source = 'auto' and geometry = 'trend';
+
 create table if not exists zone_detection_batches (
   symbol varchar not null,
   timeframe varchar not null,

@@ -112,6 +112,43 @@ def test_migration_backfills_existing_automatic_zone_batches(tmp_path: Path) -> 
     ]
 
 
+def test_migration_purges_only_automatic_trend_zones(tmp_path: Path) -> None:
+    db = Database(tmp_path / "legacy-trends.duckdb")
+    db.migrate()
+    db.connection.execute(
+        """
+        insert into support_resistance_zones
+          (zone_id, symbol, timeframe, as_of_date, zone_kind, geometry,
+           lower_price, center_price, upper_price, strength, touches, source,
+           rule_version)
+        values
+          ('00000000-0000-0000-0000-000000000311', '600001.SH', '1d',
+           '2026-08-20', 'support', 'trend', 9.8, 10, 10.2, 0.8, 3,
+           'auto', 'v1'),
+          ('00000000-0000-0000-0000-000000000312', '600001.SH', '1d',
+           '2026-08-20', 'support', 'trend', 8.8, 9, 9.2, 0.7, 2,
+           'manual', 'manual-v1'),
+          ('00000000-0000-0000-0000-000000000313', '600001.SH', '1d',
+           '2026-08-20', 'resistance', 'horizontal', 12.8, 13, 13.2, 0.9, 4,
+           'auto', 'v2')
+        """
+    )
+
+    db.migrate()
+    db.migrate()
+
+    assert db.connection.execute(
+        """
+        select source, geometry
+        from support_resistance_zones
+        order by source, geometry
+        """
+    ).fetchall() == [
+        ("auto", "horizontal"),
+        ("manual", "trend"),
+    ]
+
+
 def test_migration_upgrades_an_existing_symbols_table(tmp_path: Path) -> None:
     db = Database(tmp_path / "test.duckdb")
     db.connection.execute(
