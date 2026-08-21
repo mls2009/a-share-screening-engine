@@ -254,6 +254,42 @@ def test_screen_run_and_saved_results_report_total_matches_with_pagination(
     assert [match["rank"] for match in last.json()["matches"]] == [3]
 
 
+def test_saved_results_sort_all_matches_before_paginating(tmp_path: Path) -> None:
+    client, database = _client(tmp_path)
+    database.connection.executemany(
+        """
+        insert into symbols (symbol, name, exchange, board, is_listed)
+        values (?, ?, 'SH', 'main', true)
+        """,
+        [["600002.SH", "股票二"], ["600003.SH", "股票三"]],
+    )
+    database.connection.executemany(
+        """
+        insert into market_features
+          (symbol, timeframe, feature_date, feature_version, close, return_20)
+        values (?, '1d', '2026-08-20', 'v1', 12, ?)
+        """,
+        [["600002.SH", 40], ["600003.SH", 45]],
+    )
+    run = client.post(
+        "/api/screens/run",
+        json={"tree": CONDITION, "mode": "close", "as_of": "2026-08-20"},
+    )
+    run_id = run.json()["run_id"]
+
+    first_page = client.get(
+        f"/api/screens/runs/{run_id}",
+        params={"limit": 2, "offset": 0, "sort_by": "return_20", "sort_direction": "desc"},
+    )
+    second_page = client.get(
+        f"/api/screens/runs/{run_id}",
+        params={"limit": 2, "offset": 2, "sort_by": "return_20", "sort_direction": "desc"},
+    )
+
+    assert [match["symbol"] for match in first_page.json()["matches"]] == ["600003.SH", "600002.SH"]
+    assert [match["symbol"] for match in second_page.json()["matches"]] == ["600001.SH"]
+
+
 def test_catalog_exposes_hierarchical_filter_metadata(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
     catalog = {

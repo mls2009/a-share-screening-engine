@@ -200,6 +200,8 @@ select:focus, input:focus { border-color: #7c8a8f; box-shadow: inset 2px 0 var(-
 .results-table-wrap { overflow: auto; }
 .results-table { width: 100%; border-collapse: collapse; font: 500 11px "IBM Plex Mono", monospace; }
 .results-table th { position: sticky; top: 0; background: #111517; color: #6f7a7f; text-align: right; padding: 10px 12px; font-size: 9px; letter-spacing: .08em; }
+.results-table th button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; cursor: pointer; }
+.results-table th button:hover { color: var(--signal); }
 .results-table th:nth-child(2), .results-table td:nth-child(2) { text-align: left; }
 .results-table td { border-top: 1px solid #22292c; padding: 10px 12px; text-align: right; color: #c2c7c6; cursor: pointer; }
 .results-table tr:hover td, .results-table tr.selected td { background: #171c1e; }

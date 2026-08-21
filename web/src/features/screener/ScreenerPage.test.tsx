@@ -27,6 +27,30 @@ function client(): ScreenerClient {
 }
 
 describe("ScreenerPage", () => {
+  it("按全部命中结果排序并第三次点击恢复默认顺序", async () => {
+    const fetchPage = vi.fn().mockResolvedValue(result);
+    const fake: ScreenerClient = {
+      catalog: async () => catalog,
+      runScreen: async () => ({ ...result, match_count: 450 }),
+      screenResults: fetchPage,
+    };
+    render(<ScreenerPage client={fake} onOpenChart={() => undefined} />);
+    await screen.findByLabelText("指标");
+    await userEvent.click(screen.getByRole("button", { name: "运行全市场筛选" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "按 20 周期 排序" }));
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, "return_20", "desc"));
+    expect(screen.getByRole("button", { name: "按 20 周期 排序" })).toHaveTextContent("20 周期 ↓");
+
+    await userEvent.click(screen.getByRole("button", { name: "按 20 周期 排序" }));
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, "return_20", "asc"));
+    expect(screen.getByRole("button", { name: "按 20 周期 排序" })).toHaveTextContent("20 周期 ↑");
+
+    await userEvent.click(screen.getByRole("button", { name: "按 20 周期 排序" }));
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, undefined, undefined));
+    expect(screen.getByRole("button", { name: "按 20 周期 排序" })).toHaveTextContent("20 周期");
+  });
+
   it("运行筛选并展示证券名称、关键数值和解释", async () => {
     render(<ScreenerPage client={client()} onOpenChart={() => undefined} />);
     await screen.findByLabelText("指标");
@@ -109,11 +133,11 @@ describe("ScreenerPage", () => {
     expect(screen.getByText("第 1 / 3 页")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "下一页" }));
-    await waitFor(() => expect(fetchPage).toHaveBeenCalledWith("run-1", 200, 200));
+    await waitFor(() => expect(fetchPage).toHaveBeenCalledWith("run-1", 200, 200, undefined, undefined));
     expect((await screen.findAllByText("北交样本")).length).toBeGreaterThanOrEqual(1);
 
     await userEvent.selectOptions(screen.getByLabelText("每页数量"), "50");
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 50, 0));
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 50, 0, undefined, undefined));
     expect(screen.getByText("第 1 / 9 页")).toBeInTheDocument();
   });
 });

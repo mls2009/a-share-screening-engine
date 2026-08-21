@@ -161,6 +161,8 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         run_id: UUID,
         limit: int = Query(default=100, ge=1, le=1000),
         offset: int = Query(default=0, ge=0),
+        sort_by: Literal["rank", "symbol", "close", "return_20", "volume_ratio_20"] | None = None,
+        sort_direction: Literal["asc", "desc"] | None = None,
     ) -> dict:
         row = context.database.connection.execute(
             """
@@ -186,7 +188,9 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             "realtime_covered": row[4],
             "failed_batches": row[5],
             "match_count": row[6],
-            "matches": context.screening.results(run_id, limit, offset),
+            "matches": context.screening.results(
+                run_id, limit, offset, sort_by, sort_direction
+            ),
         }
 
     @app.get("/api/sync/jobs/{job_id}")

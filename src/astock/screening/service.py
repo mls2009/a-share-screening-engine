@@ -112,12 +112,27 @@ class ScreeningService:
     def validate(self, tree: Node) -> list[ScreenValidationIssue]:
         return validate_tree(tree)
 
-    def results(self, run_id: UUID, limit: int = 100, offset: int = 0) -> list[dict]:
+    def results(
+        self,
+        run_id: UUID,
+        limit: int = 100,
+        offset: int = 0,
+        sort_by: str | None = None,
+        sort_direction: Literal["asc", "desc"] | None = None,
+    ) -> list[dict]:
+        order_by = {
+            "rank": "match_rank",
+            "symbol": "coalesce(json_extract_string(feature_snapshot, '$.name'), symbol)",
+            "close": "try_cast(json_extract(feature_snapshot, '$.close') as double)",
+            "return_20": "try_cast(json_extract(feature_snapshot, '$.return_20') as double)",
+            "volume_ratio_20": "try_cast(json_extract(feature_snapshot, '$.volume_ratio_20') as double)",
+        }.get(sort_by or "", "match_rank")
+        direction = sort_direction if sort_by is not None else "asc"
         cursor = self.connection.execute(
-            """
+            f"""
             select symbol, match_rank, feature_snapshot, explanation
             from screen_matches where run_id = ?
-            order by match_rank limit ? offset ?
+            order by {order_by} {direction} nulls last, match_rank asc limit ? offset ?
             """,
             [run_id, limit, offset],
         )

@@ -1,16 +1,16 @@
 import { Play, Radio, Save, SlidersHorizontal } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api } from "../../api";
 import type { MetricSpec, ScreenMatch, ScreenRunResult, UiGroupNode, UiNode } from "../../types";
 import { ConditionTree } from "./ConditionTree";
-import { ResultsTable } from "./ResultsTable";
+import { ResultsTable, type ScreenSortField, type SortDirection } from "./ResultsTable";
 import { createGroup, toApiNode } from "./treeModel";
 
 export interface ScreenerClient {
   catalog(): Promise<MetricSpec[]>;
   runScreen(payload: object): Promise<ScreenRunResult>;
-  screenResults(runId: string, limit: number, offset: number): Promise<ScreenRunResult>;
+  screenResults(runId: string, limit: number, offset: number, sortBy?: ScreenSortField, sortDirection?: SortDirection): Promise<ScreenRunResult>;
 }
 
 const today = () => new Intl.DateTimeFormat("en-CA", {
@@ -34,6 +34,9 @@ export function ScreenerPage({
   const [paging, setPaging] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(200);
+  const [sortBy, setSortBy] = useState<ScreenSortField>();
+  const [sortDirection, setSortDirection] = useState<SortDirection>();
+  const sortRef = useRef<{ by?: ScreenSortField; direction?: SortDirection }>({});
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -50,6 +53,9 @@ export function ScreenerPage({
       setResult(next);
       setSelected(next.matches[0]);
       setPage(1);
+      sortRef.current = {};
+      setSortBy(undefined);
+      setSortDirection(undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "筛选失败");
     } finally {
@@ -57,7 +63,12 @@ export function ScreenerPage({
     }
   };
 
-  const loadPage = async (nextPage: number, nextPageSize = pageSize) => {
+  const loadPage = async (
+    nextPage: number,
+    nextPageSize = pageSize,
+    nextSortBy = sortRef.current.by,
+    nextSortDirection = sortRef.current.direction,
+  ) => {
     if (!result) return;
     setPaging(true); setError("");
     try {
@@ -65,6 +76,8 @@ export function ScreenerPage({
         result.run_id,
         nextPageSize,
         (nextPage - 1) * nextPageSize,
+        nextSortBy,
+        nextSortDirection,
       );
       setResult(next);
       setSelected(next.matches[0]);
@@ -74,6 +87,16 @@ export function ScreenerPage({
     } finally {
       setPaging(false);
     }
+  };
+
+  const changeSort = (field: ScreenSortField) => {
+    const { by, direction } = sortRef.current;
+    const nextDirection = by !== field ? "desc" : direction === "desc" ? "asc" : undefined;
+    const nextSortBy = nextDirection ? field : undefined;
+    sortRef.current = { by: nextSortBy, direction: nextDirection };
+    setSortBy(nextSortBy);
+    setSortDirection(nextDirection);
+    void loadPage(1, pageSize, nextSortBy, nextDirection);
   };
 
   const totalPages = result ? Math.max(1, Math.ceil(result.match_count / pageSize)) : 1;
@@ -99,7 +122,7 @@ export function ScreenerPage({
           {result && <div className="run-stats"><span>全市场 <b>{result.universe_size.toLocaleString("zh-CN")}</b></span><span>实时覆盖 <b>{result.realtime_covered.toLocaleString("zh-CN")}</b></span></div>}
         </div>
         {!result ? <div className="result-empty">组合条件后运行，命中股票将在这里显示。</div> : <>
-          <ResultsTable matches={result.matches} selected={selected?.symbol} onSelect={setSelected} onOpenChart={onOpenChart} />
+          <ResultsTable matches={result.matches} selected={selected?.symbol} onSelect={setSelected} onOpenChart={onOpenChart} sortBy={sortBy} sortDirection={sortDirection} onSort={changeSort} />
           <div className="results-pagination">
             <label>每页<select aria-label="每页数量" value={pageSize} disabled={paging} onChange={(event) => {
               const nextSize = Number(event.target.value);

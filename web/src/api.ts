@@ -20,10 +20,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  screenResults: (runId: string, limit: number, offset: number) =>
-    request<ScreenRunResult>(
-      `/api/screens/runs/${encodeURIComponent(runId)}?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`,
-    ),
+  screenResults: (runId: string, limit: number, offset: number, sortBy?: string, sortDirection?: "asc" | "desc") => {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (sortBy && sortDirection) {
+      params.set("sort_by", sortBy);
+      params.set("sort_direction", sortDirection);
+    }
+    return request<ScreenRunResult>(`/api/screens/runs/${encodeURIComponent(runId)}?${params}`);
+  },
   searchSymbols: (query: string) =>
     request<SymbolSearchResult[]>(
       `/api/symbols/search?${new URLSearchParams({ q: query })}`,
