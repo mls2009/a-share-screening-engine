@@ -94,6 +94,13 @@ export interface Bar {
   amount_cny: number;
 }
 
+export interface SymbolSearchResult {
+  symbol: string;
+  name: string;
+  exchange: "SH" | "SZ" | "BJ";
+  instrument_type: "stock" | "etf";
+}
+
 export interface PriceZoneBase {
   zone_id: string;
   timeframe: Timeframe;

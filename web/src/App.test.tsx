@@ -18,6 +18,6 @@ describe("App", () => {
     render(<App />);
     await userEvent.click(screen.getByRole("button", { name: "K 线研究" }));
     expect(await screen.findByRole("heading", { name: "K 线研究" })).toBeInTheDocument();
-    expect(await screen.findByLabelText("证券代码")).toHaveValue("600519.SH");
+    expect(await screen.findByLabelText("证券代码或名称")).toHaveValue("600519.SH");
   });
 });

@@ -2,7 +2,7 @@ import { Search, Trash2 } from "lucide-react";
 import { type ComponentType, useEffect, useRef, useState } from "react";
 
 import { api } from "../../api";
-import type { Bar, PriceZone, Timeframe } from "../../types";
+import type { Bar, PriceZone, SymbolSearchResult, Timeframe } from "../../types";
 import { DrawingToolbar } from "./DrawingToolbar";
 import { zonePresentation } from "./chartOptions";
 import { type DrawingAnchor, type DrawingGeometry, type DrawingKind, buildManualZonePayload } from "./drawing";
@@ -10,6 +10,7 @@ import { StockChart, type StockChartProps } from "./StockChart";
 import { TimeframeToolbar } from "./TimeframeToolbar";
 
 export interface ChartClient {
+  searchSymbols(query: string): Promise<SymbolSearchResult[]>;
   bars(symbol: string, timeframe: Timeframe, start: string, end: string): Promise<Bar[]>;
   zones(symbol: string, timeframe: Timeframe, asOf: string): Promise<PriceZone[]>;
   createManualZone(symbol: string, payload: object): Promise<PriceZone>;
@@ -36,6 +37,8 @@ export function ChartPage({
 }) {
   const [symbolInput, setSymbolInput] = useState(initialSymbol);
   const [symbol, setSymbol] = useState(initialSymbol);
+  const [suggestions, setSuggestions] = useState<SymbolSearchResult[]>([]);
+  const [searchActive, setSearchActive] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [bars, setBars] = useState<Bar[]>([]);
   const [zones, setZones] = useState<PriceZone[]>([]);
@@ -46,6 +49,30 @@ export function ChartPage({
   const [error, setError] = useState("");
   const deletingZoneIdsRef = useRef(new Set<string>());
   const [deletingZoneIds, setDeletingZoneIds] = useState(new Set<string>());
+
+  useEffect(() => {
+    if (!searchActive) return;
+    const query = symbolInput.trim();
+    if (!query) {
+      setSuggestions([]);
+      return;
+    }
+    let current = true;
+    const timer = window.setTimeout(() => {
+      client.searchSymbols(query)
+        .then((results) => { if (current) setSuggestions(results); })
+        .catch((cause: Error) => {
+          if (current) {
+            setSuggestions([]);
+            setError(cause.message || "证券搜索失败");
+          }
+        });
+    }, 180);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [client, searchActive, symbolInput]);
 
   useEffect(() => {
     let current = true;
@@ -75,6 +102,42 @@ export function ChartPage({
     }
   };
 
+  const openResult = (result: SymbolSearchResult) => {
+    setSymbolInput(`${result.name} ${result.symbol}`);
+    setSymbol(result.symbol);
+    setSuggestions([]);
+    setSearchActive(false);
+    setError("");
+  };
+
+  const submitSearch = async () => {
+    const query = symbolInput.trim();
+    if (!query) return;
+    setError("");
+    try {
+      const results = await client.searchSymbols(query);
+      const normalized = query.toUpperCase();
+      const exact = results.find((result) =>
+        result.symbol === normalized || result.symbol.split(".")[0] === normalized
+      );
+      if (exact) {
+        openResult(exact);
+      } else if (results.length === 1) {
+        openResult(results[0]);
+      } else if (!results.length) {
+        setSuggestions([]);
+        setError("未找到匹配的证券，请先同步行情数据");
+      } else {
+        setSuggestions(results);
+        setSearchActive(true);
+        setError("找到多个结果，请从下拉列表选择");
+      }
+    } catch (cause) {
+      setSuggestions([]);
+      setError(cause instanceof Error ? cause.message : "证券搜索失败");
+    }
+  };
+
   const remove = async (zone: PriceZone) => {
     if (deletingZoneIdsRef.current.has(zone.zone_id)) return;
     deletingZoneIdsRef.current.add(zone.zone_id);
@@ -95,8 +158,39 @@ export function ChartPage({
     <main className="chart-page">
       <header className="chart-heading">
         <div><p className="eyebrow">PRICE STRUCTURE / DRAWING DESK</p><h1>K 线研究</h1></div>
-        <form onSubmit={(event) => { event.preventDefault(); setSymbol(symbolInput.trim().toUpperCase()); }}>
-          <Search size={15} /><input aria-label="证券代码" value={symbolInput} onChange={(event) => setSymbolInput(event.target.value)} /><button type="submit">打开</button>
+        <form onSubmit={(event) => { event.preventDefault(); void submitSearch(); }}>
+          <Search size={15} />
+          <input
+            aria-autocomplete="list"
+            aria-controls="symbol-search-results"
+            aria-expanded={suggestions.length > 0}
+            aria-label="证券代码或名称"
+            placeholder="代码 / 中文名称"
+            value={symbolInput}
+            onChange={(event) => {
+              setSymbolInput(event.target.value);
+              setSearchActive(true);
+              setError("");
+            }}
+          />
+          <button className="chart-search-submit" type="submit">打开</button>
+          {suggestions.length > 0 && (
+            <div className="symbol-search-results" id="symbol-search-results" role="listbox">
+              {suggestions.map((result) => (
+                <button
+                  className="symbol-search-option"
+                  key={result.symbol}
+                  role="option"
+                  type="button"
+                  onClick={() => openResult(result)}
+                >
+                  <span>{result.name}</span>
+                  <code>{result.symbol}</code>
+                  <em>{result.instrument_type === "etf" ? "ETF" : "股票"}</em>
+                </button>
+              ))}
+            </div>
+          )}
         </form>
       </header>
       <section className="chart-desk">

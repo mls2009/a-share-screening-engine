@@ -50,6 +50,7 @@ it("切换周期、用两个锚点保存手动趋势支撑并可删除自动和�
   const deleted: string[] = [];
   let stored: PriceZone[] = [automatic];
   const client: ChartClient = {
+    searchSymbols: async () => [],
     bars: async () => bars,
     zones: async () => stored,
     createManualZone: async (_symbol, payload) => { created.push(payload); stored = [...stored, manual]; return manual; },
@@ -77,6 +78,7 @@ it("切换周期、用两个锚点保存手动趋势支撑并可删除自动和�
 it("删除失败时保留线并显示错误", async () => {
   let calls = 0;
   const client: ChartClient = {
+    searchSymbols: async () => [],
     bars: async () => bars,
     zones: async () => [automatic],
     createManualZone: async () => manual,
@@ -97,6 +99,7 @@ it("删除失败时保留线并显示错误", async () => {
 
 it("自动趋势线按方向展示名称并用于删除按钮", async () => {
   const client: ChartClient = {
+    searchSymbols: async () => [],
     bars: async () => bars,
     zones: async () => [automaticUptrend, automaticDowntrend],
     createManualZone: async () => manual,
@@ -116,6 +119,7 @@ it("删除请求完成前禁止重复提交", async () => {
   let calls = 0;
   let finish!: () => void;
   const client: ChartClient = {
+    searchSymbols: async () => [],
     bars: async () => bars,
     zones: async () => [automatic],
     createManualZone: async () => manual,
@@ -133,4 +137,72 @@ it("删除请求完成前禁止重复提交", async () => {
   expect(button).toBeDisabled();
   finish();
   await waitFor(() => expect(button).not.toBeInTheDocument());
+});
+
+it("支持中文模糊搜索 ETF 并打开完整代码", async () => {
+  const requestedSymbols: string[] = [];
+  const client: ChartClient & {
+    searchSymbols(query: string): Promise<Array<{ symbol: string; name: string; exchange: string; instrument_type: "etf" }>>;
+  } = {
+    bars: async (symbol) => { requestedSymbols.push(symbol); return bars; },
+    zones: async () => [],
+    createManualZone: async () => manual,
+    deleteZone: async () => undefined,
+    searchSymbols: async (query) => query.includes("创业板") ? [{
+      symbol: "159558.SZ", name: "创业板中盘ETF", exchange: "SZ", instrument_type: "etf",
+    }] : [],
+  };
+  render(<ChartPage initialSymbol="600001.SH" client={client} Chart={FakeChart} />);
+
+  const input = screen.getByRole("textbox");
+  await userEvent.clear(input);
+  await userEvent.type(input, "创业板");
+  await userEvent.click(await screen.findByRole("option", { name: /创业板中盘ETF.*159558\.SZ.*ETF/ }));
+
+  await waitFor(() => expect(requestedSymbols).toContain("159558.SZ"));
+  expect(input).toHaveValue("创业板中盘ETF 159558.SZ");
+});
+
+it("直接提交六位代码时自动解析交易所后缀", async () => {
+  const requestedSymbols: string[] = [];
+  const client: ChartClient & {
+    searchSymbols(query: string): Promise<Array<{ symbol: string; name: string; exchange: string; instrument_type: "etf" }>>;
+  } = {
+    bars: async (symbol) => { requestedSymbols.push(symbol); return bars; },
+    zones: async () => [],
+    createManualZone: async () => manual,
+    deleteZone: async () => undefined,
+    searchSymbols: async () => [{
+      symbol: "159558.SZ", name: "创业板中盘ETF", exchange: "SZ", instrument_type: "etf",
+    }],
+  };
+  render(<ChartPage initialSymbol="600001.SH" client={client} Chart={FakeChart} />);
+
+  const input = screen.getByRole("textbox");
+  await userEvent.clear(input);
+  await userEvent.type(input, "159558");
+  await userEvent.click(screen.getByRole("button", { name: "打开" }));
+
+  await waitFor(() => expect(requestedSymbols).toContain("159558.SZ"));
+});
+
+it("无搜索结果时保留当前图表", async () => {
+  const client: ChartClient & {
+    searchSymbols(query: string): Promise<[]>;
+  } = {
+    bars: async () => bars,
+    zones: async () => [],
+    createManualZone: async () => manual,
+    deleteZone: async () => undefined,
+    searchSymbols: async () => [],
+  };
+  render(<ChartPage initialSymbol="600001.SH" client={client} Chart={FakeChart} />);
+
+  const input = screen.getByRole("textbox");
+  await userEvent.clear(input);
+  await userEvent.type(input, "不存在的ETF");
+  await userEvent.click(screen.getByRole("button", { name: "打开" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("未找到匹配的证券");
+  expect(screen.getByText("600001.SH")).toBeInTheDocument();
 });

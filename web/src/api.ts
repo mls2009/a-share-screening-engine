@@ -1,4 +1,4 @@
-import type { BacktestRun, Bar, MetricSpec, MonitorSignal, MonitorStatus, MonitorTask, PriceZone, ScreenRunResult, Timeframe } from "./types";
+import type { BacktestRun, Bar, MetricSpec, MonitorSignal, MonitorStatus, MonitorTask, PriceZone, ScreenRunResult, SymbolSearchResult, Timeframe } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -23,6 +23,10 @@ export const api = {
   screenResults: (runId: string, limit: number, offset: number) =>
     request<ScreenRunResult>(
       `/api/screens/runs/${encodeURIComponent(runId)}?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`,
+    ),
+  searchSymbols: (query: string) =>
+    request<SymbolSearchResult[]>(
+      `/api/symbols/search?${new URLSearchParams({ q: query })}`,
     ),
   bars: (symbol: string, timeframe: Timeframe, start: string, end: string) =>
     request<Bar[]>(

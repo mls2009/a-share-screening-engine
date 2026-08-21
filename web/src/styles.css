@@ -74,10 +74,17 @@ h1 { margin: 0; font-size: clamp(34px, 4.5vw, 66px); line-height: .96; letter-sp
 .chart-page { min-width: 0; padding: 34px clamp(22px, 3.2vw, 54px) 70px; }
 .chart-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
 .chart-heading h1 { font-size: clamp(34px, 3.7vw, 54px); }
-.chart-heading form { height: 36px; display: flex; align-items: center; border: 1px solid #374044; background: #0d1012; }
+.chart-heading form { position: relative; height: 36px; display: flex; align-items: center; border: 1px solid #374044; background: #0d1012; }
 .chart-heading form svg { margin-left: 10px; color: var(--muted); }
 .chart-heading form input { width: 155px; border: 0; box-shadow: none; font: 500 12px "IBM Plex Mono", monospace; }
 .chart-heading form button { align-self: stretch; border: 0; border-left: 1px solid #374044; padding: 0 13px; background: #171c1e; color: var(--paper); cursor: pointer; }
+.chart-heading form .symbol-search-results { position: absolute; z-index: 20; top: calc(100% + 7px); right: -1px; width: 330px; max-height: 310px; overflow-y: auto; border: 1px solid #3d474b; background: #0d1113; box-shadow: 0 18px 45px #000b; }
+.chart-heading form .symbol-search-option { width: 100%; min-height: 48px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 8px 11px; border: 0; border-bottom: 1px solid #252d30; background: transparent; text-align: left; }
+.chart-heading form .symbol-search-option:last-child { border-bottom: 0; }
+.chart-heading form .symbol-search-option:hover, .chart-heading form .symbol-search-option:focus-visible { background: #172023; outline: none; }
+.symbol-search-option span { overflow: hidden; color: var(--paper); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.symbol-search-option code { color: #9faeb3; font: 500 11px "IBM Plex Mono", monospace; }
+.symbol-search-option em { min-width: 32px; padding: 3px 5px; border: 1px solid #59666b; color: #d7e0e3; font: 600 9px "IBM Plex Mono", monospace; text-align: center; }
 .chart-desk, .zone-ledger { margin-top: 16px; border: 1px solid var(--line); background: #0e1113; }
 .chart-topline { height: 52px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
 .chart-topline > div:first-child { display: flex; align-items: baseline; gap: 14px; }
@@ -128,6 +135,7 @@ h1 { margin: 0; font-size: clamp(34px, 4.5vw, 66px); line-height: .96; letter-sp
   .chart-page { padding: 26px 12px; }
   .chart-heading form { width: 100%; }
   .chart-heading form input { flex: 1; }
+  .chart-heading form .symbol-search-results { left: -1px; right: -1px; width: auto; }
   .stock-chart, .chart-loading, .chart-canvas-wrap { min-height: 440px; height: 440px; }
   .drawing-kinds, .geometry-kinds { width: 100%; }
   .drawing-kinds button, .geometry-kinds button { flex: 1; justify-content: center; }
