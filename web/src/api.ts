@@ -26,7 +26,7 @@ export const api = {
     ),
   zones: (symbol: string, timeframe: Timeframe, asOf: string) =>
     request<PriceZone[]>(
-      `/api/symbols/${encodeURIComponent(symbol)}/zones?${new URLSearchParams({ timeframe, as_of: asOf, limit_each: "20" })}`,
+      `/api/symbols/${encodeURIComponent(symbol)}/zones?${new URLSearchParams({ timeframe, as_of: asOf, limit_each: "3" })}`,
     ),
   createManualZone: (symbol: string, payload: object) =>
     request<PriceZone>(`/api/symbols/${encodeURIComponent(symbol)}/zones/manual`, {
