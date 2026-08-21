@@ -89,88 +89,6 @@ def _clusters(
     return [cluster for cluster in clusters if len(cluster) >= 2]
 
 
-def _fit_trend(
-    data: pd.DataFrame, positions: list[int], column: str
-) -> tuple[float, float, float, float]:
-    x = np.array(positions, dtype=float)
-    prices = np.array([float(data.iloc[position][column]) for position in positions])
-    slope, intercept = np.polyfit(x, prices, 1)
-    center = float(slope * (len(data) - 1) + intercept)
-    residual = float(np.mean(np.abs(prices - (slope * x + intercept))))
-    return float(slope), float(intercept), center, residual
-
-
-def _directional_trend_zones(
-    data: pd.DataFrame,
-    as_of: date,
-    pivot_groups: tuple[tuple[str, list[int]], ...],
-    tolerance: float,
-    rule_version: str,
-) -> list[PriceZone]:
-    candidates: dict[str, list[tuple[list[int], str, float, float, float, float]]] = {
-        "uptrend": [],
-        "downtrend": [],
-    }
-    for column, positions in pivot_groups:
-        recent = positions[-12:]
-        for size in range(2, min(5, len(recent)) + 1):
-            for start in range(len(recent) - size + 1):
-                selected = recent[start : start + size]
-                slope, intercept, center, residual = _fit_trend(
-                    data, selected, column
-                )
-                total_move = abs(slope) * (selected[-1] - selected[0])
-                if residual > tolerance or slope == 0 or total_move < tolerance:
-                    continue
-                direction = "uptrend" if slope > 0 else "downtrend"
-                candidates[direction].append(
-                    (selected, column, slope, intercept, center, residual)
-                )
-
-    zones = []
-    for direction, direction_candidates in candidates.items():
-        if not direction_candidates:
-            continue
-        selected, column, slope, intercept, center, residual = min(
-            direction_candidates,
-            key=lambda item: (
-                -item[0][-1],
-                -len(item[0]),
-                item[5] / tolerance,
-            ),
-        )
-        anchors = tuple(
-            (
-                pd.Timestamp(data.iloc[position]["timestamp"]).to_pydatetime(),
-                float(data.iloc[position][column]),
-            )
-            for position in selected
-        )
-        zones.append(
-            PriceZone(
-                as_of_date=as_of,
-                zone_kind=direction,
-                geometry="trend",
-                lower_price=center - tolerance,
-                center_price=center,
-                upper_price=center + tolerance,
-                slope=slope,
-                intercept=intercept,
-                anchors=anchors,
-                strength=max(
-                    0.1,
-                    min(
-                        1.0,
-                        len(selected) / 5 * (1 - min(residual / tolerance, 0.9)),
-                    ),
-                ),
-                touches=len(selected),
-                rule_version=rule_version,
-            )
-        )
-    return zones
-
-
 def detect_zones(
     bars: pd.DataFrame,
     as_of: date,
@@ -232,15 +150,6 @@ def detect_zones(
                 )
             )
 
-    zones.extend(
-        _directional_trend_zones(
-            data,
-            as_of,
-            (("low", low_positions), ("high", high_positions)),
-            tolerance,
-            rule_version,
-        )
-    )
     return sorted(zones, key=lambda zone: (zone.geometry, zone.zone_kind, zone.center_price))
 
 

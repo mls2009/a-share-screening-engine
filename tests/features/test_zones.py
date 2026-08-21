@@ -64,7 +64,7 @@ def test_detects_horizontal_support_and_resistance_as_price_zones() -> None:
 
 
 @pytest.mark.parametrize("timeframe", [Timeframe.DAY, Timeframe.WEEK, Timeframe.MONTH])
-def test_detects_at_most_one_trend_line_per_direction_for_every_timeframe(
+def test_detect_zones_does_not_create_automatic_trends(
     timeframe: Timeframe,
 ) -> None:
     frame = _frame(
@@ -109,106 +109,6 @@ def test_detects_at_most_one_trend_line_per_direction_for_every_timeframe(
         timeframe=timeframe,
         pivot_order=1,
     )
-    trends = [zone for zone in zones if zone.geometry == "trend"]
-    uptrends = [zone for zone in trends if zone.zone_kind == "uptrend"]
-    downtrends = [zone for zone in trends if zone.zone_kind == "downtrend"]
-
-    assert len(uptrends) == 1
-    assert uptrends[0].slope is not None and uptrends[0].slope > 0
-    assert len(downtrends) == 1
-    assert downtrends[0].slope is not None and downtrends[0].slope < 0
-    assert len(trends) == 2
-
-
-def test_intraday_trend_anchors_keep_the_full_bar_timestamp() -> None:
-    frame = _frame(
-        [12] * 14,
-        lows={1: 8, 4: 9, 7: 10, 10: 11},
-        highs={2: 16, 5: 15, 8: 14, 11: 13},
-    )
-    frame["timestamp"] = pd.date_range(
-        "2026-08-20 09:30:00+08:00", periods=len(frame), freq="15min"
-    )
-
-    trends = [
-        zone
-        for zone in detect_zones(
-            frame,
-            as_of=date(2026, 8, 20),
-            timeframe=Timeframe.MIN_15,
-            pivot_order=1,
-        )
-        if zone.geometry == "trend"
-    ]
-
-    assert trends
-    assert all(isinstance(anchor_at, datetime) for zone in trends for anchor_at, _ in zone.anchors)
-    assert all("T" in anchor_at.isoformat() for zone in trends for anchor_at, _ in zone.anchors)
-
-
-def test_directional_trends_prefer_recent_valid_windows_over_older_touch_count() -> None:
-    frame = _frame(
-        [100 + index * 0.01 for index in range(40)],
-        lows={1: 95, 4: 96, 7: 97, 10: 98, 13: 99, 28: 94, 34: 98},
-        highs={
-            2: 105.2,
-            5: 104.2,
-            8: 103.2,
-            11: 102.2,
-            14: 101.2,
-            29: 106,
-            35: 102,
-        },
-    )
-
-    zones = detect_zones(
-        frame,
-        as_of=pd.Timestamp(frame.iloc[-1]["timestamp"]).date(),
-        timeframe=Timeframe.DAY,
-        pivot_order=1,
-    )
-    trends = [zone for zone in zones if zone.geometry == "trend"]
-    uptrends = [zone for zone in trends if zone.zone_kind == "uptrend"]
-    downtrends = [zone for zone in trends if zone.zone_kind == "downtrend"]
-
-    assert len(uptrends) == 1
-    assert uptrends[0].anchors[-1][0] == pd.Timestamp(
-        frame.iloc[34]["timestamp"]
-    ).to_pydatetime()
-    assert uptrends[0].touches == 2
-    assert len(downtrends) == 1
-    assert downtrends[0].anchors[-1][0] == pd.Timestamp(
-        frame.iloc[35]["timestamp"]
-    ).to_pydatetime()
-    assert downtrends[0].touches == 2
-    assert len(trends) == 2
-
-
-def test_nearly_horizontal_pivots_do_not_create_a_trend_line() -> None:
-    frame = _frame(
-        [11] * 10,
-        lows={
-            0: 11,
-            1: 10.0,
-            2: 11,
-            3: 10.8,
-            4: 10.1,
-            5: 11.1,
-            6: 10.9,
-            7: 10.2,
-            8: 11.2,
-            9: 11,
-        },
-        highs={index: 12 + index * 0.1 for index in range(10)},
-    )
-
-    zones = detect_zones(
-        frame,
-        as_of=date(2026, 1, 14),
-        timeframe=Timeframe.MONTH,
-        pivot_order=1,
-    )
-
     assert not [zone for zone in zones if zone.geometry == "trend"]
 
 
