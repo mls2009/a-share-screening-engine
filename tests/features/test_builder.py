@@ -76,6 +76,8 @@ def test_builder_persists_idempotent_daily_weekly_monthly_features(tmp_path: Pat
     assert latest["listing_trade_days"] == 40
     assert latest["is_new"] is False
     assert latest["is_secondary_new"] is True
+    assert latest["high_history"] == 41.0
+    assert latest["low_history"] == 0.0
 
 
 def test_builder_persists_automatic_support_and_resistance_zones(tmp_path: Path) -> None:

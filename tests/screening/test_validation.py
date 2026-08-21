@@ -9,7 +9,9 @@ def test_catalog_contains_extended_price_volume_pattern_and_risk_metrics() -> No
 
     assert {
         "high_20",
+        "high_history",
         "low_250",
+        "low_history",
         "max_drawdown_60",
         "up_streak",
         "down_streak",

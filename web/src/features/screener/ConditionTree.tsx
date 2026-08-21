@@ -160,7 +160,8 @@ function ConditionRow({
   const family = metricFamily(spec);
   const selectorValue = node.direction ? `${family}:${node.direction}` : family;
   const familyMetrics = catalog.filter((metric) => metricFamily(metric) === family);
-  const periods = familyMetrics.filter((metric) => metric.period != null).sort((a, b) => Number(a.period) - Number(b.period));
+  const periodOrder = (period: MetricSpec["period"]) => period === "history" ? Infinity : Number(period);
+  const periods = familyMetrics.filter((metric) => metric.period != null).sort((a, b) => periodOrder(a.period) - periodOrder(b.period));
   const metricPeers = catalog.filter((metric) => metric.unit === spec.unit);
   const metricOperand = node.right.kind === "metric" ? node.right : null;
   const directionalOperators = new Set(["gt", "gte", "between"]);
@@ -176,7 +177,7 @@ function ConditionRow({
     const option = options.find((item) => item.value === value);
     if (option) onUpdate(nextCondition(node, option, spec));
   };
-  const changePeriod = (period: number) => {
+  const changePeriod = (period: NonNullable<MetricSpec["period"]>) => {
     const metric = periods.find((item) => item.period === period);
     if (metric) onUpdate({ ...node, metric: metric.key });
   };
@@ -191,8 +192,8 @@ function ConditionRow({
         <select aria-label="指标" value={selectorValue} onChange={(event) => changeSelector(event.target.value)}>
           {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
-        {periods.length > 1 && <><span>/</span><select aria-label="计算周期" value={spec.period ?? ""} onChange={(event) => changePeriod(Number(event.target.value))}>
-          {periods.map((metric) => <option key={metric.key} value={metric.period ?? ""}>{metric.period} 周期</option>)}
+        {periods.length > 1 && <><span>/</span><select aria-label="计算周期" value={spec.period ?? ""} onChange={(event) => changePeriod(event.target.value === "history" ? "history" : Number(event.target.value))}>
+          {periods.map((metric) => <option key={metric.key} value={metric.period ?? ""}>{metric.period === "history" ? "历史" : `${metric.period} 周期`}</option>)}
         </select></>}
       </div>
       <select

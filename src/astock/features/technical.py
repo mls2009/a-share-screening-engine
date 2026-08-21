@@ -74,6 +74,8 @@ def compute_technical_features(bars: pd.DataFrame) -> pd.DataFrame:
         data[f"high_{window}"] = high.rolling(window).max()
         data[f"low_{window}"] = low.rolling(window).min()
         data[f"max_drawdown_{window}"] = _rolling_drawdown(close, window)
+    data["high_history"] = high.cummax()
+    data["low_history"] = low.cummin()
     data["up_streak"] = _streak(close, positive=True)
     data["down_streak"] = _streak(close, positive=False)
     return data

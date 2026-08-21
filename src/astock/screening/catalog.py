@@ -41,7 +41,7 @@ class MetricSpec:
     operators: frozenset[Operator] = NUMERIC_OPERATORS
     group: str = "technical"
     family: str | None = None
-    period: int | None = None
+    period: int | str | None = None
     directions: tuple[ChoiceSpec, ...] = ()
     choices: tuple[ChoiceSpec, ...] = ()
     multiple: bool = False
@@ -55,7 +55,7 @@ def _metric(
     *,
     group: str = "technical",
     family: str | None = None,
-    period: int | None = None,
+    period: int | str | None = None,
     directions: tuple[ChoiceSpec, ...] = (),
 ) -> MetricSpec:
     return MetricSpec(
@@ -173,10 +173,12 @@ METRICS = [
         _metric(f"high_{window}", "阶段最高价", Unit.PRICE, group="price", family="period_high", period=window)
         for window in (20, 60, 250)
     ],
+    _metric("high_history", "阶段最高价", Unit.PRICE, group="price", family="period_high", period="history"),
     *[
         _metric(f"low_{window}", "阶段最低价", Unit.PRICE, group="price", family="period_low", period=window)
         for window in (20, 60, 250)
     ],
+    _metric("low_history", "阶段最低价", Unit.PRICE, group="price", family="period_low", period="history"),
     *[
         _metric(f"max_drawdown_{window}", "最大回撤", Unit.PERCENT, group="trend", family="max_drawdown", period=window)
         for window in (20, 60, 250)

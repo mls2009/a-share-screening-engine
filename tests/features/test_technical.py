@@ -42,6 +42,17 @@ def test_computes_bollinger_atr_rsi_and_streaks() -> None:
     assert last["up_streak"] == 29
 
 
+def test_computes_available_history_high_and_low() -> None:
+    frame = _frame(3)
+    frame["high"] = [5.0, 3.0, 4.0]
+    frame["low"] = [2.0, 1.0, 1.5]
+
+    features = compute_technical_features(frame)
+
+    assert features["high_history"].tolist() == [5.0, 5.0, 5.0]
+    assert features["low_history"].tolist() == [2.0, 1.0, 1.0]
+
+
 def test_features_do_not_change_past_rows_when_future_bars_are_added() -> None:
     short = compute_technical_features(_frame(20))
     full = compute_technical_features(_frame(30)).iloc[:20]
