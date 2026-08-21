@@ -164,6 +164,53 @@ def test_catalog_validate_and_run_screen_endpoints(tmp_path: Path) -> None:
     assert run.json()["matches"][0]["symbol"] == "600001.SH"
 
 
+def test_symbol_search_matches_etf_code_and_chinese_name(tmp_path: Path) -> None:
+    client, database = _client(tmp_path)
+    database.connection.executemany(
+        """
+        insert into symbols
+          (symbol, name, exchange, board, instrument_type, is_listed)
+        values (?, ?, ?, 'main', ?, ?)
+        """,
+        [
+            ["159558.SZ", "创业板中盘ETF", "SZ", "etf", True],
+            ["159559.SZ", "创业板精选ETF", "SZ", "etf", True],
+            ["159557.SZ", "已退市ETF", "SZ", "etf", False],
+        ],
+    )
+
+    by_code = client.get("/api/symbols/search", params={"q": "159558"})
+    by_full_code = client.get(
+        "/api/symbols/search", params={"q": "159558.sz"}
+    )
+    by_name = client.get(
+        "/api/symbols/search", params={"q": "创业板", "limit": 1}
+    )
+
+    expected = {
+        "symbol": "159558.SZ",
+        "name": "创业板中盘ETF",
+        "exchange": "SZ",
+        "instrument_type": "etf",
+    }
+    assert by_code.status_code == 200
+    assert by_code.json()[0] == expected
+    assert by_full_code.json() == [expected]
+    assert by_name.status_code == 200
+    assert len(by_name.json()) == 1
+    assert by_name.json()[0] == expected
+    assert all(item["symbol"] != "159557.SZ" for item in by_code.json())
+
+
+def test_symbol_search_treats_wildcards_literally_and_blank_as_empty(
+    tmp_path: Path,
+) -> None:
+    client, _ = _client(tmp_path)
+
+    assert client.get("/api/symbols/search", params={"q": " "}).json() == []
+    assert client.get("/api/symbols/search", params={"q": "%"}).json() == []
+
+
 def test_screen_run_and_saved_results_report_total_matches_with_pagination(
     tmp_path: Path,
 ) -> None:

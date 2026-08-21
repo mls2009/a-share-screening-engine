@@ -200,6 +200,57 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             "failed": summary.failed,
         }
 
+    @app.get("/api/symbols/search")
+    def search_symbols(
+        q: str,
+        limit: int = Query(default=10, ge=1, le=20),
+    ) -> list[dict]:
+        query = q.strip()
+        if not query:
+            return []
+        normalized = query.upper()
+        rows = context.database.connection.execute(
+            """
+            select symbol, name, exchange, instrument_type
+            from symbols
+            where is_listed
+              and (
+                upper(symbol) = ?
+                or split_part(upper(symbol), '.', 1) = ?
+                or starts_with(upper(symbol), ?)
+                or contains(upper(name), ?)
+              )
+            order by
+              case
+                when upper(symbol) = ? then 0
+                when split_part(upper(symbol), '.', 1) = ? then 1
+                when starts_with(upper(symbol), ?) then 2
+                else 3
+              end,
+              symbol
+            limit ?
+            """,
+            [
+                normalized,
+                normalized,
+                normalized,
+                normalized,
+                normalized,
+                normalized,
+                normalized,
+                limit,
+            ],
+        ).fetchall()
+        return [
+            {
+                "symbol": row[0],
+                "name": row[1],
+                "exchange": row[2],
+                "instrument_type": row[3],
+            }
+            for row in rows
+        ]
+
     @app.get("/api/symbols/{symbol}/bars")
     def symbol_bars(
         symbol: str,
