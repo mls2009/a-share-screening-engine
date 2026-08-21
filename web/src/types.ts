@@ -101,6 +101,7 @@ export interface ChartIndicatorPoint {
   ma_5: number | null;
   ma_10: number | null;
   ma_20: number | null;
+  ma_30: number | null;
   boll_upper: number | null;
   boll_middle: number | null;
   boll_lower: number | null;

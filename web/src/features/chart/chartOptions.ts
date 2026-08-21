@@ -236,6 +236,7 @@ export function buildChartOption(
       line("MA5", values(indicators, "ma_5"), 0, "#f3c969"),
       line("MA10", values(indicators, "ma_10"), 0, "#6bc5ff"),
       line("MA20", values(indicators, "ma_20"), 0, "#d897ff"),
+      line("MA30", values(indicators, "ma_30"), 0, "#ffab70"),
     );
   }
   if (selected.includes("boll")) {

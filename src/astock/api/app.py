@@ -288,7 +288,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             ]
         )
         fields = (
-            "ma_5", "ma_10", "ma_20", "boll_upper", "boll_middle",
+            "ma_5", "ma_10", "ma_20", "ma_30", "boll_upper", "boll_middle",
             "boll_lower", "macd", "macd_signal", "macd_hist", "kdj_k",
             "kdj_d", "kdj_j", "rsi_14", "volume_ma_5", "volume_ma_20",
             "obv", "atr_14",

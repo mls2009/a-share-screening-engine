@@ -203,11 +203,11 @@ it("周线趋势锚点按日期匹配并将中心线延伸到最新K线", () => 
 
 it("默认叠加 MA，并为 BOLL 和 MACD 生成对应图形", () => {
   const indicators = [{
-    timestamp: "2026-08-19T15:00:00+08:00", ma_5: 10.1, ma_10: 10.2, ma_20: 10.3,
+    timestamp: "2026-08-19T15:00:00+08:00", ma_5: 10.1, ma_10: 10.2, ma_20: 10.3, ma_30: 10.4,
     boll_upper: 11.5, boll_middle: 10.3, boll_lower: 9.1,
     macd: 0.2, macd_signal: 0.1, macd_hist: 0.2,
   }, {
-    timestamp: "2026-08-20T15:00:00+08:00", ma_5: 10.3, ma_10: 10.4, ma_20: 10.5,
+    timestamp: "2026-08-20T15:00:00+08:00", ma_5: 10.3, ma_10: 10.4, ma_20: 10.5, ma_30: 10.6,
     boll_upper: 11.7, boll_middle: 10.5, boll_lower: 9.3,
     macd: 0.3, macd_signal: 0.15, macd_hist: 0.3,
   }];
@@ -217,6 +217,7 @@ it("默认叠加 MA，并为 BOLL 和 MACD 生成对应图形", () => {
   const xAxis = option.xAxis as Array<Record<string, unknown>>;
 
   expect(series.find((item) => item.name === "MA5")).toMatchObject({ type: "line", yAxisIndex: 0, data: [10.1, 10.3] });
+  expect(series.find((item) => item.name === "MA30")).toMatchObject({ type: "line", yAxisIndex: 0, data: [10.4, 10.6] });
   expect(series.find((item) => item.name === "BOLL上轨")).toMatchObject({ type: "line", yAxisIndex: 0 });
   expect(series.find((item) => item.name === "MACD柱")).toMatchObject({ type: "bar", yAxisIndex: 2, data: [0.2, 0.3] });
   expect(series.find((item) => item.name === "DIF")).toMatchObject({ type: "line", yAxisIndex: 2 });

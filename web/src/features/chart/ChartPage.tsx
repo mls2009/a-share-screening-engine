@@ -19,7 +19,7 @@ export interface ChartClient {
 }
 
 const indicatorOptions: Array<{ value: ChartIndicator; label: string }> = [
-  { value: "ma", label: "MA 5/10/20" },
+  { value: "ma", label: "MA 5/10/20/30" },
   { value: "boll", label: "BOLL" },
   { value: "macd", label: "MACD" },
   { value: "kdj", label: "KDJ" },

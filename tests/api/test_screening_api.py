@@ -217,7 +217,7 @@ def test_chart_indicators_use_history_before_visible_window(tmp_path: Path) -> N
     history = [
         Bar(
             symbol="600001.SH",
-            timestamp=datetime(2026, 7, day, 15, tzinfo=ZoneInfo("Asia/Shanghai")),
+            timestamp=datetime(2026, 7, 1, 15, tzinfo=ZoneInfo("Asia/Shanghai")) + timedelta(days=day - 1),
             timeframe=Timeframe.DAY,
             open=day,
             high=day + 1,
@@ -228,24 +228,25 @@ def test_chart_indicators_use_history_before_visible_window(tmp_path: Path) -> N
             adjustment=Adjustment.QFQ,
             source="test",
         )
-        for day in range(1, 26)
+        for day in range(1, 36)
     ]
     bar_store.upsert(history)
 
     response = client.get(
         "/api/symbols/600001.SH/indicators",
-        params={"timeframe": "1d", "start": "2026-07-25", "end": "2026-07-25"},
+        params={"timeframe": "1d", "start": "2026-08-04", "end": "2026-08-04"},
     )
 
     assert response.status_code == 200
     result = response.json()[0]
-    assert result["timestamp"] == "2026-07-25T15:00:00+08:00"
-    assert result["ma_5"] == 23.0
-    assert result["ma_10"] == 20.5
-    assert result["ma_20"] == 15.5
-    assert result["boll_middle"] == 15.5
+    assert result["timestamp"] == "2026-08-04T15:00:00+08:00"
+    assert result["ma_5"] == 33.0
+    assert result["ma_10"] == 30.5
+    assert result["ma_20"] == 25.5
+    assert result["ma_30"] == 20.5
+    assert result["boll_middle"] == 25.5
     assert result["rsi_14"] == 100.0
-    assert result["volume_ma_20"] == 1550.0
+    assert result["volume_ma_20"] == 2550.0
     assert result["atr_14"] == 2.0
 
 
