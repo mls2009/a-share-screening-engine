@@ -40,6 +40,7 @@ export function App() {
               onClick={() => setPage(id)}
               type="button"
               aria-label={label}
+              aria-current={page === id ? "page" : undefined}
             >
               <span className="nav-index">0{index + 1}</span>
               <Icon size={18} strokeWidth={1.7} />
