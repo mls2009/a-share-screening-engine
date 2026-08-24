@@ -52,6 +52,7 @@ describe("BacktestPage", () => {
 
     expect(client.runBacktest).toHaveBeenCalledOnce();
     expect(await screen.findByText("12.50%")) .toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "交易明细表格" })).toHaveClass("table-scroll");
     expect(screen.getByText("600001.SH")).toBeInTheDocument();
     expect(screen.getByText("买入")).toBeInTheDocument();
   });

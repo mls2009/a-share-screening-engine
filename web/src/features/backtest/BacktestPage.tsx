@@ -122,7 +122,7 @@ export function BacktestPage({ client = api }: { client?: BacktestClient }) {
             <div><span>完成交易</span><strong>{run.result.metrics.trade_count}</strong></div>
           </div>
           <div className="report-panel"><h2><Activity size={17} />权益曲线</h2><EquitySparkline run={run} /></div>
-          <div className="report-panel"><h2>交易明细</h2><div className="table-scroll"><table><thead><tr><th>证券</th><th>方向</th><th>信号时间</th><th>成交时间</th><th>数量</th><th>价格</th><th>费用</th></tr></thead><tbody>{run.result.trades.map((trade, index) => <tr key={`${trade.timestamp}-${index}`}><td>{trade.symbol}</td><td className={trade.side}>{trade.side === "buy" ? "买入" : "卖出"}</td><td>{new Date(trade.signal_at).toLocaleString("zh-CN")}</td><td>{new Date(trade.timestamp).toLocaleString("zh-CN")}</td><td>{trade.quantity.toLocaleString("zh-CN")}</td><td>{trade.price.toFixed(3)}</td><td>{(trade.commission + trade.tax + trade.transfer_fee).toFixed(2)}</td></tr>)}</tbody></table></div></div>
+          <div className="report-panel"><h2>交易明细</h2><div className="table-scroll" role="region" aria-label="交易明细表格" tabIndex={0}><table><thead><tr><th>证券</th><th>方向</th><th>信号时间</th><th>成交时间</th><th>数量</th><th>价格</th><th>费用</th></tr></thead><tbody>{run.result.trades.map((trade, index) => <tr key={`${trade.timestamp}-${index}`}><td>{trade.symbol}</td><td className={trade.side}>{trade.side === "buy" ? "买入" : "卖出"}</td><td>{new Date(trade.signal_at).toLocaleString("zh-CN")}</td><td>{new Date(trade.timestamp).toLocaleString("zh-CN")}</td><td>{trade.quantity.toLocaleString("zh-CN")}</td><td>{trade.price.toFixed(3)}</td><td>{(trade.commission + trade.tax + trade.transfer_fee).toFixed(2)}</td></tr>)}</tbody></table></div></div>
         </section>
       )}
     </main>

@@ -347,7 +347,7 @@ select:focus, input:focus { border-color: #7c8a8f; box-shadow: inset 2px 0 var(-
 .equity-chart { height: 210px; padding: 18px; background: linear-gradient(180deg, rgba(200, 255, 66, .025), transparent); }
 .equity-chart svg { width: 100%; height: 100%; overflow: visible; }
 .equity-chart polyline { fill: none; stroke: var(--signal); stroke-width: .7; vector-effect: non-scaling-stroke; }
-.table-scroll { overflow: auto; }
+.table-scroll { width: 100%; max-width: 100%; overflow: auto; overscroll-behavior-inline: contain; -webkit-overflow-scrolling: touch; }
 .report-panel table { width: 100%; min-width: 760px; border-collapse: collapse; font: 500 10px "IBM Plex Mono", monospace; }
 .report-panel th, .report-panel td { padding: 10px 13px; border-top: 1px solid #22292c; text-align: right; }
 .report-panel th { color: #6f7a7f; font-size: 8px; letter-spacing: .08em; }
@@ -363,10 +363,14 @@ select:focus, input:focus { border-color: #7c8a8f; box-shadow: inset 2px 0 var(-
 
 @media (max-width: 760px) {
   .backtest-page { padding: 26px 12px; }
-  .backtest-page .compact-heading .run-button { width: 100%; justify-content: center; }
-  .backtest-config { grid-template-columns: 1fr 1fr; }
+  .backtest-page .compact-heading .run-button { width: 100%; min-height: 44px; justify-content: center; }
+  .backtest-config { grid-template-columns: 1fr; }
   .metrics-grid { grid-template-columns: 1fr 1fr; }
   .strategy-tree .condition-row { grid-template-columns: 1fr 1fr; }
+  .backtest-report, .report-panel { min-width: 0; }
+  .equity-chart { height: 170px; padding: 14px 10px; }
+  .report-panel th:first-child, .report-panel td:first-child { position: sticky; left: 0; z-index: 1; background: #0e1113; }
+  .report-panel th:first-child { z-index: 2; }
 }
 
 /* Live monitor: operational state is always visible; alerts read like a signal tape. */
@@ -418,6 +422,13 @@ select:focus, input:focus { border-color: #7c8a8f; box-shadow: inset 2px 0 var(-
 @media (max-width: 760px) {
   .monitor-page { padding: 26px 12px; }
   .monitor-runtime { width: 100%; justify-content: space-between; }
-  .monitor-form { grid-template-columns: 1fr 1fr; }
-  .monitor-form .run-button { grid-column: 1 / -1; justify-content: center; }
+  .monitor-runtime button { min-height: 44px; }
+  .monitor-form { grid-template-columns: 1fr; }
+  .monitor-form .run-button { width: 100%; min-height: 44px; grid-column: 1 / -1; justify-content: center; }
+  .monitor-grid, .task-ledger, .signal-ledger { min-width: 0; }
+  .task-list { grid-template-columns: 1fr; }
+  .task-list code { overflow-wrap: anywhere; }
+  .task-list footer button { min-height: 44px; }
+  .task-list footer button:last-child { min-width: 44px; padding: 0; }
+  .signal-list article { padding-right: 68px; }
 }

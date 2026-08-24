@@ -101,11 +101,11 @@ export function MonitorPage({ client = api }: { client?: MonitorClient }) {
       </section>
       {scope === "market" && <p className="scope-note">全市场任务可留空证券代码，将按数据库内全部在市 A 股分批扫描。</p>}
       <div className="monitor-grid">
-        <section className="task-ledger">
+        <section className="task-ledger" role="region" aria-label="监控任务">
           <div className="section-title"><div><span>监控任务</span><em>{tasks.length}</em></div><button type="button" className="ghost-button" onClick={async () => { const result = await client.scanMonitor(); setMessage(`手动扫描完成，触发 ${result.triggered} 条`); }}>立即扫描</button></div>
           {!tasks.length ? <div className="result-empty">尚未创建监控规则。</div> : <div className="task-list">{tasks.map((task) => <article key={task.task_id} className={task.enabled ? "" : "disabled"}><div><i className={task.comparator.includes("above") ? "up" : "down"} /><span>{task.enabled ? "监控中" : "已暂停"} · {task.scope === "market" ? "全市场" : "自选股"}</span></div><h3>{task.name}</h3><code>{task.symbols.length ? task.symbols.join(" · ") : "ALL A-SHARES"}</code><p>{comparatorLabels[task.comparator]} <strong>{task.threshold}</strong> · 冷却 {task.cooldown_seconds}s</p><footer><button type="button" onClick={async () => { const next = await client.toggleMonitorTask(task.task_id, !task.enabled); setTasks((current) => current.map((item) => item.task_id === task.task_id ? next : item)); }}>{task.enabled ? "暂停" : "启用"}</button><button type="button" aria-label={`删除监控 ${task.name}`} onClick={async () => { await client.deleteMonitorTask(task.task_id); setTasks((current) => current.filter((item) => item.task_id !== task.task_id)); }}><Trash2 size={13} /></button></footer></article>)}</div>}
         </section>
-        <section className="signal-ledger">
+        <section className="signal-ledger" role="region" aria-label="最近触发">
           <div className="section-title"><div><span>最近触发</span></div><button type="button" className="ghost-button" disabled={!status?.feishu_configured} onClick={async () => { await client.testFeishu(); setMessage("飞书测试消息已发送"); }}><Bot size={13} />测试飞书</button></div>
           {!signals.length ? <div className="result-empty">暂无触发记录。</div> : <div className="signal-list">{signals.map((signal) => <article key={signal.signal_key}><time>{new Date(signal.triggered_at).toLocaleString("zh-CN")}</time><strong>{signal.symbol}</strong><p>{comparatorLabels[signal.comparator]} {signal.threshold}</p><b>{signal.price}</b></article>)}</div>}
         </section>

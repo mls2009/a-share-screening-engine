@@ -32,6 +32,8 @@ describe("MonitorPage", () => {
 
     expect(await screen.findByRole("heading", { name: "实时监控" })).toBeInTheDocument();
     expect(await screen.findByText("茅台突破 1500")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "监控任务" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "最近触发" })).toBeInTheDocument();
     expect(screen.getAllByText("600519.SH")).toHaveLength(2);
     await userEvent.click(screen.getByRole("button", { name: "启动实时监控" }));
     expect(client.startMonitor).toHaveBeenCalledOnce();
