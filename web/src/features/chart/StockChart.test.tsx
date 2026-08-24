@@ -44,6 +44,30 @@ beforeEach(() => {
   echartsMock.zrHandlers.clear();
 });
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+it("图表容器尺寸变化时重新计算画布", () => {
+  let notify: (() => void) | undefined;
+  const observe = vi.fn();
+  const disconnect = vi.fn();
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(callback: () => void) { notify = callback; }
+    observe = observe;
+    disconnect = disconnect;
+  });
+
+  const { unmount } = render(<StockChart bars={bars} zones={[]} />);
+  expect(observe).toHaveBeenCalled();
+  echartsMock.chart.resize.mockClear();
+  act(() => notify?.());
+  expect(echartsMock.chart.resize).toHaveBeenCalledTimes(1);
+
+  unmount();
+  expect(disconnect).toHaveBeenCalledTimes(1);
+});
+
 it("将自动趋势线的鼠标位置换算为边界内数据索引并显示 item tooltip", () => {
   echartsMock.chart.convertFromPixel.mockReturnValue([99.6, 10.4]);
   render(<StockChart bars={bars} zones={[]} />);

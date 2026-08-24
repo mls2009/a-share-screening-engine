@@ -1,4 +1,4 @@
-import { Search, Trash2 } from "lucide-react";
+import { Maximize2, Minimize2, Search, Trash2 } from "lucide-react";
 import { type ComponentType, useEffect, useRef, useState } from "react";
 
 import { api } from "../../api";
@@ -56,6 +56,7 @@ export function ChartPage({
   const [indicators, setIndicators] = useState<ChartIndicatorPoint[]>([]);
   const [selectedIndicators, setSelectedIndicators] = useState<ChartIndicator[]>(["ma"]);
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const [zones, setZones] = useState<PriceZone[]>([]);
   const [kind, setKind] = useState<DrawingKind | null>(null);
   const [geometry, setGeometry] = useState<DrawingGeometry>("horizontal");
@@ -107,6 +108,20 @@ export function ChartPage({
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
   }, [client, symbol, timeframe]);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    document.body.classList.add("chart-fullscreen-open");
+    const orientation = window.screen.orientation as ScreenOrientation & {
+      lock?: (mode: string) => Promise<void>;
+      unlock?: () => void;
+    };
+    void orientation?.lock?.("landscape").catch(() => undefined);
+    return () => {
+      document.body.classList.remove("chart-fullscreen-open");
+      orientation?.unlock?.();
+    };
+  }, [fullscreen]);
 
   const addAnchor = async (anchor: DrawingAnchor) => {
     if (!kind) return;
@@ -187,7 +202,7 @@ export function ChartPage({
   };
 
   return (
-    <main className="chart-page">
+    <main className={`chart-page ${fullscreen ? "has-fullscreen-chart" : ""}`}>
       <header className="chart-heading">
         <div><p className="eyebrow">PRICE STRUCTURE / DRAWING DESK</p><h1>K 线研究</h1></div>
         <form onSubmit={(event) => { event.preventDefault(); void submitSearch(); }}>
@@ -225,8 +240,17 @@ export function ChartPage({
           )}
         </form>
       </header>
-      <section className="chart-desk">
-        <div className="chart-topline"><div><strong>{symbol}</strong><span>{bars.length ? `${bars.at(-1)?.close.toFixed(2)} 元` : "—"}</span></div><TimeframeToolbar value={timeframe} onChange={(next) => { setTimeframe(next); setAnchors([]); }} /></div>
+      <section className={`chart-desk ${fullscreen ? "is-fullscreen" : ""}`} data-testid="chart-desk">
+        <div className="chart-topline">
+          <div><strong>{symbol}</strong><span>{bars.length ? `${bars.at(-1)?.close.toFixed(2)} 元` : "—"}</span></div>
+          <div className="chart-actions">
+            <TimeframeToolbar value={timeframe} onChange={(next) => { setTimeframe(next); setAnchors([]); }} />
+            <button type="button" className="fullscreen-toggle" aria-label={fullscreen ? "退出全屏" : "全屏看盘"} onClick={() => setFullscreen((current) => !current)}>
+              {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+              <span>{fullscreen ? "退出" : "全屏"}</span>
+            </button>
+          </div>
+        </div>
         <div className="indicator-toolbar">
           <span>技术指标</span>
           {selectedIndicators.map((indicator) => {

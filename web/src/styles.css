@@ -90,6 +90,9 @@ h1 { margin: 0; font-size: clamp(34px, 4.5vw, 66px); line-height: .96; letter-sp
 .chart-topline > div:first-child { display: flex; align-items: baseline; gap: 14px; }
 .chart-topline strong { font: 600 13px "IBM Plex Mono", monospace; letter-spacing: .06em; }
 .chart-topline span { color: var(--paper); font: 500 18px "IBM Plex Mono", monospace; }
+.chart-actions { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.fullscreen-toggle { min-height: 30px; border: 1px solid #3a4448; background: #121719; color: #aeb8bb; padding: 0 9px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; font: 500 10px "IBM Plex Mono", monospace; }
+.fullscreen-toggle:hover { color: var(--signal); border-color: #667331; }
 .timeframe-toolbar { display: flex; align-items: center; gap: 2px; }
 .timeframe-toolbar button { width: 42px; height: 28px; border: 0; background: transparent; color: #7d888d; font: 500 10px "IBM Plex Mono", monospace; cursor: pointer; }
 .timeframe-toolbar button:hover { color: var(--paper); background: #171c1e; }
@@ -116,7 +119,7 @@ h1 { margin: 0; font-size: clamp(34px, 4.5vw, 66px); line-height: .96; letter-sp
 .drawing-toolbar p { margin: 0 auto 0 4px; color: var(--signal); font-size: 10px; }
 .drawing-toolbar .cancel-drawing { color: #8f666a; }
 .chart-canvas-wrap { position: relative; min-height: 560px; }
-.stock-chart { width: 100%; height: 560px; cursor: crosshair; }
+.stock-chart { width: 100%; height: var(--chart-height, 560px); cursor: crosshair; }
 .stock-chart:not(.drawing) { cursor: default; }
 .chart-loading { min-height: 560px; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
 .zone-ledger .section-title p { margin: 0; display: flex; align-items: center; gap: 7px; color: var(--muted); letter-spacing: 0; }
@@ -132,6 +135,11 @@ h1 { margin: 0; font-size: clamp(34px, 4.5vw, 66px); line-height: .96; letter-sp
 .zone-list small { color: #687378; font-size: 9px; }
 .zone-list button { position: absolute; right: 10px; top: 10px; width: 28px; height: 28px; border: 1px solid #343d41; background: transparent; color: #875d62; display: grid; place-items: center; cursor: pointer; }
 .zone-list button:hover { color: var(--resistance); border-color: var(--resistance); }
+body.chart-fullscreen-open { overflow: hidden; }
+.chart-desk.is-fullscreen { position: fixed; z-index: 100; inset: 0; margin: 0; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); border: 0; background: #090c0d; overflow: auto; overscroll-behavior: contain; }
+.chart-desk.is-fullscreen .chart-topline { position: sticky; z-index: 12; top: 0; background: rgba(13, 17, 19, .97); }
+.chart-desk.is-fullscreen .stock-chart { height: max(var(--chart-mobile-height, 440px), calc(100dvh - 188px)); }
+.chart-page.has-fullscreen-chart > .chart-heading, .chart-page.has-fullscreen-chart > .zone-ledger { display: none; }
 
 @media (max-width: 900px) {
   .chart-heading { align-items: flex-start; flex-direction: column; }
@@ -144,12 +152,44 @@ h1 { margin: 0; font-size: clamp(34px, 4.5vw, 66px); line-height: .96; letter-sp
 
 @media (max-width: 760px) {
   .chart-page { padding: 26px 12px; }
+  .chart-heading { gap: 16px; }
+  .chart-heading h1 { font-size: 38px; }
   .chart-heading form { width: 100%; }
   .chart-heading form input { flex: 1; }
   .chart-heading form .symbol-search-results { left: -1px; right: -1px; width: auto; }
-  .stock-chart, .chart-loading, .chart-canvas-wrap { min-height: 440px; height: 440px; }
-  .drawing-kinds, .geometry-kinds { width: 100%; }
-  .drawing-kinds button, .geometry-kinds button { flex: 1; justify-content: center; }
+  .chart-desk, .zone-ledger { margin-top: 12px; }
+  .chart-topline { min-height: 104px; padding: 10px 10px 8px; gap: 8px; }
+  .chart-actions { width: 100%; }
+  .timeframe-toolbar { min-width: 0; flex: 1; overflow-x: auto; scrollbar-width: none; }
+  .timeframe-toolbar::-webkit-scrollbar, .indicator-toolbar::-webkit-scrollbar, .drawing-toolbar::-webkit-scrollbar { display: none; }
+  .timeframe-toolbar button { flex: 0 0 46px; min-height: 44px; }
+  .fullscreen-toggle { flex: 0 0 auto; min-height: 44px; }
+  .indicator-toolbar { min-height: 54px; flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-inline: contain; }
+  .indicator-toolbar > span, .indicator-toolbar button, .indicator-menu-wrap { flex: 0 0 auto; }
+  .indicator-toolbar button { height: 40px; }
+  .indicator-menu { position: fixed; inset: auto 12px calc(80px + env(safe-area-inset-bottom)); min-width: 150px; }
+  .chart-desk.is-fullscreen .indicator-menu { bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .drawing-toolbar { min-height: 54px; flex-wrap: nowrap; align-items: center; overflow-x: auto; overscroll-behavior-inline: contain; }
+  .drawing-kinds, .geometry-kinds { width: auto; flex: 0 0 auto; }
+  .drawing-toolbar button { min-height: 40px; white-space: nowrap; }
+  .drawing-toolbar p { flex: 0 0 auto; order: initial; margin-left: 0; white-space: nowrap; }
+  .stock-chart { height: var(--chart-mobile-height, 440px); }
+  .chart-loading, .chart-canvas-wrap { min-height: 440px; height: auto; }
+  .chart-desk.is-fullscreen .chart-canvas-wrap { min-height: 0; }
+  .zone-ledger .section-title { min-height: 70px; align-items: flex-start; flex-direction: column; justify-content: center; gap: 8px; }
+  .zone-ledger .section-title p { width: 100%; overflow-x: auto; white-space: nowrap; }
+  .zone-list { grid-template-columns: 1fr; }
+  .zone-list > div:not(.result-empty) { min-height: 92px; padding-right: 58px; }
+  .zone-list button { width: 44px; height: 44px; }
+  .chart-page.has-fullscreen-chart { padding: 0; }
+}
+
+@media (max-width: 900px) and (orientation: landscape) {
+  .chart-desk.is-fullscreen .chart-topline { min-height: 52px; flex-direction: row; align-items: center; }
+  .chart-desk.is-fullscreen .chart-topline > div:first-child { flex: 0 0 auto; }
+  .chart-desk.is-fullscreen .chart-actions { flex: 1; width: auto; }
+  .chart-desk.is-fullscreen .indicator-toolbar, .chart-desk.is-fullscreen .drawing-toolbar { min-height: 48px; }
+  .chart-desk.is-fullscreen .stock-chart { height: max(320px, calc(100dvh - 148px)); }
 }
 
 /* Screener: dense, explicit and inspectable like an exchange blotter. */

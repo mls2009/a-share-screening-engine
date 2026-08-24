@@ -9,7 +9,7 @@ import {
 } from "echarts/components";
 import * as echarts from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import { useEffect, useRef } from "react";
+import { type CSSProperties, useEffect, useRef } from "react";
 
 import type { Bar, ChartIndicator, ChartIndicatorPoint, PriceZone } from "../../types";
 import { buildChartOption } from "./chartOptions";
@@ -70,6 +70,8 @@ export function StockChart({ bars, zones, indicators = [], selectedIndicators, d
     const chart = echarts.init(element.current, undefined, { renderer: "canvas" });
     chart.setOption(buildChartOption(bars, zones, indicators, selectedIndicators), true);
     const resize = () => chart.resize();
+    const resizeObserver = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(resize);
+    resizeObserver?.observe(element.current);
     window.addEventListener("resize", resize);
     const click = (event: { offsetX: number; offsetY: number }) => {
       if (!anchorCallback.current) return;
@@ -113,11 +115,16 @@ export function StockChart({ bars, zones, indicators = [], selectedIndicators, d
       chart.getZr().off("click", click);
       chart.off("mousemove", showLineTooltip);
       chart.off("mouseout", hideLineTooltip);
+      resizeObserver?.disconnect();
       window.removeEventListener("resize", resize);
       chart.dispose();
     };
   }, [bars, indicators, selectedIndicators, zones]);
 
   const subPaneCount = selectedIndicators?.filter((item) => ["macd", "kdj", "rsi", "obv", "atr"].includes(item)).length ?? 0;
-  return <div ref={element} style={{ height: `${560 + subPaneCount * 120}px` }} className={`stock-chart ${drawing ? "drawing" : ""}`} role="img" aria-label="K 线与成交量图" />;
+  const chartStyle = {
+    "--chart-height": `${560 + subPaneCount * 120}px`,
+    "--chart-mobile-height": `${440 + subPaneCount * 110}px`,
+  } as CSSProperties;
+  return <div ref={element} style={chartStyle} className={`stock-chart ${drawing ? "drawing" : ""}`} role="img" aria-label="K 线与成交量图" />;
 }

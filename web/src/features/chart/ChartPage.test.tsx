@@ -66,6 +66,29 @@ it("默认显示 MA，可从菜单添加和移除副图指标", async () => {
   expect(screen.getByText("指标：ma")).toBeInTheDocument();
 });
 
+it("全屏看盘进入退出时保留当前指标", async () => {
+  const client: ChartClient = {
+    searchSymbols: async () => [],
+    bars: async () => bars,
+    indicators: async () => [],
+    zones: async () => [],
+    createManualZone: async () => manual,
+    deleteZone: async () => undefined,
+  };
+  render(<ChartPage initialSymbol="600001.SH" client={client} Chart={FakeChart} />);
+
+  expect(await screen.findByText("指标：ma")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "+ 指标" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "MACD" }));
+  await userEvent.click(screen.getByRole("button", { name: "全屏看盘" }));
+
+  expect(screen.getByTestId("chart-desk")).toHaveClass("is-fullscreen");
+  expect(screen.getByText("指标：ma,macd")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "退出全屏" }));
+  expect(screen.getByTestId("chart-desk")).not.toHaveClass("is-fullscreen");
+  expect(screen.getByText("指标：ma,macd")).toBeInTheDocument();
+});
+
 it("切换周期、用两个锚点保存手动趋势支撑并可删除自动和手动线", async () => {
   const created: object[] = [];
   const deleted: string[] = [];
