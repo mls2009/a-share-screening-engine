@@ -25,7 +25,7 @@ export function ResultsTable({ matches, selected, onSelect, onOpenChart, sortBy,
   if (!matches.length) return <div className="result-empty">当前条件没有命中证券。</div>;
   return (
     <div className="results-layout">
-      <div className="results-table-wrap">
+      <div className="results-table-wrap" role="region" aria-label="筛选结果表格" tabIndex={0}>
         <table className="results-table">
           <thead><tr>{([
             ["rank", "#"], ["symbol", "证券"], ["close", "现价"], ["return_20", "20 周期"], ["volume_ratio_20", "量比"],

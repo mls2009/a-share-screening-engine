@@ -249,12 +249,39 @@ select:focus, input:focus { border-color: #7c8a8f; box-shadow: inset 2px 0 var(-
 
 @media (max-width: 760px) {
   .screener-page { padding: 26px 12px; }
+  .screener-page, .composer-section, .screen-results, .results-layout { min-width: 0; }
+  .compact-heading { gap: 18px; }
+  .compact-heading h1 { font-size: 38px; }
   .screen-controls { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+  select, input { min-height: 44px; font-size: 16px; }
   .run-button { grid-column: 1 / -1; justify-content: center; }
-  .condition-row { grid-template-columns: 1fr 1fr; padding-right: 46px; }
+  .condition-group { padding: 8px; }
+  .group-header { flex-wrap: wrap; }
+  .group-header select { min-width: 0; flex: 1 1 150px; }
+  .group-actions { flex: 1 1 auto; justify-content: flex-end; }
+  .group-actions button, .ghost-button { min-height: 44px; }
+  .condition-row { grid-template-columns: 1fr 1fr; padding: 52px 8px 10px; border-left-width: 2px; }
   .condition-path { grid-template-columns: 1fr 8px 1fr 8px .8fr; }
+  .condition-field, .condition-row > select, .condition-row > label, .condition-row > details, .condition-row > .metric-operand, .condition-row > .lookback-fields { min-width: 0; }
   .nested-group { margin-left: 8px; }
-  .results-table { min-width: 640px; }
+  .icon-button { width: 44px; min-height: 44px; top: 4px; right: 4px; }
+  .choice-popover { position: fixed; inset: auto 12px calc(68px + env(safe-area-inset-bottom) + 12px); min-width: 0; max-height: 45dvh; }
+  .choice-popover label { min-height: 44px; }
+  .screen-results .section-title { min-height: 60px; padding-block: 8px; align-items: flex-start; flex-direction: column; gap: 7px; }
+  .run-stats { width: 100%; justify-content: space-between; }
+  .results-table-wrap { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; -webkit-overflow-scrolling: touch; }
+  .results-table { min-width: 620px; }
+  .results-table td, .results-table th { padding-block: 12px; }
+  .results-table td button { width: 44px; height: 44px; }
+  .explanation-panel { padding: 18px 14px; }
+  .results-pagination { justify-content: center; flex-wrap: wrap; padding: 10px 8px; }
+  .results-pagination label { margin-right: 0; }
+  .results-pagination select, .results-pagination button { min-height: 44px; }
+}
+
+@media (max-width: 380px) {
+  .screen-controls, .condition-row { grid-template-columns: 1fr; }
+  .condition-path { grid-template-columns: minmax(0, 1fr) 6px minmax(0, 1fr) 6px minmax(0, .85fr); }
 }
 
 /* Backtest desk: strategy definition above, auditable execution report below. */

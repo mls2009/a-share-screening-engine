@@ -197,6 +197,7 @@ function ConditionRow({
         </select></>}
       </div>
       <select
+        className="condition-field condition-timeframe"
         aria-label="周期"
         value={node.timeframe}
         onChange={(event) => onUpdate({ ...node, timeframe: event.target.value as Timeframe })}
@@ -204,6 +205,7 @@ function ConditionRow({
         {spec.timeframes.map((timeframe) => <option key={timeframe} value={timeframe}>{timeframeLabels[timeframe]}</option>)}
       </select>
       <select
+        className="condition-field condition-operator"
         aria-label="操作符"
         value={node.operator}
         onChange={(event) => onUpdate({ ...node, operator: event.target.value })}

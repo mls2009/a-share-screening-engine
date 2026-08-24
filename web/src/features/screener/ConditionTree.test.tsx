@@ -68,6 +68,7 @@ describe("ConditionTree", () => {
 
   it("切换分类后只显示该类条件并保留兼容 K 线周期", async () => {
     render(<Harness />);
+    expect(screen.getByLabelText("周期").closest(".condition-field")).not.toBeNull();
     await userEvent.selectOptions(screen.getByLabelText("指标分类"), "activity");
 
     expect(screen.getByLabelText("指标")).toHaveValue("volume");

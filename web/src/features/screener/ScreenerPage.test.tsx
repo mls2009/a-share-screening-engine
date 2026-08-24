@@ -57,6 +57,7 @@ describe("ScreenerPage", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "运行全市场筛选" }));
 
+    expect(screen.getByRole("region", { name: "筛选结果表格" })).toHaveClass("results-table-wrap");
     expect((await screen.findAllByText("测试股份")).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("35.20%")).toBeInTheDocument();
     expect(screen.getByText("实际 35.2 / 期望 30")).toBeInTheDocument();
