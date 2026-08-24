@@ -68,6 +68,7 @@ test("workbench and chart desk render without browser errors", async ({ page }) 
       { zone_id: "auto-uptrend", timeframe: "1d", as_of_date: "2026-08-20", zone_kind: "uptrend", geometry: "trend", lower_price: 1490, center_price: 1545, upper_price: 1600, slope: 1.39, intercept: 1490, anchors: "[[\"2026-05-01\",1490],[\"2026-07-19\",1600]]", strength: .9, touches: 3, source: "auto" },
     ] });
   });
+  await page.route("**/api/symbols/*/indicators?*", async (route) => route.fulfill({ json: [] }));
   await page.route("**/api/backtests/run", async (route) => {
     await route.fulfill({ json: {
       run_id: "backtest-e2e",
@@ -132,4 +133,76 @@ test("workbench and chart desk render without browser errors", async ({ page }) 
   await page.screenshot({ path: "test-results/monitor-desk.png", fullPage: true });
 
   expect(errors).toEqual([]);
+});
+
+async function mockMobileWorkbench(page: Page) {
+  await page.route("**/api/catalog", async (route) => route.fulfill({ json: [{
+    key: "return_20", label: "价格涨跌", unit: "percent",
+    timeframes: ["5m", "15m", "30m", "60m", "1d", "1w", "1mo"],
+    operators: ["gte", "lt"], group: "price", family: "price_change", period: 20,
+    directions: [{ value: "rise", label: "上涨幅度" }, { value: "fall", label: "下跌幅度" }],
+  }] }));
+  await page.route("**/api/symbols/*/bars?*", async (route) => route.fulfill({ json: Array.from({ length: 60 }, (_, index) => ({
+    symbol: "600519.SH", timestamp: new Date(2026, 5, index + 1).toISOString(), timeframe: "1d",
+    open: 1500 + index, high: 1515 + index, low: 1490 + index, close: 1508 + index,
+    volume_shares: 2_000_000 + index * 10_000, amount_cny: 3_000_000_000,
+    adjustment: "qfq", source: "e2e", is_final: true,
+  })) }));
+  await page.route("**/api/symbols/*/zones?*", async (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/symbols/*/indicators?*", async (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/monitor/tasks", async (route) => route.fulfill({ json: [{
+    task_id: "task-mobile", name: "移动端点位监控", symbols: ["600519.SH", "159558.SZ"],
+    comparator: "cross_above", threshold: 1600, cooldown_seconds: 300, scope: "watchlist",
+    enabled: true, created_at: "2026-08-20", updated_at: "2026-08-20",
+  }] }));
+  await page.route("**/api/monitor/status", async (route) => route.fulfill({ json: {
+    running: true, tasks: 1, enabled_tasks: 1, pending_notifications: 0, feishu_configured: true,
+    watchlist_interval_seconds: 5, market_interval_seconds: 300,
+  } }));
+  await page.route("**/api/monitor/signals", async (route) => route.fulfill({ json: [] }));
+}
+
+async function expectNoViewportOverflow(page: Page) {
+  const dimensions = await page.evaluate(() => ({
+    viewport: window.innerWidth,
+    document: document.documentElement.scrollWidth,
+    body: document.body.scrollWidth,
+  }));
+  expect(dimensions.document, JSON.stringify(dimensions)).toBeLessThanOrEqual(dimensions.viewport);
+  expect(dimensions.body, JSON.stringify(dimensions)).toBeLessThanOrEqual(dimensions.viewport);
+}
+
+test("mobile workbench fits phones and chart supports landscape focus", async ({ page }) => {
+  await mockMobileWorkbench(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "选股工作台" })).toBeVisible();
+  await expectNoViewportOverflow(page);
+
+  await page.getByRole("button", { name: "K 线研究" }).click();
+  await expect(page.getByRole("img", { name: "K 线与成交量图" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "删除指标 MA 5/10/20/30" })).toBeVisible();
+  await expectNoViewportOverflow(page);
+
+  await page.getByRole("button", { name: "全屏看盘" }).click();
+  await expect(page.getByTestId("chart-desk")).toHaveClass(/is-fullscreen/);
+  await page.setViewportSize({ width: 844, height: 390 });
+  const chartDesk = await page.getByTestId("chart-desk").boundingBox();
+  expect(chartDesk?.width).toBeGreaterThanOrEqual(843);
+  expect(chartDesk?.height).toBeGreaterThanOrEqual(389);
+  await expectNoViewportOverflow(page);
+  await page.getByRole("button", { name: "退出全屏" }).click();
+
+  await page.setViewportSize({ width: 430, height: 932 });
+  await page.getByRole("button", { name: "策略回测" }).click();
+  await expect(page.getByRole("heading", { name: "策略回测" })).toBeVisible();
+  await expectNoViewportOverflow(page);
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.getByRole("button", { name: "实时监控" }).click();
+  await expect(page.getByRole("region", { name: "监控任务" })).toBeVisible();
+  await expect(page.getByText("移动端点位监控")).toBeVisible();
+  await expectNoViewportOverflow(page);
 });
