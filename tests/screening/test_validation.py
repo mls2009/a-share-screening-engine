@@ -18,6 +18,8 @@ def test_catalog_contains_extended_price_volume_pattern_and_risk_metrics() -> No
         "pattern_type",
         "support_distance",
         "resistance_distance",
+        "limit_up_count_5_max_60",
+        "return_10_max_60",
     } <= keys
 
 

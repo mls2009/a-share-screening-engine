@@ -14,7 +14,7 @@ const timeframeLabels: Record<Timeframe, string> = {
 };
 const unitLabels: Record<string, string> = {
   price: "元", percent: "%", ratio: "倍", shares: "股", amount: "元", days: "周期",
-  boolean: "", category: "", score: "分",
+  boolean: "", category: "", score: "分", count: "次",
 };
 const groupLabels: Record<string, string> = {
   price: "价格行情",

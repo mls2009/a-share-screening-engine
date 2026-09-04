@@ -179,6 +179,14 @@ METRICS = [
         for window in (20, 60, 250)
     ],
     _metric("low_history", "阶段最低价", Unit.PRICE, group="price", family="period_low", period="history"),
+    MetricSpec(
+        "return_10_max_60",
+        "近3个月任意10日最大涨幅",
+        Unit.PERCENT,
+        timeframes=frozenset({Timeframe.DAY}),
+        group="price",
+        family="burst_return",
+    ),
     *[
         _metric(f"max_drawdown_{window}", "最大回撤", Unit.PERCENT, group="trend", family="max_drawdown", period=window)
         for window in (20, 60, 250)
@@ -191,6 +199,14 @@ METRICS = [
     MetricSpec("is_secondary_new", "次新股", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="attributes", family="is_secondary_new", visible=False),
     MetricSpec("is_st", "ST 状态", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="status", family="st_status", choices=(ChoiceSpec("true", "ST"), ChoiceSpec("false", "非 ST"))),
     MetricSpec("is_suspended", "交易状态", Unit.BOOLEAN, operators=EQUALITY_OPERATORS, group="status", family="suspension_status", choices=(ChoiceSpec("false", "正常交易"), ChoiceSpec("true", "停牌"))),
+    MetricSpec(
+        "limit_up_count_5_max_60",
+        "近3个月任意5日最多涨停次数",
+        Unit.COUNT,
+        timeframes=frozenset({Timeframe.DAY}),
+        group="status",
+        family="burst_limit_up",
+    ),
     MetricSpec("board", "所属板块", Unit.CATEGORY, operators=CATEGORY_OPERATORS, group="attributes", family="board", choices=BOARD_CHOICES, multiple=True),
     MetricSpec("pattern_type", "K 线形态", Unit.CATEGORY, operators=CATEGORY_OPERATORS, group="candlestick", family="pattern", choices=PATTERN_CHOICES, multiple=True),
     MetricSpec("pattern_strength", "形态强度", Unit.SCORE, group="candlestick", family="pattern_strength"),

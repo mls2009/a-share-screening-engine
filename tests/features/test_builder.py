@@ -80,6 +80,57 @@ def test_builder_persists_idempotent_daily_weekly_monthly_features(tmp_path: Pat
     assert latest["low_history"] == 0.0
 
 
+def test_builder_computes_three_month_rolling_burst_metrics(tmp_path: Path) -> None:
+    database = Database(tmp_path / "burst-features.duckdb")
+    database.migrate()
+    bar_store = BarStore(tmp_path / "burst-bars")
+    dates = pd.date_range("2026-01-02", periods=70, freq="B")
+    closes = [10.0]
+    for index in range(1, len(dates)):
+        previous = closes[-1]
+        if 11 <= index <= 20:
+            closes.append(previous * 1.04)
+        elif index in {30, 34}:
+            closes.append(previous * 1.10)
+        else:
+            closes.append(previous)
+    bar_store.upsert(
+        [
+            Bar(
+                symbol="600000.SH",
+                timestamp=datetime.combine(stamp.date(), datetime.min.time(), tzinfo=TZ),
+                timeframe=Timeframe.DAY,
+                open=close,
+                high=close,
+                low=close,
+                close=close,
+                volume_shares=1_000,
+                amount_cny=10_000,
+                adjustment=Adjustment.QFQ,
+                source="test",
+            )
+            for stamp, close in zip(dates, closes, strict=True)
+        ]
+    )
+    database.connection.execute(
+        """
+        insert into symbols
+          (symbol, name, exchange, listed_on, board, is_listed)
+        values ('600000.SH', '浦发银行', 'SH', '1999-11-10', 'main', true)
+        """
+    )
+
+    store = MarketFeatureStore(database)
+    FeatureBuilder(bar_store, store, database).build_symbol(
+        "600000.SH", dates[-1].date()
+    )
+
+    latest = store.read_latest("600000.SH", Timeframe.DAY, dates[-1].date())
+    assert latest is not None
+    assert latest["limit_up_count_5_max_60"] == 2
+    assert latest["return_10_max_60"] > 40
+
+
 def test_builder_persists_automatic_support_and_resistance_zones(tmp_path: Path) -> None:
     database = Database(tmp_path / "zones.duckdb")
     database.migrate()

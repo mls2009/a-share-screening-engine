@@ -79,3 +79,19 @@ def compute_technical_features(bars: pd.DataFrame) -> pd.DataFrame:
     data["up_streak"] = _streak(close, positive=True)
     data["down_streak"] = _streak(close, positive=False)
     return data
+
+
+def compute_burst_features(
+    features: pd.DataFrame,
+    limit_up_thresholds: pd.Series,
+) -> pd.DataFrame:
+    data = features.copy()
+    thresholds = limit_up_thresholds.reindex(data.index)
+    data["is_limit_up"] = thresholds.notna() & data["return_1"].ge(thresholds - 0.2)
+
+    five_day_counts = data["is_limit_up"].astype(int).rolling(5, min_periods=5).sum()
+    data["limit_up_count_5_max_60"] = five_day_counts.rolling(
+        56, min_periods=1
+    ).max()
+    data["return_10_max_60"] = data["return_10"].rolling(50, min_periods=1).max()
+    return data
