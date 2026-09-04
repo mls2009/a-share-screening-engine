@@ -162,6 +162,35 @@ METRICS = [
         _metric(f"ma_{window}", "移动平均线", Unit.PRICE, family="ma", period=window)
         for window in (5, 10, 20, 30, 60, 120, 250)
     ],
+    *[
+        _metric(
+            f"ma_{window}_slope_abs_5",
+            "均线放平斜率（近5周期）",
+            Unit.PERCENT,
+            group="trend",
+            family="ma_flat_slope_5",
+            period=window,
+        )
+        for window in (10, 20)
+    ],
+    *[
+        _metric(
+            f"ma_{window}_range_5",
+            "均线放平波动范围（近5周期）",
+            Unit.PERCENT,
+            group="trend",
+            family="ma_flat_range_5",
+            period=window,
+        )
+        for window in (10, 20)
+    ],
+    _metric(
+        "ma_10_20_distance",
+        "MA10/MA20 粘合距离",
+        Unit.PERCENT,
+        group="trend",
+        family="ma_convergence",
+    ),
     *[_metric(key, label, Unit.PRICE, family=key) for key, label in (("macd", "MACD"), ("macd_signal", "MACD 信号线"), ("macd_hist", "MACD 柱"))],
     *[_metric(key, label, Unit.SCORE, family=key) for key, label in (("kdj_k", "KDJ K"), ("kdj_d", "KDJ D"), ("kdj_j", "KDJ J"), ("rsi_14", "RSI 14"))],
     *[

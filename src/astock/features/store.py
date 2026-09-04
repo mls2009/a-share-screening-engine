@@ -72,6 +72,11 @@ EXTRA_COLUMNS = [
     "limit_up_count_5_max_60",
     "limit_up_burst_5_count_60",
     "return_10_max_60",
+    "ma_10_slope_abs_5",
+    "ma_20_slope_abs_5",
+    "ma_10_range_5",
+    "ma_20_range_5",
+    "ma_10_20_distance",
 ]
 
 

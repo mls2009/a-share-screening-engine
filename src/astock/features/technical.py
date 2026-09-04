@@ -15,6 +15,17 @@ def _rolling_drawdown(values: pd.Series, window: int) -> pd.Series:
     )
 
 
+def _normalized_slope_abs(values: np.ndarray) -> float:
+    mean = values.mean()
+    if mean == 0:
+        return float("nan")
+    centered_periods = np.arange(len(values)) - (len(values) - 1) / 2
+    slope = np.dot(values, centered_periods) / np.dot(
+        centered_periods, centered_periods
+    )
+    return float(abs(slope / mean) * 100)
+
+
 def compute_technical_features(bars: pd.DataFrame) -> pd.DataFrame:
     data = bars.copy().sort_values("timestamp").reset_index(drop=True)
     close = data["close"].astype(float)
@@ -28,6 +39,19 @@ def compute_technical_features(bars: pd.DataFrame) -> pd.DataFrame:
         data[f"return_{window}"] = close.pct_change(window, fill_method=None) * 100
     for window in (5, 10, 20, 30, 60, 120, 250):
         data[f"ma_{window}"] = close.rolling(window).mean()
+    for window in (10, 20):
+        moving_average = data[f"ma_{window}"]
+        data[f"ma_{window}_slope_abs_5"] = moving_average.rolling(5).apply(
+            _normalized_slope_abs,
+            raw=True,
+        )
+        data[f"ma_{window}_range_5"] = (
+            moving_average.rolling(5).max() / moving_average.rolling(5).min() - 1
+        ) * 100
+    average_ma_10_20 = (data["ma_10"] + data["ma_20"]) / 2
+    data["ma_10_20_distance"] = (
+        (data["ma_10"] - data["ma_20"]).abs() / average_ma_10_20.replace(0, np.nan) * 100
+    )
     for window in (5, 20, 60):
         data[f"volume_ma_{window}"] = volume.rolling(window).mean()
     data["volume_ratio_20"] = volume / data["volume_ma_20"]

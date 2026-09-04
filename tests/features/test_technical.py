@@ -53,6 +53,24 @@ def test_computes_available_history_high_and_low() -> None:
     assert features["low_history"].tolist() == [2.0, 1.0, 1.0]
 
 
+def test_computes_ma_flatness_and_convergence_metrics() -> None:
+    features = compute_technical_features(_frame())
+    last = features.iloc[-1]
+
+    assert math.isclose(last["ma_10_slope_abs_5"], 1 / 23.5 * 100)
+    assert math.isclose(last["ma_20_slope_abs_5"], 1 / 18.5 * 100)
+    assert math.isclose(last["ma_10_range_5"], (25.5 / 21.5 - 1) * 100)
+    assert math.isclose(last["ma_20_range_5"], (20.5 / 16.5 - 1) * 100)
+    assert math.isclose(last["ma_10_20_distance"], 5 / 23 * 100)
+
+
+def test_ma_flatness_requires_five_complete_ma_values() -> None:
+    features = compute_technical_features(_frame(23))
+
+    assert math.isnan(features.iloc[-1]["ma_20_slope_abs_5"])
+    assert math.isnan(features.iloc[-1]["ma_20_range_5"])
+
+
 def test_features_do_not_change_past_rows_when_future_bars_are_added() -> None:
     short = compute_technical_features(_frame(20))
     full = compute_technical_features(_frame(30)).iloc[:20]
