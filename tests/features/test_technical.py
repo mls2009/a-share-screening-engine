@@ -2,7 +2,7 @@ import math
 
 import pandas as pd
 
-from astock.features.technical import compute_technical_features
+from astock.features.technical import compute_burst_features, compute_technical_features
 
 
 def _frame(rows: int = 30) -> pd.DataFrame:
@@ -58,3 +58,18 @@ def test_features_do_not_change_past_rows_when_future_bars_are_added() -> None:
     full = compute_technical_features(_frame(30)).iloc[:20]
 
     pd.testing.assert_frame_equal(short, full)
+
+
+def test_counts_separate_five_day_double_limit_up_episodes_without_overlap() -> None:
+    features = pd.DataFrame(
+        {
+            "return_1": [0.0] * 70,
+            "return_10": [float("nan")] * 70,
+        }
+    )
+    features.loc[[20, 22, 40, 42], "return_1"] = 10.0
+    thresholds = pd.Series([10.0] * 70)
+
+    result = compute_burst_features(features, thresholds)
+
+    assert result.iloc[-1]["limit_up_burst_5_count_60"] == 2

@@ -93,5 +93,16 @@ def compute_burst_features(
     data["limit_up_count_5_max_60"] = five_day_counts.rolling(
         56, min_periods=1
     ).max()
+    qualifying_windows = five_day_counts.ge(2).fillna(False)
+    episode_starts = qualifying_windows & ~qualifying_windows.shift(
+        1, fill_value=False
+    )
+    episode_count = episode_starts.astype(int).rolling(56, min_periods=1).sum()
+    continued_at_boundary = qualifying_windows.shift(
+        55, fill_value=False
+    ) & ~episode_starts.shift(55, fill_value=False)
+    data["limit_up_burst_5_count_60"] = episode_count + continued_at_boundary.astype(
+        int
+    )
     data["return_10_max_60"] = data["return_10"].rolling(50, min_periods=1).max()
     return data

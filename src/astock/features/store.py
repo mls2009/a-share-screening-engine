@@ -70,6 +70,7 @@ EXTRA_COLUMNS = [
     "volume_change_20",
     "is_limit_up",
     "limit_up_count_5_max_60",
+    "limit_up_burst_5_count_60",
     "return_10_max_60",
 ]
 
