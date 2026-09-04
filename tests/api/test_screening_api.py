@@ -17,6 +17,12 @@ from astock.storage.database import Database
 
 
 class FakeSync:
+    def latest_completed_end_date(self) -> date:
+        return date.max
+
+    def start(self, end: date, years: int = 3):
+        raise AssertionError("daily sync should be skipped in API tests")
+
     def status(self, job_id: UUID):
         return SimpleNamespace(
             job_id=job_id,
@@ -95,6 +101,16 @@ def _client(tmp_path: Path) -> tuple[TestClient, Database]:
         market_sync=FakeSync(),
     )
     return TestClient(create_app(context)), database
+
+
+def test_app_keeps_daily_market_update_scheduler_running(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    scheduler = client.app.state.data_update_scheduler
+
+    with client:
+        assert scheduler.running is True
+
+    assert scheduler.running is False
 
 
 def _fifteen_minute_trend_source_bars() -> list[Bar]:

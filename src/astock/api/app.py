@@ -14,6 +14,7 @@ from astock.api.dependencies import ApiContext
 from astock.backtest.models import BacktestRequest
 from astock.backtest.service import BacktestDataError, BacktestService
 from astock.config import Settings
+from astock.data.daily_update import DailyMarketUpdateScheduler
 from astock.data.market_sync import MarketSyncService
 from astock.data.providers.routing import build_default_market_providers
 from astock.data.providers.tencent import TencentQuoteProvider
@@ -110,9 +111,13 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         TencentQuoteProvider(),
     )
     monitor_scheduler = MonitoringScheduler(monitoring)
+    data_update_scheduler = DailyMarketUpdateScheduler(context.market_sync)
     app.state.monitoring = monitoring
     app.state.monitor_scheduler = monitor_scheduler
+    app.state.data_update_scheduler = data_update_scheduler
+    app.add_event_handler("startup", data_update_scheduler.start)
     app.add_event_handler("shutdown", monitor_scheduler.stop)
+    app.add_event_handler("shutdown", data_update_scheduler.stop)
     feature_builder = FeatureBuilder(
         context.bar_store, MarketFeatureStore(context.database), context.database
     )
