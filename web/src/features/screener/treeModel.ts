@@ -82,6 +82,86 @@ function negativeMagnitude(value: ConstantValue): ConstantValue {
   return typeof value === "number" ? -value : value;
 }
 
+function record(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("条件 JSON 结构无效");
+  }
+  return value as Record<string, unknown>;
+}
+
+function constantText(value: unknown): string {
+  if (Array.isArray(value)) return value.join(", ");
+  return String(value);
+}
+
+function isNegativeMagnitude(value: unknown): boolean {
+  if (typeof value === "number") return value < 0;
+  return Array.isArray(value)
+    && value.length > 0
+    && value.every((item) => typeof item === "number" && item < 0);
+}
+
+export function fromApiNode(value: unknown, metrics: MetricSpec[]): UiNode {
+  const node = record(value);
+  if (node.kind === "group") {
+    if (!Array.isArray(node.children) || !["and", "or", "not"].includes(String(node.logic))) {
+      throw new Error("条件组合结构无效");
+    }
+    return {
+      id: id("group"),
+      kind: "group",
+      logic: node.logic as UiGroupNode["logic"],
+      children: node.children.map((child) => fromApiNode(child, metrics)),
+    };
+  }
+  if (node.kind !== "condition") throw new Error("条件 JSON 缺少 kind");
+
+  const metric = metrics.find((item) => item.key === node.metric);
+  if (!metric) throw new Error(`未知指标：${String(node.metric)}`);
+  const right = record(node.right);
+  let operator = String(node.operator);
+  let direction: UiConditionNode["direction"];
+  let constant = right.value;
+  if (metric.directions?.length) {
+    const negative = isNegativeMagnitude(constant);
+    const wanted = negative ? ["fall", "decrease"] : ["rise", "increase"];
+    direction = metric.directions.find((item) => wanted.includes(item.value))
+      ?.value as UiConditionNode["direction"];
+    if (!direction) throw new Error(`无法识别 ${metric.label} 的方向`);
+    if (negative) {
+      operator = inverseOperator[operator] ?? operator;
+      constant = negativeMagnitude(constant as ConstantValue);
+    }
+    if (!["gt", "gte", "between"].includes(operator)) {
+      throw new Error(`${metric.label} 的导入条件无法在当前界面中无损表示`);
+    }
+  }
+
+  const selectedValues = metric.multiple && Array.isArray(constant)
+    ? constant.map(String)
+    : undefined;
+  const operand = right.kind === "metric"
+    ? {
+        kind: "metric" as const,
+        metric: String(right.metric),
+        timeframe: String(right.timeframe) as Timeframe,
+        multiplier: Number(right.multiplier ?? 1),
+      }
+    : { kind: "constant" as const, value: constantText(constant) };
+  return {
+    id: id("condition"),
+    kind: "condition",
+    metric: metric.key,
+    timeframe: String(node.timeframe) as Timeframe,
+    operator,
+    right: operand,
+    direction,
+    selectedValues,
+    ...(typeof node.lookback === "number" ? { lookback: node.lookback } : {}),
+    ...(typeof node.occurrences === "number" ? { occurrences: node.occurrences } : {}),
+  };
+}
+
 export function toApiNode(node: UiNode, metrics: MetricSpec[]): object {
   if (node.kind === "group") {
     return { kind: "group", logic: node.logic, children: node.children.map((child) => toApiNode(child, metrics)) };

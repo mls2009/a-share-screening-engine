@@ -83,6 +83,19 @@ export interface ScreenRunResult {
   matches: ScreenMatch[];
 }
 
+export interface ScreenValidation {
+  valid: boolean;
+  errors: Array<{ code: string; message: string; path: string }>;
+}
+
+export interface ScreenTemplate {
+  template_id: string;
+  name: string;
+  version: number;
+  tree: unknown;
+  updated_at: string;
+}
+
 export interface Bar {
   symbol: string;
   timestamp: string;

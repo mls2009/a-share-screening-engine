@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import type { MetricSpec, ScreenRunResult } from "../../types";
@@ -23,14 +23,22 @@ const result: ScreenRunResult = {
 };
 
 function client(): ScreenerClient {
-  return { catalog: async () => catalog, runScreen: async () => result, screenResults: async () => result };
+  return {
+    catalog: async () => catalog,
+    validateScreen: async () => ({ valid: true, errors: [] }),
+    listScreenTemplates: async () => [],
+    saveScreenTemplate: async (name, tree) => ({ template_id: "saved", name, version: 1, tree, updated_at: "2026-09-05T00:00:00" }),
+    deleteScreenTemplate: async () => undefined,
+    runScreen: async () => result,
+    screenResults: async () => result,
+  };
 }
 
 describe("ScreenerPage", () => {
   it("按全部命中结果排序并第三次点击恢复默认顺序", async () => {
     const fetchPage = vi.fn().mockResolvedValue(result);
     const fake: ScreenerClient = {
-      catalog: async () => catalog,
+      ...client(),
       runScreen: async () => ({ ...result, match_count: 450 }),
       screenResults: fetchPage,
     };
@@ -68,9 +76,8 @@ describe("ScreenerPage", () => {
     const calls: object[] = [];
     const open: string[] = [];
     const fake: ScreenerClient = {
-      catalog: async () => catalog,
+      ...client(),
       runScreen: async (payload) => { calls.push(payload); return result; },
-      screenResults: async () => result,
     };
     render(<ScreenerPage client={fake} onOpenChart={(symbol) => open.push(symbol)} />);
     await screen.findByLabelText("指标");
@@ -85,9 +92,8 @@ describe("ScreenerPage", () => {
   it("下跌幅度以正数输入并提交为带符号条件", async () => {
     const calls: object[] = [];
     const fake: ScreenerClient = {
-      catalog: async () => catalog,
+      ...client(),
       runScreen: async (payload) => { calls.push(payload); return result; },
-      screenResults: async () => result,
     };
     render(<ScreenerPage client={fake} onOpenChart={() => undefined} />);
     await screen.findByLabelText("指标");
@@ -122,7 +128,7 @@ describe("ScreenerPage", () => {
     const firstPage = { ...result, match_count: 450 };
     const fetchPage = vi.fn().mockResolvedValue(secondPage);
     const fake: ScreenerClient = {
-      catalog: async () => catalog,
+      ...client(),
       runScreen: async () => firstPage,
       screenResults: fetchPage,
     };
@@ -140,5 +146,76 @@ describe("ScreenerPage", () => {
     await userEvent.selectOptions(screen.getByLabelText("每页数量"), "50");
     await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 50, 0, undefined, undefined));
     expect(screen.getByText("第 1 / 9 页")).toBeInTheDocument();
+  });
+
+  it("校验并导入粘贴的条件 JSON", async () => {
+    const validateScreen = vi.fn().mockResolvedValue({ valid: true, errors: [] });
+    const fake = {
+      ...client(),
+      validateScreen,
+      listScreenTemplates: async () => [],
+      saveScreenTemplate: vi.fn(),
+      deleteScreenTemplate: vi.fn(),
+    };
+    render(<ScreenerPage client={fake} onOpenChart={() => undefined} />);
+    await screen.findByLabelText("指标");
+
+    await userEvent.click(screen.getByRole("button", { name: "导入 JSON" }));
+    const imported = {
+      kind: "group",
+      logic: "and",
+      children: [{
+        kind: "condition",
+        metric: "return_20",
+        timeframe: "1d",
+        operator: "lte",
+        right: { kind: "constant", value: -30, unit: "percent" },
+      }],
+    };
+    fireEvent.change(screen.getByLabelText("条件 JSON"), {
+      target: { value: JSON.stringify(imported) },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "应用 JSON" }));
+
+    await waitFor(() => expect(validateScreen).toHaveBeenCalledWith(imported));
+    expect(screen.getByLabelText("指标")).toHaveValue("price_change:fall");
+    expect(screen.getByLabelText("比较值")).toHaveValue(30);
+  });
+
+  it("保存、加载并删除持久化条件模板", async () => {
+    const saved = {
+      template_id: "template-1",
+      name: "强势股",
+      version: 1,
+      tree: {
+        kind: "condition",
+        metric: "return_20",
+        timeframe: "1d",
+        operator: "gte",
+        right: { kind: "constant", value: 45, unit: "percent" },
+      },
+      updated_at: "2026-09-05T00:00:00",
+    };
+    const saveScreenTemplate = vi.fn().mockResolvedValue(saved);
+    const deleteScreenTemplate = vi.fn().mockResolvedValue(undefined);
+    const fake = {
+      ...client(),
+      validateScreen: async () => ({ valid: true, errors: [] }),
+      listScreenTemplates: vi.fn().mockResolvedValue([saved]),
+      saveScreenTemplate,
+      deleteScreenTemplate,
+    };
+    render(<ScreenerPage client={fake} onOpenChart={() => undefined} />);
+    await screen.findByLabelText("指标");
+
+    await userEvent.type(screen.getByLabelText("模板名称"), "强势股");
+    await userEvent.click(screen.getByRole("button", { name: "保存模板" }));
+    await waitFor(() => expect(saveScreenTemplate).toHaveBeenCalled());
+
+    await userEvent.click(screen.getByRole("button", { name: "加载模板" }));
+    expect(screen.getByLabelText("比较值")).toHaveValue(45);
+
+    await userEvent.click(screen.getByRole("button", { name: "删除模板" }));
+    await waitFor(() => expect(deleteScreenTemplate).toHaveBeenCalledWith("template-1"));
   });
 });

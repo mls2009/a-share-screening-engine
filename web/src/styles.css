@@ -210,6 +210,23 @@ select:focus, input:focus { border-color: #7c8a8f; box-shadow: inset 2px 0 var(-
 .section-title em { font-style: normal; color: var(--signal); background: rgba(200, 255, 66, .08); padding: 4px 7px; }
 .ghost-button, .group-actions button { border: 1px solid #343c40; background: transparent; color: #9da6a9; min-height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; cursor: pointer; }
 .ghost-button:disabled { opacity: .35; }
+.template-toolbar { padding: 11px 15px; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: minmax(180px, 1fr) auto minmax(190px, 1fr) auto auto; gap: 7px; align-items: end; background: #101416; }
+.template-toolbar label { min-width: 0; display: grid; gap: 5px; }
+.template-toolbar label > span { color: var(--muted); font: 500 8px "IBM Plex Mono", monospace; letter-spacing: .08em; }
+.template-toolbar input, .template-toolbar select { width: 100%; min-width: 0; }
+.template-toolbar button, .json-import-actions button, .file-button { min-height: 34px; border: 1px solid #343c40; background: transparent; color: #abb3b5; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+.template-toolbar button:hover:not(:disabled), .file-button:hover { border-color: var(--signal); color: var(--signal); }
+.template-toolbar button:disabled { opacity: .3; cursor: default; }
+.template-toolbar .danger-action:hover:not(:disabled) { border-color: var(--resistance); color: var(--resistance); }
+.json-import-panel { margin: 12px; padding: 14px; border: 1px solid #465156; background: #111719; box-shadow: inset 3px 0 var(--signal); display: grid; gap: 10px; }
+.json-import-panel > div:first-child { display: flex; align-items: baseline; gap: 12px; }
+.json-import-panel strong { color: var(--paper); font-size: 12px; }
+.json-import-panel span { color: var(--muted); font-size: 10px; }
+.json-import-panel textarea { width: 100%; min-height: 160px; resize: vertical; border: 1px solid #30383c; background: #090c0d; color: #c9d0d1; padding: 11px; font: 500 11px/1.6 "IBM Plex Mono", monospace; }
+.json-import-actions { display: flex; justify-content: flex-end; gap: 7px; }
+.json-import-actions .run-button { color: #111; background: var(--signal); border-color: var(--signal); }
+.file-button { position: relative; overflow: hidden; margin-right: auto; }
+.file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .condition-group { padding: 12px; }
 .nested-group { margin: 9px 0 0 20px; border: 1px solid #2e373a; border-left: 2px solid #566166; background: #121618; }
 .group-header { display: flex; align-items: center; gap: 8px; min-height: 36px; }
@@ -293,6 +310,12 @@ select:focus, input:focus { border-color: #7c8a8f; box-shadow: inset 2px 0 var(-
   .compact-heading { gap: 18px; }
   .compact-heading h1 { font-size: 38px; }
   .screen-controls { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+  .template-toolbar { grid-template-columns: 1fr 1fr; }
+  .template-toolbar label { grid-column: 1 / -1; }
+  .template-toolbar .danger-action { grid-column: auto; }
+  .json-import-panel > div:first-child { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .json-import-actions { flex-wrap: wrap; }
+  .file-button { width: 100%; margin-right: 0; }
   select, input { min-height: 44px; font-size: 16px; }
   .run-button { grid-column: 1 / -1; justify-content: center; }
   .condition-group { padding: 8px; }
