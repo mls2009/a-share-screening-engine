@@ -9,6 +9,7 @@ import { zonePresentation } from "./chartOptions";
 import { type ChartWindow, drillWindow, drilldownTimeframes, filterWindowBars } from "./drilldown";
 import { type DrawingAnchor, type DrawingGeometry, type DrawingKind, buildManualZonePayload } from "./drawing";
 import { StockChart, type StockChartProps } from "./StockChart";
+import { sourceMarks } from "../watchlist/model";
 import { TimeframeToolbar } from "./TimeframeToolbar";
 
 export interface ChartClient {
@@ -57,8 +58,10 @@ export function ChartPage({
   client = api,
   Chart = StockChart,
   ComparisonChart = BenchmarkChart,
+  watchSource,
 }: {
   initialSymbol?: string;
+  watchSource?: import("../watchlist/model").WatchSource;
   client?: ChartClient;
   Chart?: ComponentType<StockChartProps>;
   ComparisonChart?: ComponentType<{ comparison: BenchmarkComparison }>;
@@ -67,7 +70,7 @@ export function ChartPage({
   const [symbol, setSymbol] = useState(initialSymbol);
   const [suggestions, setSuggestions] = useState<SymbolSearchResult[]>([]);
   const [searchActive, setSearchActive] = useState(false);
-  const [timeframe, setTimeframe] = useState<Timeframe>("1d");
+  const [timeframe, setTimeframe] = useState<Timeframe>(watchSource ? sourceMarks(watchSource)[0]?.timeframe ?? "1d" : "1d");
   const [bars, setBars] = useState<Bar[]>([]);
   const [indicators, setIndicators] = useState<ChartIndicatorPoint[]>([]);
   const [selectedIndicators, setSelectedIndicators] = useState<ChartIndicator[]>(["ma"]);
@@ -90,8 +93,8 @@ export function ChartPage({
   const [deletingZoneIds, setDeletingZoneIds] = useState(new Set<string>());
   const activeWindow = drillStack.at(-1)?.window;
   const [defaultStart, defaultEnd] = range(timeframe);
-  const requestStart = activeWindow?.start ?? defaultStart;
-  const requestEnd = activeWindow?.end ?? defaultEnd;
+  const requestStart = activeWindow?.start ?? (watchSource ? new Date(new Date(watchSource.as_of).getTime() - 730 * 86400000).toISOString().slice(0, 10) : defaultStart);
+  const requestEnd = activeWindow?.end ?? (watchSource?.as_of ?? defaultEnd);
   const requestStartAt = activeWindow?.startAt;
   const requestEndAt = activeWindow?.endAt;
 
@@ -425,7 +428,7 @@ export function ChartPage({
               <button type="button" disabled={syncing} onClick={() => void syncCurrentWindow()}><RefreshCw size={14} />{syncing ? "正在同步…" : "同步当前时段数据"}</button>
             </div>
           ) : (
-            <Chart bars={bars} zones={zones} indicators={indicators} selectedIndicators={selectedIndicators} drawing={kind !== null} onAnchor={addAnchor} onBarSelect={selectBar} />
+            <Chart bars={bars} zones={zones} indicators={indicators} selectedIndicators={selectedIndicators} marks={watchSource && symbol === initialSymbol ? sourceMarks(watchSource).filter((mark) => mark.timeframe === timeframe) : []} drawing={kind !== null} onAnchor={addAnchor} onBarSelect={selectBar} />
           )}
         </div>
         {selectedBar && <div className="drilldown-menu" role="dialog" aria-label="选择小周期">

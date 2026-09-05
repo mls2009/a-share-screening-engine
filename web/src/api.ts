@@ -14,6 +14,11 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  watchlist: () => request<import("./features/watchlist/model").WatchItem[]>("/api/watchlist"),
+  addWatchlist: (symbol: string, runId?: string) => request<import("./features/watchlist/model").WatchItem>("/api/watchlist", {
+    method: "POST", body: JSON.stringify({ symbol, run_id: runId }),
+  }),
+  removeWatchlist: (symbol: string) => request<void>(`/api/watchlist/${encodeURIComponent(symbol)}`, { method: "DELETE" }),
   catalog: () => request<MetricSpec[]>("/api/catalog"),
   validateScreen: (tree: unknown) => request<ScreenValidation>("/api/screens/validate", {
     method: "POST",

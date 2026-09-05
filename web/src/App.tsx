@@ -4,6 +4,7 @@ import {
   Database,
   FlaskConical,
   ScanSearch,
+  Star,
 } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 
@@ -12,11 +13,13 @@ import { ScreenerPage } from "./features/screener/ScreenerPage";
 const ChartPage = lazy(() => import("./features/chart/ChartPage").then((module) => ({ default: module.ChartPage })));
 const BacktestPage = lazy(() => import("./features/backtest/BacktestPage").then((module) => ({ default: module.BacktestPage })));
 const MonitorPage = lazy(() => import("./features/monitor/MonitorPage").then((module) => ({ default: module.MonitorPage })));
+const WatchlistPage = lazy(() => import("./features/watchlist/WatchlistPage").then((module) => ({ default: module.WatchlistPage })));
 
-type Page = "screener" | "chart" | "backtest" | "monitor";
+type Page = "screener" | "chart" | "backtest" | "monitor" | "watchlist";
 
 const pages = [
   { id: "screener" as const, label: "条件选股", icon: ScanSearch },
+  { id: "watchlist" as const, label: "自选股", icon: Star },
   { id: "chart" as const, label: "K 线研究", icon: CandlestickChart },
   { id: "backtest" as const, label: "策略回测", icon: FlaskConical },
   { id: "monitor" as const, label: "实时监控", icon: BellRing },
@@ -56,6 +59,8 @@ export function App() {
       </aside>
       {page === "screener" ? (
         <ScreenerPage onOpenChart={(symbol) => { setChartSymbol(symbol); setPage("chart"); }} />
+      ) : page === "watchlist" ? (
+        <Suspense fallback={<main className="empty-page">正在加载自选股…</main>}><WatchlistPage /></Suspense>
       ) : page === "chart" ? (
         <Suspense fallback={<main className="empty-page"><p className="eyebrow">LOADING CHART DESK</p></main>}>
           <ChartPage initialSymbol={chartSymbol} />

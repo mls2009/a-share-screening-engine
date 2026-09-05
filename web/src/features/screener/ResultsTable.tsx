@@ -13,11 +13,12 @@ function leaves(evaluation: Evaluation): Evaluation[] {
   return evaluation.children.length ? evaluation.children.flatMap(leaves) : [evaluation];
 }
 
-export function ResultsTable({ matches, selected, onSelect, onOpenChart, sortBy, sortDirection, onSort }: {
+export function ResultsTable({ matches, selected, onSelect, onOpenChart, onAddWatchlist, sortBy, sortDirection, onSort }: {
   matches: ScreenMatch[];
   selected?: string;
   onSelect: (match: ScreenMatch) => void;
   onOpenChart: (symbol: string) => void;
+  onAddWatchlist?: (symbol: string) => void;
   sortBy?: ScreenSortField;
   sortDirection?: SortDirection;
   onSort: (field: ScreenSortField) => void;
@@ -38,7 +39,7 @@ export function ResultsTable({ matches, selected, onSelect, onOpenChart, sortBy,
                 <td>{number(match.features.close)}</td>
                 <td className={Number(match.features.return_20) >= 0 ? "positive" : "negative"}>{number(match.features.return_20)}%</td>
                 <td>{number(match.features.volume_ratio_20)}x</td>
-                <td><button type="button" aria-label={`查看 ${match.symbol} K 线`} onClick={(event) => { event.stopPropagation(); onOpenChart(match.symbol); }}><ArrowUpRight size={15} /></button></td>
+                <td>{onAddWatchlist && <button type="button" aria-label={`加入自选 ${match.symbol}`} onClick={(event) => { event.stopPropagation(); onAddWatchlist(match.symbol); }}>+ 自选</button>}<button type="button" aria-label={`查看 ${match.symbol} K 线`} onClick={(event) => { event.stopPropagation(); onOpenChart(match.symbol); }}><ArrowUpRight size={15} /></button></td>
               </tr>
             ))}
           </tbody>

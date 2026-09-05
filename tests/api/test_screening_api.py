@@ -226,6 +226,22 @@ def test_screen_template_rejects_unknown_metric(tmp_path: Path) -> None:
     assert response.json()["errors"][0]["code"] == "unknown_metric"
 
 
+def test_watchlist_preserves_screen_source_and_deduplicates(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    run = client.post("/api/screens/run", json={"tree": CONDITION, "mode": "close", "as_of": "2026-08-20"}).json()
+    payload = {"symbol": "600001.SH", "run_id": run["run_id"]}
+    assert client.post("/api/watchlist", json=payload).status_code == 200
+    assert client.post("/api/watchlist", json=payload).status_code == 200
+    items = client.get("/api/watchlist").json()
+    assert len(items) == 1
+    assert len(items[0]["sources"]) == 1
+    assert items[0]["sources"][0]["tree"]["metric"] == CONDITION["metric"]
+    invalid = client.post("/api/watchlist", json={"symbol": "missing"})
+    assert invalid.status_code == 404
+    assert client.delete("/api/watchlist/600001.SH").status_code == 204
+    assert client.get("/api/watchlist").json() == []
+
+
 def test_symbol_search_matches_etf_code_and_chinese_name(tmp_path: Path) -> None:
     client, database = _client(tmp_path)
     database.connection.executemany(

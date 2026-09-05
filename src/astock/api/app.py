@@ -39,6 +39,7 @@ from astock.live.scheduler import MonitoringScheduler
 from astock.live.service import MonitoringService
 from astock.notifications.feishu import FeishuNotifier
 from astock.notifications.outbox import OutboxWorker
+from astock.screening.annotations import condition_marks
 from astock.screening.catalog import DEFAULT_CATALOG
 from astock.screening.models import Node
 from astock.screening.service import ScreenDefinitionError, ScreeningService
@@ -69,6 +70,11 @@ class ChartDataSyncRequest(BaseModel):
 class ScreenTemplateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     tree: Node
+
+
+class WatchlistRequest(BaseModel):
+    symbol: str
+    run_id: UUID | None = None
 
 
 def _screen_template(row: tuple) -> dict:
@@ -151,6 +157,54 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
     @app.get("/api/catalog")
     def catalog() -> list[dict]:
         return _catalog()
+
+    @app.get("/api/watchlist")
+    def list_watchlist():
+        rows = context.database.connection.execute(
+            "select symbol, name, sources, added_at from watchlist order by added_at desc"
+        ).fetchall()
+        return jsonable_encoder([
+            {"symbol": row[0], "name": row[1], "sources": json.loads(row[2]), "added_at": row[3]}
+            for row in rows
+        ])
+
+    @app.post("/api/watchlist")
+    def add_watchlist(payload: WatchlistRequest):
+        con = context.database.connection
+        security = con.execute("select name from symbols where symbol = ?", [payload.symbol]).fetchone()
+        if not security:
+            return JSONResponse(status_code=404, content={"message": "证券不存在"})
+        existing = con.execute("select sources from watchlist where symbol = ?", [payload.symbol]).fetchone()
+        sources = json.loads(existing[0]) if existing else []
+        if payload.run_id is not None:
+            source = con.execute(
+                """select r.as_of_date, r.condition_tree, m.explanation, r.mode
+                from screen_runs r join screen_matches m on r.run_id = m.run_id
+                where r.run_id = ? and m.symbol = ?""",
+                [payload.run_id, payload.symbol],
+            ).fetchone()
+            if not source:
+                return JSONResponse(status_code=422, content={"message": "该股票不在此筛选结果中"})
+            if not any(item["run_id"] == str(payload.run_id) for item in sources):
+                stored_tree, stored_result = json.loads(source[1]), json.loads(source[2])
+                histories = {timeframe: MarketFeatureStore(context.database).read_history(
+                    payload.symbol, timeframe, source[0], 1000, enrich=False
+                ) for timeframe in Timeframe}
+                sources.append({"run_id": str(payload.run_id), "as_of": source[0].isoformat(),
+                                "tree": stored_tree, "explanation": stored_result,
+                                "marks": condition_marks(stored_tree, stored_result, histories),
+                                "mode": source[3]})
+        con.execute(
+            """insert into watchlist(symbol, name, sources) values (?, ?, ?)
+            on conflict(symbol) do update set name = excluded.name, sources = excluded.sources""",
+            [payload.symbol, security[0], json.dumps(sources, ensure_ascii=False)],
+        )
+        return {"symbol": payload.symbol, "name": security[0], "sources": sources}
+
+    @app.delete("/api/watchlist/{symbol}", status_code=204)
+    def remove_watchlist(symbol: str):
+        context.database.connection.execute("delete from watchlist where symbol = ?", [symbol])
+        return Response(status_code=204)
 
     @app.post("/api/screens/validate")
     def validate_screen(tree: Node) -> dict:
@@ -394,6 +448,10 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             "obv", "atr_14",
         )
         features = compute_technical_features(frame)
+        fields = tuple(dict.fromkeys((*fields, *[
+            metric.key for metric in DEFAULT_CATALOG.all()
+            if metric.key in features.columns and metric.unit.value not in {"category", "boolean"}
+        ])))
         visible = features[
             features["timestamp"].dt.date.between(start, end)
         ]

@@ -47,6 +47,14 @@ export function ScreenerPage({
   const [templateName, setTemplateName] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
+  const [watchMessage, setWatchMessage] = useState("");
+  const addWatchlist = async (symbol: string) => {
+    if (!result) return;
+    try {
+      await api.addWatchlist(symbol, result.run_id);
+      setWatchMessage(`${symbol} 已加入自选，已保存本次筛选条件`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "加入自选失败"); }
+  };
 
   useEffect(() => {
     client.catalog().then((metrics) => {
@@ -218,7 +226,8 @@ export function ScreenerPage({
           {result && <div className="run-stats"><span>全市场 <b>{result.universe_size.toLocaleString("zh-CN")}</b></span><span>实时覆盖 <b>{result.realtime_covered.toLocaleString("zh-CN")}</b></span></div>}
         </div>
         {!result ? <div className="result-empty">组合条件后运行，命中股票将在这里显示。</div> : <>
-          <ResultsTable matches={result.matches} selected={selected?.symbol} onSelect={setSelected} onOpenChart={onOpenChart} sortBy={sortBy} sortDirection={sortDirection} onSort={changeSort} />
+          {watchMessage && <p role="status">{watchMessage}</p>}
+          <ResultsTable matches={result.matches} selected={selected?.symbol} onSelect={setSelected} onOpenChart={onOpenChart} onAddWatchlist={addWatchlist} sortBy={sortBy} sortDirection={sortDirection} onSort={changeSort} />
           <div className="results-pagination">
             <label>每页<select aria-label="每页数量" value={pageSize} disabled={paging} onChange={(event) => {
               const nextSize = Number(event.target.value);

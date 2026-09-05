@@ -1,6 +1,7 @@
 import type { EChartsOption, LineSeriesOption } from "echarts";
 
 import type { Bar, ChartIndicator, ChartIndicatorPoint, PriceZone } from "../../types";
+import type { ConditionMark } from "../watchlist/model";
 
 export const DEFAULT_CHART_INDICATORS: ChartIndicator[] = ["ma"];
 
@@ -185,6 +186,7 @@ export function buildChartOption(
   zones: PriceZone[],
   indicators: ChartIndicatorPoint[] = [],
   selected: ChartIndicator[] = DEFAULT_CHART_INDICATORS,
+  marks: ConditionMark[] = [],
 ): EChartsOption {
   const dates = bars.map((bar) => bar.timestamp);
   const candleData = bars.map((bar) => [bar.open, bar.close, bar.low, bar.high]);
@@ -270,6 +272,56 @@ export function buildChartOption(
     if (indicator === "obv") chartSeries.push(line("OBV", values(indicators, "obv"), axis, "#75baff"));
     if (indicator === "atr") chartSeries.push(line("ATR14", values(indicators, "atr_14"), axis, "#ffab70"));
   });
+  const indicatorRows = new Map(indicators.map((row) => [row.timestamp, row as unknown as Record<string, unknown>]));
+  for (const mark of marks) {
+    let endIndex = bars.length - 1;
+    while (endIndex >= 0 && bars[endIndex].timestamp.slice(0, 10) > mark.date) endIndex--;
+    if (endIndex < 0) continue;
+    const firstIndex = mark.startDate ? bars.findIndex((bar) => bar.timestamp.slice(0, 10) >= mark.startDate!) : Math.max(0, endIndex - mark.periods + 1);
+    if (firstIndex < 0 || firstIndex > endIndex || bars[endIndex].timestamp.slice(0, 10) !== mark.date) continue;
+    const metric = mark.metric;
+    const isCandle = ["open", "high", "low", "close", "pattern_type", "pattern_strength", "is_limit_up"].includes(metric);
+    if (isCandle) {
+      const section = bars.slice(firstIndex, endIndex + 1);
+      chartSeries.push({ name: mark.label, type: "line", data: [], markArea: {
+        silent: false, itemStyle: { color: "#f3c96918", borderColor: "#f3c969", borderWidth: 2 },
+        label: { show: false },
+        tooltip: { formatter: mark.label },
+        data: [[{ name: mark.label, xAxis: firstIndex - 0.45, yAxis: Math.min(...section.map((bar) => bar.low)) * 0.995 },
+          { xAxis: endIndex + 0.45, yAxis: Math.max(...section.map((bar) => bar.high)) * 1.005 }]],
+      } });
+      continue;
+    }
+    const values = bars.map((bar) => {
+      const value = indicatorRows.get(bar.timestamp)?.[metric];
+      return typeof value === "number" && Number.isFinite(value) ? value : null;
+    });
+    if (!values.some((value) => value !== null)) continue;
+    const priceMetric = /^ma_\d+$/.test(metric) || /^(boll_|high_|low_)/.test(metric);
+    const volumeMetric = metric === "volume" || /^volume_ma_/.test(metric);
+    let axis = priceMetric ? 0 : volumeMetric ? 1 : grids.length;
+    const knownNames: Record<string, string> = { ma_5: "MA5", ma_10: "MA10", ma_20: "MA20", ma_30: "MA30", macd: "DIF", macd_signal: "DEA", macd_hist: "MACD柱", kdj_k: "K", kdj_d: "D", kdj_j: "J", rsi_14: "RSI14", obv: "OBV", atr_14: "ATR14", volume: "成交量" };
+    const existing = chartSeries.find((series) => series.name === (knownNames[metric] ?? metric));
+    if (existing) axis = Number(existing.xAxisIndex ?? 0);
+    if (axis === grids.length) {
+      grids.push({ left: 58, right: 22, top: "0%", height: "10%" });
+      axes.push({ ...axes[1], gridIndex: axis });
+      yAxes.push({ ...yAxes[1], gridIndex: axis });
+    }
+    const points = values.flatMap((value, index) => index >= firstIndex && index <= endIndex && value !== null
+      ? [{ name: mark.label, coord: [dates[index], value] }] : []);
+    chartSeries.push({ name: knownNames[metric] ?? mark.metricLabel ?? metric, type: "line", xAxisIndex: axis, yAxisIndex: axis,
+      data: values, showSymbol: false, lineStyle: { color: "#f3c969", width: 1, opacity: existing ? 0 : 1 },
+      markPoint: { symbol: "circle", symbolSize: 10, itemStyle: { color: "#f3c969", borderColor: "#fff", borderWidth: 1 },
+        label: { show: false }, tooltip: { formatter: mark.label }, data: points } });
+  }
+  if (grids.length > paneCount) {
+    const available = 86 / (grids.length + 1.4);
+    grids.forEach((grid, index) => {
+      grid.top = `${index === 0 ? 5 : 5 + available * (index + 1.4)}%`;
+      grid.height = `${available * (index === 0 ? 2.4 : 1) - 2}%`;
+    });
+  }
   return {
     animation: false,
     backgroundColor: "transparent",
@@ -279,8 +331,8 @@ export function buildChartOption(
     xAxis: axes,
     yAxis: yAxes,
     dataZoom: [
-      { type: "inside", xAxisIndex: Array.from({ length: paneCount }, (_, index) => index), start: Math.max(0, 100 - 12000 / Math.max(bars.length, 1)), end: 100 },
-      { type: "slider", xAxisIndex: Array.from({ length: paneCount }, (_, index) => index), bottom: 4, height: 16, borderColor: "#30383c", backgroundColor: "#111517", fillerColor: "#313a3e80", handleStyle: { color: "#c8ff42" }, textStyle: { color: "#677277" } },
+      { type: "inside", xAxisIndex: Array.from({ length: grids.length }, (_, index) => index), start: Math.max(0, 100 - 12000 / Math.max(bars.length, 1)), end: 100 },
+      { type: "slider", xAxisIndex: Array.from({ length: grids.length }, (_, index) => index), bottom: 4, height: 16, borderColor: "#30383c", backgroundColor: "#111517", fillerColor: "#313a3e80", handleStyle: { color: "#c8ff42" }, textStyle: { color: "#677277" } },
     ],
     series: [
       ...chartSeries,

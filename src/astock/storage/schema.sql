@@ -66,6 +66,13 @@ create table if not exists quality_issues (
   created_at timestamp default current_timestamp
 );
 
+create table if not exists watchlist (
+  symbol varchar primary key,
+  name varchar not null,
+  sources json not null default '[]',
+  added_at timestamp default current_timestamp
+);
+
 create table if not exists market_features (
   symbol varchar not null,
   timeframe varchar not null,

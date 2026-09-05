@@ -5,6 +5,7 @@ import {
   GridComponent,
   MarkAreaComponent,
   MarkLineComponent,
+  MarkPointComponent,
   TooltipComponent,
 } from "echarts/components";
 import * as echarts from "echarts/core";
@@ -25,6 +26,7 @@ echarts.use([
   LineChart,
   MarkAreaComponent,
   MarkLineComponent,
+  MarkPointComponent,
   TooltipComponent,
 ]);
 
@@ -33,6 +35,7 @@ export interface StockChartProps {
   zones: PriceZone[];
   indicators?: ChartIndicatorPoint[];
   selectedIndicators?: ChartIndicator[];
+  marks?: import("../watchlist/model").ConditionMark[];
   drawing?: boolean;
   onAnchor?: (anchor: DrawingAnchor) => void;
   onBarSelect?: (bar: Bar) => void;
@@ -61,7 +64,7 @@ function linePointerParams(params: unknown): ChartLinePointerParams | undefined 
   return candidate;
 }
 
-export function StockChart({ bars, zones, indicators = [], selectedIndicators, drawing = false, onAnchor, onBarSelect }: StockChartProps) {
+export function StockChart({ bars, zones, indicators = [], selectedIndicators, marks = [], drawing = false, onAnchor, onBarSelect }: StockChartProps) {
   const element = useRef<HTMLDivElement>(null);
   const anchorCallback = useRef(onAnchor);
   const barSelectCallback = useRef(onBarSelect);
@@ -71,7 +74,7 @@ export function StockChart({ bars, zones, indicators = [], selectedIndicators, d
   useEffect(() => {
     if (!element.current) return;
     const chart = echarts.init(element.current, undefined, { renderer: "canvas" });
-    chart.setOption(buildChartOption(bars, zones, indicators, selectedIndicators), true);
+    chart.setOption(buildChartOption(bars, zones, indicators, selectedIndicators, marks), true);
     const resize = () => chart.resize();
     const resizeObserver = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(resize);
     resizeObserver?.observe(element.current);
@@ -134,9 +137,9 @@ export function StockChart({ bars, zones, indicators = [], selectedIndicators, d
       window.removeEventListener("resize", resize);
       chart.dispose();
     };
-  }, [bars, drawing, indicators, selectedIndicators, zones]);
+  }, [bars, drawing, indicators, selectedIndicators, zones, marks]);
 
-  const subPaneCount = selectedIndicators?.filter((item) => ["macd", "kdj", "rsi", "obv", "atr"].includes(item)).length ?? 0;
+  const subPaneCount = (selectedIndicators?.filter((item) => ["macd", "kdj", "rsi", "obv", "atr"].includes(item)).length ?? 0) + new Set(marks.filter((mark) => !/^(ma_\d+$|open$|close$|high$|low$|pattern_|volume$)/.test(mark.metric)).map((mark) => mark.metric)).size;
   const chartStyle = {
     "--chart-height": `${560 + subPaneCount * 120}px`,
     "--chart-mobile-height": `${440 + subPaneCount * 110}px`,

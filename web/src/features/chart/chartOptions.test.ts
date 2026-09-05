@@ -28,6 +28,22 @@ const bars: Bar[] = [
   { symbol: "600001.SH", timestamp: "2026-08-19T15:00:00+08:00", open: 10, high: 11, low: 9.8, close: 10.8, volume_shares: 1000, amount_cny: 10800 },
   { symbol: "600001.SH", timestamp: "2026-08-20T15:00:00+08:00", open: 10.8, high: 11.2, low: 10.5, close: 10.6, volume_shares: 1800, amount_cny: 19080 },
 ];
+
+it("boxes matched candles without moving the evidence to a later date", () => {
+  const marks = [{ metric: "close", timeframe: "1d" as const, date: "2026-08-20", periods: 2, label: "入选依据" }];
+  const option = buildChartOption(bars, [], [], [], marks);
+  const series = option.series as TestSeries[];
+  expect(series.some((item) => item.markArea)).toBe(true);
+  const outside = buildChartOption(bars, [], [], [], [{ ...marks[0], date: "2026-08-21" }]);
+  expect((outside.series as TestSeries[]).some((item) => item.markArea)).toBe(false);
+});
+
+it("marks the moving average curve at the matched candle timestamp", () => {
+  const indicators = bars.map((bar) => ({ timestamp: bar.timestamp, ma_10: 10 })) as import("../../types").ChartIndicatorPoint[];
+  const option = buildChartOption(bars, [], indicators, ["ma"], [{ metric: "ma_10", timeframe: "1d", date: "2026-08-20", periods: 1, label: "均线条件" }]);
+  const series = option.series as Array<{ name: string; markPoint?: { data: Array<{ coord: unknown[] }> } }>;
+  expect(series.find((item) => item.markPoint)?.markPoint?.data[0].coord).toEqual([bars[1].timestamp, 10]);
+});
 const autoHorizontalZone = {
   zone_id: "auto-horizontal", timeframe: "1d", as_of_date: "2026-08-20", zone_kind: "support",
   geometry: "horizontal", lower_price: 9.7, center_price: 9.8, upper_price: 9.9,
