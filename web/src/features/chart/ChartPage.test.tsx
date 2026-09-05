@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import type { Bar, PriceZone } from "../../types";
+import type { Bar, BenchmarkComparison, PriceZone } from "../../types";
 import { ChartPage, type ChartClient } from "./ChartPage";
 import type { StockChartProps } from "./StockChart";
 
@@ -41,9 +41,106 @@ const automaticDowntrend: PriceZone = {
   source: "auto",
 };
 
-function FakeChart({ bars: chartBars, zones, selectedIndicators, onAnchor }: StockChartProps) {
-  return <div><span>{chartBars.length} 根 K 线 / {zones.length} 条线</span><span>指标：{selectedIndicators?.join(",")}</span><button onClick={() => onAnchor?.({ date: "2026-08-01", price: 10 })}>锚点1</button><button onClick={() => onAnchor?.({ date: "2026-08-20", price: 11 })}>锚点2</button></div>;
+function FakeChart({ bars: chartBars, zones, selectedIndicators, onAnchor, onBarSelect }: StockChartProps) {
+  return <div><span>{chartBars.length} 根 K 线 / {zones.length} 条线</span><span>指标：{selectedIndicators?.join(",")}</span><button onClick={() => onAnchor?.({ date: "2026-08-01", price: 10 })}>锚点1</button><button onClick={() => onAnchor?.({ date: "2026-08-20", price: 11 })}>锚点2</button>{chartBars.map((bar) => <button key={bar.timestamp} onClick={() => onBarSelect?.(bar)}>选择 {bar.timestamp.slice(0, 10)} K线</button>)}</div>;
 }
+
+function FakeBenchmarkChart({ comparison }: { comparison: BenchmarkComparison }) {
+  return <div role="img" aria-label="大盘走势对比图">{comparison.stock_name} 对比 {comparison.benchmark_name}</div>;
+}
+
+const comparison: BenchmarkComparison = {
+  stock_symbol: "600001.SH",
+  stock_name: "股票一",
+  benchmark_symbol: "000001.SH",
+  benchmark_name: "上证指数",
+  points: [
+    { timestamp: "2026-08-20T15:00:00+08:00", stock_return_pct: 0, benchmark_return_pct: 0, relative_pct: 0 },
+  ],
+};
+
+it("点击日 K 后选择15分钟并可返回日线", async () => {
+  const requests: Array<[string, string, string, string]> = [];
+  const client: ChartClient = {
+    searchSymbols: async () => [],
+    bars: async (...args) => { requests.push(args); return bars; },
+    indicators: async () => [],
+    zones: async () => [],
+    createManualZone: async () => manual,
+    deleteZone: async () => undefined,
+  };
+  render(<ChartPage initialSymbol="600001.SH" client={client} Chart={FakeChart} />);
+
+  await userEvent.click(await screen.findByRole("button", { name: "选择 2026-08-20 K线" }));
+  await userEvent.click(screen.getByRole("button", { name: "查看15分钟" }));
+
+  await waitFor(() => expect(requests.at(-1)).toEqual([
+    "600001.SH", "15m", "2026-08-20", "2026-08-20",
+  ]));
+  expect(screen.getByText("日线")).toBeVisible();
+  expect(screen.getByText("2026-08-20")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "返回日线" }));
+  await waitFor(() => expect(requests.at(-1)?.[1]).toBe("1d"));
+});
+
+it("大盘对比使用同区间折线并在关闭后恢复指标和画线工具", async () => {
+  const comparisonRequests: unknown[][] = [];
+  const client: ChartClient = {
+    searchSymbols: async () => [],
+    bars: async () => bars,
+    indicators: async () => [],
+    zones: async () => [],
+    benchmarkComparison: async (...args) => { comparisonRequests.push(args); return comparison; },
+    createManualZone: async () => manual,
+    deleteZone: async () => undefined,
+  };
+  render(
+    <ChartPage
+      initialSymbol="600001.SH"
+      client={client}
+      Chart={FakeChart}
+      ComparisonChart={FakeBenchmarkChart}
+    />,
+  );
+
+  expect(await screen.findByText("指标：ma")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "开启大盘对比" }));
+
+  expect(await screen.findByRole("img", { name: "大盘走势对比图" })).toBeVisible();
+  expect(comparisonRequests[0]).toEqual([
+    "600001.SH", "1d", expect.any(String), expect.any(String), undefined, undefined,
+  ]);
+  expect(screen.queryByRole("button", { name: "画支撑" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "删除指标 MA 5/10/20/30" })).not.toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "关闭大盘对比" }));
+  expect(await screen.findByText("指标：ma")).toBeVisible();
+  expect(screen.getByRole("button", { name: "画支撑" })).toBeVisible();
+});
+
+it("缺少行情时可同步当前窗口并自动重新加载", async () => {
+  let synced = false;
+  const syncRequests: object[] = [];
+  const client: ChartClient = {
+    searchSymbols: async () => [],
+    bars: async () => synced ? bars : [],
+    indicators: async () => [],
+    zones: async () => [],
+    syncChartData: async (_symbol, payload) => {
+      syncRequests.push(payload);
+      synced = true;
+      return { stock_bars: bars.length, benchmark_bars: 0 };
+    },
+    createManualZone: async () => manual,
+    deleteZone: async () => undefined,
+  };
+  render(<ChartPage initialSymbol="600001.SH" client={client} Chart={FakeChart} />);
+
+  await userEvent.click(await screen.findByRole("button", { name: "同步当前时段数据" }));
+
+  expect(syncRequests[0]).toMatchObject({ timeframe: "1d", include_benchmark: false });
+  expect(await screen.findByText("2 根 K 线 / 0 条线")).toBeVisible();
+});
 
 it("默认显示 MA，可从菜单添加和移除副图指标", async () => {
   const requested: string[][] = [];

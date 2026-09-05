@@ -1,10 +1,12 @@
-import { Maximize2, Minimize2, Search, Trash2 } from "lucide-react";
+import { ArrowLeft, GitCompareArrows, Maximize2, Minimize2, RefreshCw, Search, Trash2 } from "lucide-react";
 import { type ComponentType, useEffect, useRef, useState } from "react";
 
 import { api } from "../../api";
-import type { Bar, ChartIndicator, ChartIndicatorPoint, PriceZone, SymbolSearchResult, Timeframe } from "../../types";
+import type { Bar, BenchmarkComparison, ChartDataSyncRequest, ChartDataSyncResult, ChartIndicator, ChartIndicatorPoint, PriceZone, SymbolSearchResult, Timeframe } from "../../types";
+import { BenchmarkChart } from "./BenchmarkChart";
 import { DrawingToolbar } from "./DrawingToolbar";
 import { zonePresentation } from "./chartOptions";
+import { type ChartWindow, drillWindow, drilldownTimeframes, filterWindowBars } from "./drilldown";
 import { type DrawingAnchor, type DrawingGeometry, type DrawingKind, buildManualZonePayload } from "./drawing";
 import { StockChart, type StockChartProps } from "./StockChart";
 import { TimeframeToolbar } from "./TimeframeToolbar";
@@ -13,6 +15,8 @@ export interface ChartClient {
   searchSymbols(query: string): Promise<SymbolSearchResult[]>;
   bars(symbol: string, timeframe: Timeframe, start: string, end: string): Promise<Bar[]>;
   indicators?(symbol: string, timeframe: Timeframe, start: string, end: string): Promise<ChartIndicatorPoint[]>;
+  benchmarkComparison?(symbol: string, timeframe: Timeframe, start: string, end: string, startAt?: string, endAt?: string): Promise<BenchmarkComparison>;
+  syncChartData?(symbol: string, payload: ChartDataSyncRequest): Promise<ChartDataSyncResult>;
   zones(symbol: string, timeframe: Timeframe, asOf: string): Promise<PriceZone[]>;
   createManualZone(symbol: string, payload: object): Promise<PriceZone>;
   deleteZone(symbol: string, zoneId: string): Promise<void>;
@@ -30,6 +34,16 @@ const indicatorOptions: Array<{ value: ChartIndicator; label: string }> = [
 ];
 
 const date = (value: Date) => value.toISOString().slice(0, 10);
+const timeframeLabel: Record<Timeframe, string> = {
+  "5m": "5分钟",
+  "15m": "15分钟",
+  "30m": "30分钟",
+  "60m": "60分钟",
+  "1d": "日线",
+  "1w": "周线",
+  "1mo": "月线",
+};
+
 const range = (timeframe: Timeframe) => {
   const end = new Date();
   const start = new Date(end);
@@ -42,10 +56,12 @@ export function ChartPage({
   initialSymbol = "600519.SH",
   client = api,
   Chart = StockChart,
+  ComparisonChart = BenchmarkChart,
 }: {
   initialSymbol?: string;
   client?: ChartClient;
   Chart?: ComponentType<StockChartProps>;
+  ComparisonChart?: ComponentType<{ comparison: BenchmarkComparison }>;
 }) {
   const [symbolInput, setSymbolInput] = useState(initialSymbol);
   const [symbol, setSymbol] = useState(initialSymbol);
@@ -63,8 +79,21 @@ export function ChartPage({
   const [anchors, setAnchors] = useState<DrawingAnchor[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [drillStack, setDrillStack] = useState<Array<{ parentTimeframe: Timeframe; window: ChartWindow }>>([]);
+  const [selectedBar, setSelectedBar] = useState<Bar | null>(null);
+  const [benchmarkEnabled, setBenchmarkEnabled] = useState(false);
+  const [comparison, setComparison] = useState<BenchmarkComparison | null>(null);
+  const [comparisonLoading, setComparisonLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [reloadVersion, setReloadVersion] = useState(0);
   const deletingZoneIdsRef = useRef(new Set<string>());
   const [deletingZoneIds, setDeletingZoneIds] = useState(new Set<string>());
+  const activeWindow = drillStack.at(-1)?.window;
+  const [defaultStart, defaultEnd] = range(timeframe);
+  const requestStart = activeWindow?.start ?? defaultStart;
+  const requestEnd = activeWindow?.end ?? defaultEnd;
+  const requestStartAt = activeWindow?.startAt;
+  const requestEndAt = activeWindow?.endAt;
 
   useEffect(() => {
     if (!searchActive) return;
@@ -92,22 +121,48 @@ export function ChartPage({
 
   useEffect(() => {
     let current = true;
-    const [start, end] = range(timeframe);
     setLoading(true); setError("");
     Promise.all([
-      client.bars(symbol, timeframe, start, end),
-      client.zones(symbol, timeframe, end),
-      client.indicators?.(symbol, timeframe, start, end) ?? Promise.resolve([]),
+      client.bars(symbol, timeframe, requestStart, requestEnd),
+      client.zones(symbol, timeframe, requestEnd),
+      client.indicators?.(symbol, timeframe, requestStart, requestEnd) ?? Promise.resolve([]),
     ])
       .then(([nextBars, nextZones, nextIndicators]) => {
         if (current) {
-          setBars(nextBars); setZones(nextZones); setIndicators(nextIndicators);
+          setBars(activeWindow ? filterWindowBars(nextBars, activeWindow) : nextBars);
+          setZones(nextZones);
+          setIndicators(nextIndicators);
         }
       })
       .catch((cause: Error) => { if (current) setError(cause.message); })
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
-  }, [client, symbol, timeframe]);
+  }, [client, reloadVersion, requestEnd, requestEndAt, requestStart, requestStartAt, symbol, timeframe]);
+
+  useEffect(() => {
+    if (!benchmarkEnabled) {
+      setComparison(null);
+      setComparisonLoading(false);
+      return;
+    }
+    if (!client.benchmarkComparison) {
+      setError("当前数据服务不支持大盘对比");
+      return;
+    }
+    let current = true;
+    setComparisonLoading(true);
+    setError("");
+    client.benchmarkComparison(symbol, timeframe, requestStart, requestEnd, requestStartAt, requestEndAt)
+      .then((result) => { if (current) setComparison(result); })
+      .catch((cause: Error) => {
+        if (current) {
+          setComparison(null);
+          setError(cause.message || "大盘对比数据读取失败");
+        }
+      })
+      .finally(() => { if (current) setComparisonLoading(false); });
+    return () => { current = false; };
+  }, [benchmarkEnabled, client, reloadVersion, requestEnd, requestEndAt, requestStart, requestStartAt, symbol, timeframe]);
 
   useEffect(() => {
     if (!fullscreen) return;
@@ -145,6 +200,9 @@ export function ChartPage({
     setSymbol(result.symbol);
     setSuggestions([]);
     setSearchActive(false);
+    setDrillStack([]);
+    setSelectedBar(null);
+    setComparison(null);
     setError("");
   };
 
@@ -201,6 +259,70 @@ export function ChartPage({
     setSelectedIndicators((previous) => previous.filter((item) => item !== indicator));
   };
 
+  const changeTimeframe = (next: Timeframe) => {
+    setTimeframe(next);
+    setDrillStack([]);
+    setSelectedBar(null);
+    setComparison(null);
+    setAnchors([]);
+  };
+
+  const selectBar = (bar: Bar) => {
+    if (benchmarkEnabled || kind || !drilldownTimeframes(timeframe).length) return;
+    setSelectedBar(bar);
+  };
+
+  const enterDrilldown = (target: Timeframe) => {
+    if (!selectedBar) return;
+    const window = drillWindow(selectedBar, timeframe, target);
+    setDrillStack((previous) => [...previous, { parentTimeframe: timeframe, window }]);
+    setTimeframe(target);
+    setSelectedBar(null);
+    setComparison(null);
+    setAnchors([]);
+  };
+
+  const leaveDrilldown = () => {
+    const previous = drillStack.at(-1);
+    if (!previous) return;
+    setDrillStack((stack) => stack.slice(0, -1));
+    setTimeframe(previous.parentTimeframe);
+    setSelectedBar(null);
+    setComparison(null);
+    setAnchors([]);
+  };
+
+  const toggleBenchmark = () => {
+    setBenchmarkEnabled((enabled) => !enabled);
+    setSelectedBar(null);
+    setIndicatorMenuOpen(false);
+    setKind(null);
+    setAnchors([]);
+    setError("");
+  };
+
+  const syncCurrentWindow = async () => {
+    if (!client.syncChartData) {
+      setError("当前数据服务不支持行情同步");
+      return;
+    }
+    setSyncing(true);
+    setError("");
+    try {
+      await client.syncChartData(symbol, {
+        timeframe,
+        start: requestStart,
+        end: requestEnd,
+        include_benchmark: benchmarkEnabled,
+      });
+      setReloadVersion((version) => version + 1);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "行情同步失败");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <main className={`chart-page ${fullscreen ? "has-fullscreen-chart" : ""}`}>
       <header className="chart-heading">
@@ -244,14 +366,31 @@ export function ChartPage({
         <div className="chart-topline">
           <div><strong>{symbol}</strong><span>{bars.length ? `${bars.at(-1)?.close.toFixed(2)} 元` : "—"}</span></div>
           <div className="chart-actions">
-            <TimeframeToolbar value={timeframe} onChange={(next) => { setTimeframe(next); setAnchors([]); }} />
+            <TimeframeToolbar value={timeframe} onChange={changeTimeframe} />
+            <button
+              type="button"
+              className={`benchmark-toggle ${benchmarkEnabled ? "active" : ""}`}
+              aria-label={benchmarkEnabled ? "关闭大盘对比" : "开启大盘对比"}
+              aria-pressed={benchmarkEnabled}
+              onClick={toggleBenchmark}
+            >
+              <GitCompareArrows size={15} />
+              <span>{benchmarkEnabled ? "关闭对比" : "大盘对比"}</span>
+            </button>
             <button type="button" className="fullscreen-toggle" aria-label={fullscreen ? "退出全屏" : "全屏看盘"} onClick={() => setFullscreen((current) => !current)}>
               {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
               <span>{fullscreen ? "退出" : "全屏"}</span>
             </button>
           </div>
         </div>
-        <div className="indicator-toolbar">
+        {drillStack.length > 0 && <div className="drill-breadcrumb">
+          <button type="button" aria-label={`返回${timeframeLabel[drillStack.at(-1)!.parentTimeframe]}`} onClick={leaveDrilldown}>
+            <ArrowLeft size={14} />返回{timeframeLabel[drillStack.at(-1)!.parentTimeframe]}
+          </button>
+          <span>{timeframeLabel[drillStack[0].parentTimeframe]}</span>
+          {drillStack.map((entry) => <span className="drill-crumb" key={`${entry.window.timeframe}-${entry.window.label}`}>/ <b>{entry.window.label}</b> / {timeframeLabel[entry.window.timeframe]}</span>)}
+        </div>}
+        {!benchmarkEnabled && <div className="indicator-toolbar">
           <span>技术指标</span>
           {selectedIndicators.map((indicator) => {
             const option = indicatorOptions.find((item) => item.value === indicator);
@@ -265,20 +404,39 @@ export function ChartPage({
               ))}
             </div>}
           </div>
-        </div>
-        <DrawingToolbar kind={kind} geometry={geometry} anchors={anchors.length} onKindChange={(next) => { setKind(next); setAnchors([]); }} onGeometryChange={(next) => { setGeometry(next); setAnchors([]); }} onCancel={() => { setKind(null); setAnchors([]); }} />
+        </div>}
+        {!benchmarkEnabled && <DrawingToolbar kind={kind} geometry={geometry} anchors={anchors.length} onKindChange={(next) => { setKind(next); setAnchors([]); }} onGeometryChange={(next) => { setGeometry(next); setAnchors([]); }} onCancel={() => { setKind(null); setAnchors([]); }} />}
         {error && <div className="error-banner" role="alert">{error}</div>}
         <div className="chart-canvas-wrap">
-          {loading ? (
+          {benchmarkEnabled ? comparisonLoading ? (
+            <div className="chart-loading">正在读取大盘走势…</div>
+          ) : comparison ? (
+            <ComparisonChart comparison={comparison} />
+          ) : (
+            <div className="chart-data-empty">
+              <p>当前时段缺少可对齐的股票或大盘行情。</p>
+              <button type="button" disabled={syncing} onClick={() => void syncCurrentWindow()}><RefreshCw size={14} />{syncing ? "正在同步…" : "同步股票及大盘数据"}</button>
+            </div>
+          ) : loading ? (
             <div className="chart-loading">正在读取行情…</div>
           ) : !bars.length ? (
-            <div className="chart-loading">该周期暂无本地 K 线数据</div>
+            <div className="chart-data-empty">
+              <p>该周期暂无本地 K 线数据。</p>
+              <button type="button" disabled={syncing} onClick={() => void syncCurrentWindow()}><RefreshCw size={14} />{syncing ? "正在同步…" : "同步当前时段数据"}</button>
+            </div>
           ) : (
-            <Chart bars={bars} zones={zones} indicators={indicators} selectedIndicators={selectedIndicators} drawing={kind !== null} onAnchor={addAnchor} />
+            <Chart bars={bars} zones={zones} indicators={indicators} selectedIndicators={selectedIndicators} drawing={kind !== null} onAnchor={addAnchor} onBarSelect={selectBar} />
           )}
         </div>
+        {selectedBar && <div className="drilldown-menu" role="dialog" aria-label="选择小周期">
+          <div><strong>{selectedBar.timestamp.slice(0, 10)}</strong><span>选择要查看的小周期</span></div>
+          <div>
+            {drilldownTimeframes(timeframe).map((target) => <button key={target} type="button" aria-label={`查看${timeframeLabel[target]}`} onClick={() => enterDrilldown(target)}>{timeframeLabel[target]}</button>)}
+            <button type="button" className="drilldown-cancel" onClick={() => setSelectedBar(null)}>取消</button>
+          </div>
+        </div>}
       </section>
-      <section className="zone-ledger">
+      {!benchmarkEnabled && <section className="zone-ledger">
         <div className="section-title"><div><span>支撑压力线</span><em>{zones.length}</em></div><p><i className="support-dot" />支撑<i className="resistance-dot" />压力<span className="normal-line" />正常实线<span className="reappeared-line" />删除后重现虚线</p></div>
         <div className="zone-list">
           {zones.map((zone) => {
@@ -288,7 +446,7 @@ export function ChartPage({
           })}
           {!zones.length && <div className="result-empty">当前窗口内尚未识别到有效支撑压力线。</div>}
         </div>
-      </section>
+      </section>}
     </main>
   );
 }
