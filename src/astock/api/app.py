@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
@@ -14,6 +15,7 @@ from astock.api.dependencies import ApiContext
 from astock.backtest.models import BacktestRequest
 from astock.backtest.service import BacktestDataError, BacktestService
 from astock.config import Settings
+from astock.data.daily_update import DailyMarketUpdateScheduler
 from astock.data.market_sync import MarketSyncService
 from astock.data.providers.akshare import AkShareProvider
 from astock.data.providers.routing import build_default_market_providers
@@ -62,6 +64,22 @@ class ChartDataSyncRequest(BaseModel):
     start: date
     end: date
     include_benchmark: bool = False
+
+
+class ScreenTemplateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    tree: Node
+
+
+def _screen_template(row: tuple) -> dict:
+    tree = json.loads(row[3]) if isinstance(row[3], str) else row[3]
+    return {
+        "template_id": str(row[0]),
+        "name": row[1],
+        "version": row[2],
+        "tree": tree,
+        "updated_at": row[4],
+    }
 
 
 def _catalog() -> list[dict]:
@@ -119,9 +137,13 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         TencentQuoteProvider(),
     )
     monitor_scheduler = MonitoringScheduler(monitoring)
+    data_update_scheduler = DailyMarketUpdateScheduler(context.market_sync)
     app.state.monitoring = monitoring
     app.state.monitor_scheduler = monitor_scheduler
+    app.state.data_update_scheduler = data_update_scheduler
+    app.add_event_handler("startup", data_update_scheduler.start)
     app.add_event_handler("shutdown", monitor_scheduler.stop)
+    app.add_event_handler("shutdown", data_update_scheduler.stop)
     feature_builder = FeatureBuilder(
         context.bar_store, MarketFeatureStore(context.database), context.database
     )
@@ -140,6 +162,75 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
                 for error in errors
             ],
         }
+
+    @app.get("/api/screens/templates")
+    def screen_templates() -> list[dict]:
+        rows = context.database.connection.execute(
+            """
+            select definition_id, name, version, condition_tree, updated_at
+            from screen_definitions order by updated_at desc, name
+            """
+        ).fetchall()
+        return jsonable_encoder([_screen_template(row) for row in rows])
+
+    @app.post("/api/screens/templates", status_code=201)
+    def save_screen_template(payload: ScreenTemplateRequest):
+        errors = context.screening.validate(payload.tree)
+        if errors:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "errors": [
+                        {"code": error.code, "message": error.message, "path": error.path}
+                        for error in errors
+                    ]
+                },
+            )
+        name = payload.name.strip()
+        existing = context.database.connection.execute(
+            "select definition_id from screen_definitions where lower(name) = lower(?) limit 1",
+            [name],
+        ).fetchone()
+        tree = payload.tree.model_dump_json()
+        if existing:
+            context.database.connection.execute(
+                """
+                update screen_definitions
+                set name = ?, version = version + 1, condition_tree = ?, updated_at = now()
+                where definition_id = ?
+                """,
+                [name, tree, existing[0]],
+            )
+            template_id = existing[0]
+        else:
+            template_id = context.database.connection.execute(
+                """
+                insert into screen_definitions (name, condition_tree)
+                values (?, ?) returning definition_id
+                """,
+                [name, tree],
+            ).fetchone()[0]
+        row = context.database.connection.execute(
+            """
+            select definition_id, name, version, condition_tree, updated_at
+            from screen_definitions where definition_id = ?
+            """,
+            [template_id],
+        ).fetchone()
+        return jsonable_encoder(_screen_template(row))
+
+    @app.delete("/api/screens/templates/{template_id}", status_code=204)
+    def delete_screen_template(template_id: UUID):
+        row = context.database.connection.execute(
+            "delete from screen_definitions where definition_id = ? returning definition_id",
+            [template_id],
+        ).fetchone()
+        if row is None:
+            return JSONResponse(
+                status_code=404,
+                content={"code": "template_not_found", "message": "screen template not found"},
+            )
+        return Response(status_code=204)
 
     @app.post("/api/screens/run")
     def run_screen(request: ScreenRunRequest):

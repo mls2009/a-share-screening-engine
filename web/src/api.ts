@@ -1,4 +1,4 @@
-import type { BacktestRun, Bar, BenchmarkComparison, ChartDataSyncRequest, ChartDataSyncResult, ChartIndicatorPoint, MetricSpec, MonitorSignal, MonitorStatus, MonitorTask, PriceZone, ScreenRunResult, SymbolSearchResult, Timeframe } from "./types";
+import type { BacktestRun, Bar, BenchmarkComparison, ChartDataSyncRequest, ChartDataSyncResult, ChartIndicatorPoint, MetricSpec, MonitorSignal, MonitorStatus, MonitorTask, PriceZone, ScreenRunResult, ScreenTemplate, ScreenValidation, SymbolSearchResult, Timeframe } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -15,6 +15,20 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   catalog: () => request<MetricSpec[]>("/api/catalog"),
+  validateScreen: (tree: unknown) => request<ScreenValidation>("/api/screens/validate", {
+    method: "POST",
+    body: JSON.stringify(tree),
+  }),
+  listScreenTemplates: () => request<ScreenTemplate[]>("/api/screens/templates"),
+  saveScreenTemplate: (name: string, tree: unknown) =>
+    request<ScreenTemplate>("/api/screens/templates", {
+      method: "POST",
+      body: JSON.stringify({ name, tree }),
+    }),
+  deleteScreenTemplate: (templateId: string) =>
+    request<void>(`/api/screens/templates/${encodeURIComponent(templateId)}`, {
+      method: "DELETE",
+    }),
   runScreen: (payload: object) =>
     request<ScreenRunResult>("/api/screens/run", {
       method: "POST",

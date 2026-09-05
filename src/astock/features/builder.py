@@ -9,7 +9,7 @@ from astock.data.service import MarketDataService
 from astock.domain.market import Adjustment, Bar, Timeframe
 from astock.features.patterns import detect_patterns, persist_pattern_events
 from astock.features.store import MarketFeatureStore
-from astock.features.technical import compute_technical_features
+from astock.features.technical import compute_burst_features, compute_technical_features
 from astock.features.zones import ZONE_RULE_VERSION, detect_zones, replace_auto_zones
 from astock.storage.bars import BarStore
 from astock.storage.database import Database
@@ -137,9 +137,21 @@ class FeatureBuilder:
         daily = _bar_frame(bars)
         date_index = [pd.Timestamp(value).date() for value in daily["timestamp"]]
         listed_row = self.connection.execute(
-            "select listed_on from symbols where symbol = ?", [symbol]
+            "select listed_on, board, name from symbols where symbol = ?", [symbol]
         ).fetchone()
         listed_on = listed_row[0] if listed_row else None
+        board = listed_row[1] if listed_row and listed_row[1] else self._board(symbol)
+        name = listed_row[2] if listed_row else symbol
+        statuses = {
+            row[0]: row[1:]
+            for row in self.connection.execute(
+                """
+                select trade_date, is_st, previous_close, limit_up
+                from security_status where symbol = ? and trade_date <= ?
+                """,
+                [symbol, as_of],
+            ).fetchall()
+        }
 
         frames = {
             Timeframe.DAY: daily,
@@ -157,6 +169,11 @@ class FeatureBuilder:
             features["listing_trade_days"] = listing_days
             features["is_new"] = features["listing_trade_days"] <= 30
             features["is_secondary_new"] = features["listing_trade_days"].between(31, 250)
+            if timeframe == Timeframe.DAY:
+                thresholds = self._limit_up_thresholds(
+                    features, board, name, statuses
+                )
+                features = compute_burst_features(features, thresholds)
             self.feature_store.upsert(symbol, timeframe, features)
             persist_pattern_events(
                 self.connection,
@@ -175,3 +192,46 @@ class FeatureBuilder:
                 latest_bar_at=bars[-1].timestamp,
                 source_revision=source_revision,
             )
+
+    @staticmethod
+    def _board(symbol: str) -> str:
+        code, exchange = symbol.split(".")
+        if exchange == "BJ" or code.startswith(("4", "8", "9")):
+            return "beijing"
+        if code.startswith(("300", "301")):
+            return "chinext"
+        if code.startswith(("688", "689")):
+            return "star"
+        return "main"
+
+    @staticmethod
+    def _limit_up_thresholds(
+        features: pd.DataFrame,
+        board: str,
+        name: str,
+        statuses: dict[date, tuple],
+    ) -> pd.Series:
+        normalized_name = name.upper().lstrip("*")
+        fallback_rate = 5.0 if normalized_name.startswith("ST") else {
+            "main": 10.0,
+            "chinext": 20.0,
+            "star": 20.0,
+            "beijing": 30.0,
+        }.get(board, 10.0)
+        unlimited_days = 1 if board == "beijing" else 5
+        values: list[float | None] = []
+        for row in features.to_dict("records"):
+            feature_date = pd.Timestamp(row["timestamp"]).date()
+            status = statuses.get(feature_date)
+            if status is not None:
+                _, previous_close, limit_up = status
+                values.append(
+                    (limit_up / previous_close - 1) * 100
+                    if limit_up is not None and previous_close not in {None, 0}
+                    else None
+                )
+            elif row["listing_trade_days"] <= unlimited_days:
+                values.append(None)
+            else:
+                values.append(fallback_rate)
+        return pd.Series(values, index=features.index, dtype="float64")

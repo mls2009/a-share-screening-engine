@@ -15,6 +15,17 @@ def _rolling_drawdown(values: pd.Series, window: int) -> pd.Series:
     )
 
 
+def _normalized_slope_abs(values: np.ndarray) -> float:
+    mean = values.mean()
+    if mean == 0:
+        return float("nan")
+    centered_periods = np.arange(len(values)) - (len(values) - 1) / 2
+    slope = np.dot(values, centered_periods) / np.dot(
+        centered_periods, centered_periods
+    )
+    return float(abs(slope / mean) * 100)
+
+
 def compute_technical_features(bars: pd.DataFrame) -> pd.DataFrame:
     data = bars.copy().sort_values("timestamp").reset_index(drop=True)
     close = data["close"].astype(float)
@@ -28,6 +39,19 @@ def compute_technical_features(bars: pd.DataFrame) -> pd.DataFrame:
         data[f"return_{window}"] = close.pct_change(window, fill_method=None) * 100
     for window in (5, 10, 20, 30, 60, 120, 250):
         data[f"ma_{window}"] = close.rolling(window).mean()
+    for window in (10, 20):
+        moving_average = data[f"ma_{window}"]
+        data[f"ma_{window}_slope_abs_5"] = moving_average.rolling(5).apply(
+            _normalized_slope_abs,
+            raw=True,
+        )
+        data[f"ma_{window}_range_5"] = (
+            moving_average.rolling(5).max() / moving_average.rolling(5).min() - 1
+        ) * 100
+    average_ma_10_20 = (data["ma_10"] + data["ma_20"]) / 2
+    data["ma_10_20_distance"] = (
+        (data["ma_10"] - data["ma_20"]).abs() / average_ma_10_20.replace(0, np.nan) * 100
+    )
     for window in (5, 20, 60):
         data[f"volume_ma_{window}"] = volume.rolling(window).mean()
     data["volume_ratio_20"] = volume / data["volume_ma_20"]
@@ -78,4 +102,31 @@ def compute_technical_features(bars: pd.DataFrame) -> pd.DataFrame:
     data["low_history"] = low.cummin()
     data["up_streak"] = _streak(close, positive=True)
     data["down_streak"] = _streak(close, positive=False)
+    return data
+
+
+def compute_burst_features(
+    features: pd.DataFrame,
+    limit_up_thresholds: pd.Series,
+) -> pd.DataFrame:
+    data = features.copy()
+    thresholds = limit_up_thresholds.reindex(data.index)
+    data["is_limit_up"] = thresholds.notna() & data["return_1"].ge(thresholds - 0.2)
+
+    five_day_counts = data["is_limit_up"].astype(int).rolling(5, min_periods=5).sum()
+    data["limit_up_count_5_max_60"] = five_day_counts.rolling(
+        56, min_periods=1
+    ).max()
+    qualifying_windows = five_day_counts.ge(2).fillna(False)
+    episode_starts = qualifying_windows & ~qualifying_windows.shift(
+        1, fill_value=False
+    )
+    episode_count = episode_starts.astype(int).rolling(56, min_periods=1).sum()
+    continued_at_boundary = qualifying_windows.shift(
+        55, fill_value=False
+    ) & ~episode_starts.shift(55, fill_value=False)
+    data["limit_up_burst_5_count_60"] = episode_count + continued_at_boundary.astype(
+        int
+    )
+    data["return_10_max_60"] = data["return_10"].rolling(50, min_periods=1).max()
     return data

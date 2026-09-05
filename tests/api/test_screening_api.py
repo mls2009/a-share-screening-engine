@@ -18,6 +18,12 @@ from astock.storage.database import Database
 
 
 class FakeSync:
+    def latest_completed_end_date(self) -> date:
+        return date.max
+
+    def start(self, end: date, years: int = 3):
+        raise AssertionError("daily sync should be skipped in API tests")
+
     def status(self, job_id: UUID):
         return SimpleNamespace(
             job_id=job_id,
@@ -104,6 +110,16 @@ def _client(tmp_path: Path, benchmark_factory=None) -> tuple[TestClient, Databas
     return TestClient(create_app(context)), database
 
 
+def test_app_keeps_daily_market_update_scheduler_running(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    scheduler = client.app.state.data_update_scheduler
+
+    with client:
+        assert scheduler.running is True
+
+    assert scheduler.running is False
+
+
 def _fifteen_minute_trend_source_bars() -> list[Bar]:
     bucket_ends = [
         (date(2026, 8, 19), time(9, 45)),
@@ -169,6 +185,45 @@ def test_catalog_validate_and_run_screen_endpoints(tmp_path: Path) -> None:
     assert validation.json() == {"valid": True, "errors": []}
     assert run.status_code == 200
     assert run.json()["matches"][0]["symbol"] == "600001.SH"
+
+
+def test_screen_templates_can_be_saved_replaced_listed_and_deleted(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    created = client.post(
+        "/api/screens/templates",
+        json={"name": "月线强势", "tree": CONDITION},
+    )
+    replaced_tree = {**CONDITION, "right": {"kind": "constant", "value": 40, "unit": "percent"}}
+    replaced = client.post(
+        "/api/screens/templates",
+        json={"name": "月线强势", "tree": replaced_tree},
+    )
+    templates = client.get("/api/screens/templates")
+
+    assert created.status_code == 201
+    assert replaced.status_code == 201
+    assert replaced.json()["template_id"] == created.json()["template_id"]
+    assert replaced.json()["version"] == 2
+    assert templates.json()[0]["name"] == "月线强势"
+    assert templates.json()[0]["tree"]["right"]["value"] == 40
+
+    deleted = client.delete(f"/api/screens/templates/{created.json()['template_id']}")
+    assert deleted.status_code == 204
+    assert client.get("/api/screens/templates").json() == []
+
+
+def test_screen_template_rejects_unknown_metric(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    invalid = {**CONDITION, "metric": "not_a_metric"}
+
+    response = client.post(
+        "/api/screens/templates",
+        json={"name": "错误模板", "tree": invalid},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["errors"][0]["code"] == "unknown_metric"
 
 
 def test_symbol_search_matches_etf_code_and_chinese_name(tmp_path: Path) -> None:

@@ -18,6 +18,7 @@ class Unit(StrEnum):
     BOOLEAN = "boolean"
     CATEGORY = "category"
     SCORE = "score"
+    COUNT = "count"
 
 
 class Operator(StrEnum):

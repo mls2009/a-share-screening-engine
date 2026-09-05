@@ -1,5 +1,5 @@
 export type Timeframe = "5m" | "15m" | "30m" | "60m" | "1d" | "1w" | "1mo";
-export type Unit = "price" | "percent" | "ratio" | "shares" | "amount" | "days" | "boolean" | "category" | "score";
+export type Unit = "price" | "percent" | "ratio" | "shares" | "amount" | "days" | "boolean" | "category" | "score" | "count";
 
 export interface MetricChoice {
   value: string;
@@ -81,6 +81,19 @@ export interface ScreenRunResult {
   realtime_covered: number;
   failed_batches: number;
   matches: ScreenMatch[];
+}
+
+export interface ScreenValidation {
+  valid: boolean;
+  errors: Array<{ code: string; message: string; path: string }>;
+}
+
+export interface ScreenTemplate {
+  template_id: string;
+  name: string;
+  version: number;
+  tree: unknown;
+  updated_at: string;
 }
 
 export interface Bar {

@@ -50,6 +50,7 @@ test("workbench and chart desk render without browser errors", async ({ page }) 
       directions: [{ value: "rise", label: "上涨幅度" }, { value: "fall", label: "下跌幅度" }],
     }] });
   });
+  await page.route("**/api/screens/templates", async (route) => route.fulfill({ json: [] }));
 
   await page.route("**/api/symbols/*/bars?*", async (route) => {
     const start = new Date("2026-05-01T15:00:00+08:00");
@@ -148,6 +149,7 @@ async function mockMobileWorkbench(page: Page) {
     operators: ["gte", "lt"], group: "price", family: "price_change", period: 20,
     directions: [{ value: "rise", label: "上涨幅度" }, { value: "fall", label: "下跌幅度" }],
   }] }));
+  await page.route("**/api/screens/templates", async (route) => route.fulfill({ json: [] }));
   await page.route("**/api/symbols/*/bars?*", async (route) => {
     const timeframe = new URL(route.request().url()).searchParams.get("timeframe") ?? "1d";
     const bars = timeframe === "15m"

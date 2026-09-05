@@ -48,6 +48,15 @@ class SyncJobRepository:
             raise KeyError(f"sync job not found: {job_id}")
         return SyncJob(*row)
 
+    def latest_completed_end_date(self) -> date | None:
+        row = self.connection.execute(
+            """
+            select max(end_date) from data_sync_jobs
+            where status in ('completed', 'completed_with_errors')
+            """
+        ).fetchone()
+        return row[0] if row else None
+
     def mark_succeeded(self, job_id: UUID, symbol: str) -> None:
         self.connection.execute(
             """

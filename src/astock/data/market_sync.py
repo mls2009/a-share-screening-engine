@@ -91,6 +91,9 @@ class MarketSyncService:
             status=job.status,
         )
 
+    def latest_completed_end_date(self) -> date | None:
+        return self.jobs.latest_completed_end_date()
+
     def _run(self, job_id: UUID, symbols: list[str]) -> SyncSummary:
         job = self.jobs.get(job_id)
         session = getattr(self.market_data, "bulk_session", nullcontext)

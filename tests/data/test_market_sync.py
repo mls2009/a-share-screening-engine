@@ -86,6 +86,7 @@ def test_full_market_sync_continues_after_one_symbol_fails(tmp_path: Path) -> No
         (date(2023, 8, 20), date(2026, 8, 20))
     ]
     assert jobs.failed_symbols(summary.job_id) == ["000001.SZ"]
+    assert service.latest_completed_end_date() == date(2026, 8, 20)
 
 
 def test_retry_failed_only_requests_previously_failed_symbols(tmp_path: Path) -> None:

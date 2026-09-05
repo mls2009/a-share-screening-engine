@@ -1,5 +1,5 @@
 import type { MetricSpec } from "../../types";
-import { createCondition, toApiNode } from "./treeModel";
+import { createCondition, fromApiNode, toApiNode } from "./treeModel";
 
 const metrics: MetricSpec[] = [
   { key: "return_20", label: "价格涨跌", unit: "percent", timeframes: ["1d"], operators: ["gte", "between"], group: "price", family: "price_change", period: 20, directions: [{ value: "rise", label: "上涨幅度" }, { value: "fall", label: "下跌幅度" }] },
@@ -102,5 +102,33 @@ it("把多选枚举转换为包含条件", () => {
     metric: "board",
     operator: "in",
     right: { value: ["main", "chinext"], unit: "category" },
+  });
+});
+
+it("把导入的负涨跌幅 JSON 还原为界面中的下跌幅度正数", () => {
+  const imported = fromApiNode({
+    kind: "group",
+    logic: "and",
+    children: [{
+      kind: "condition",
+      metric: "return_20",
+      timeframe: "1d",
+      operator: "lte",
+      right: { kind: "constant", value: -30, unit: "percent" },
+    }],
+  }, metrics);
+
+  expect(imported).toMatchObject({
+    kind: "group",
+    logic: "and",
+    children: [{
+      metric: "return_20",
+      operator: "gte",
+      direction: "fall",
+      right: { kind: "constant", value: "30" },
+    }],
+  });
+  expect(toApiNode(imported, metrics)).toMatchObject({
+    children: [{ operator: "lte", right: { value: -30 } }],
   });
 });
