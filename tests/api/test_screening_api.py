@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from astock.api.app import ApiContext, create_app, create_default_app
 from astock.config import Settings
 from astock.domain.market import Adjustment, Bar, Timeframe
+from astock.features.benchmark import BenchmarkService
 from astock.features.store import MarketFeatureStore
 from astock.features.zones import ZONE_RULE_VERSION, PriceZone, replace_auto_zones
 from astock.screening.service import ScreeningService
@@ -27,7 +28,7 @@ class FakeSync:
         )
 
 
-def _client(tmp_path: Path) -> tuple[TestClient, Database]:
+def _client(tmp_path: Path, benchmark_factory=None) -> tuple[TestClient, Database]:
     database = Database(tmp_path / "api.duckdb")
     database.migrate()
     bar_store = BarStore(tmp_path / "bars")
@@ -88,11 +89,17 @@ def _client(tmp_path: Path) -> tuple[TestClient, Database]:
             "600001.SH", Timeframe.DAY, date(2026, 8, 20)
         ),
     )
+    benchmark = (
+        benchmark_factory(database, bar_store)
+        if benchmark_factory is not None
+        else BenchmarkService(database, bar_store)
+    )
     context = ApiContext(
         database=database,
         bar_store=bar_store,
         screening=ScreeningService(database, MarketFeatureStore(database)),
         market_sync=FakeSync(),
+        benchmark=benchmark,
     )
     return TestClient(create_app(context)), database
 
@@ -209,6 +216,113 @@ def test_symbol_search_treats_wildcards_literally_and_blank_as_empty(
 
     assert client.get("/api/symbols/search", params={"q": " "}).json() == []
     assert client.get("/api/symbols/search", params={"q": "%"}).json() == []
+
+
+def test_benchmark_comparison_endpoint_normalizes_common_dates(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    store = client.app.state.context.bar_store
+    store.upsert([
+        Bar(
+            symbol="600001.SH",
+            timestamp=datetime(2026, 8, 19, 15, tzinfo=ZoneInfo("Asia/Shanghai")),
+            timeframe=Timeframe.DAY,
+            open=10,
+            high=10,
+            low=10,
+            close=10,
+            volume_shares=1_000,
+            amount_cny=10_000,
+            adjustment=Adjustment.QFQ,
+            source="test",
+        ),
+        Bar(
+            symbol="000001.SH",
+            timestamp=datetime(2026, 8, 19, 15, tzinfo=ZoneInfo("Asia/Shanghai")),
+            timeframe=Timeframe.DAY,
+            open=3_000,
+            high=3_000,
+            low=3_000,
+            close=3_000,
+            volume_shares=1_000,
+            amount_cny=3_000_000,
+            adjustment=Adjustment.NONE,
+            source="test",
+        ),
+        Bar(
+            symbol="000001.SH",
+            timestamp=datetime(2026, 8, 20, 15, tzinfo=ZoneInfo("Asia/Shanghai")),
+            timeframe=Timeframe.DAY,
+            open=3_150,
+            high=3_150,
+            low=3_150,
+            close=3_150,
+            volume_shares=1_000,
+            amount_cny=3_150_000,
+            adjustment=Adjustment.NONE,
+            source="test",
+        ),
+    ])
+
+    response = client.get(
+        "/api/symbols/600001.SH/benchmark-comparison",
+        params={"timeframe": "1d", "start": "2026-08-19", "end": "2026-08-20"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["benchmark_symbol"] == "000001.SH"
+    assert response.json()["benchmark_name"] == "上证指数"
+    assert response.json()["points"][0]["stock_return_pct"] == 0
+
+
+class FakeBenchmarkApi:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def sync(self, *args):
+        self.calls.append(args)
+        return {"stock_bars": 12, "benchmark_bars": 12}
+
+
+def test_chart_data_sync_endpoint_passes_exact_scope(tmp_path: Path) -> None:
+    fake = FakeBenchmarkApi()
+    client, _ = _client(tmp_path, lambda _database, _store: fake)
+
+    response = client.post(
+        "/api/symbols/600001.SH/chart-data/sync",
+        json={
+            "timeframe": "15m",
+            "start": "2026-08-20",
+            "end": "2026-08-20",
+            "include_benchmark": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"stock_bars": 12, "benchmark_bars": 12}
+    assert fake.calls == [
+        (
+            "600001.SH",
+            Timeframe.MIN_15,
+            date(2026, 8, 20),
+            date(2026, 8, 20),
+            True,
+        )
+    ]
+
+
+def test_benchmark_endpoint_returns_structured_missing_data_error(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    response = client.get(
+        "/api/symbols/600001.SH/benchmark-comparison",
+        params={"timeframe": "1d", "start": "2026-08-20", "end": "2026-08-20"},
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": "benchmark_data_missing",
+        "message": "对应大盘数据尚未同步",
+    }
 
 
 def test_chart_indicators_use_history_before_visible_window(tmp_path: Path) -> None:

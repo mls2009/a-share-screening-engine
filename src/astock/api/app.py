@@ -15,10 +15,12 @@ from astock.backtest.models import BacktestRequest
 from astock.backtest.service import BacktestDataError, BacktestService
 from astock.config import Settings
 from astock.data.market_sync import MarketSyncService
+from astock.data.providers.akshare import AkShareProvider
 from astock.data.providers.routing import build_default_market_providers
 from astock.data.providers.tencent import TencentQuoteProvider
 from astock.data.service import MarketDataService
 from astock.domain.market import Adjustment, Timeframe
+from astock.features.benchmark import BenchmarkDataError, BenchmarkService
 from astock.features.builder import FeatureBuilder, chart_base_timeframe
 from astock.features.store import MarketFeatureStore
 from astock.features.technical import compute_technical_features
@@ -53,6 +55,13 @@ class ScreenRunRequest(BaseModel):
 
 class EnabledRequest(BaseModel):
     enabled: bool
+
+
+class ChartDataSyncRequest(BaseModel):
+    timeframe: Timeframe
+    start: date
+    end: date
+    include_benchmark: bool = False
 
 
 def _catalog() -> list[dict]:
@@ -308,6 +317,59 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             for _, row in visible.iterrows()
         ]
 
+    @app.get("/api/symbols/{symbol}/benchmark-comparison")
+    def benchmark_comparison(
+        symbol: str,
+        timeframe: Timeframe,
+        start: date,
+        end: date,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ):
+        if context.benchmark is None:
+            return JSONResponse(
+                status_code=503,
+                content={"code": "benchmark_unavailable", "message": "大盘对比服务未配置"},
+            )
+        try:
+            result = context.benchmark.compare(
+                symbol, timeframe, start, end, start_at, end_at
+            )
+        except BenchmarkDataError as error:
+            status = 404 if error.code == "symbol_not_found" else 409
+            return JSONResponse(
+                status_code=status,
+                content={"code": error.code, "message": str(error)},
+            )
+        return result.model_dump(mode="json")
+
+    @app.post("/api/symbols/{symbol}/chart-data/sync")
+    def sync_chart_data(symbol: str, request: ChartDataSyncRequest):
+        if context.benchmark is None:
+            return JSONResponse(
+                status_code=503,
+                content={"code": "sync_unavailable", "message": "行情同步服务未配置"},
+            )
+        try:
+            return context.benchmark.sync(
+                symbol,
+                request.timeframe,
+                request.start,
+                request.end,
+                request.include_benchmark,
+            )
+        except BenchmarkDataError as error:
+            if error.code == "symbol_not_found":
+                status = 404
+            elif error.code == "minute_history_unavailable":
+                status = 422
+            else:
+                status = 409
+            return JSONResponse(
+                status_code=status,
+                content={"code": error.code, "message": str(error)},
+            )
+
     @app.get("/api/symbols/{symbol}/bars")
     def symbol_bars(
         symbol: str,
@@ -536,6 +598,7 @@ def create_default_app(settings: Settings | None = None) -> FastAPI:
         SyncJobRepository(database.connection),
         FeatureBuilder(bars, feature_store, database),
     )
+    benchmark = BenchmarkService(database, bars, market_data, AkShareProvider())
     screening = ScreeningService(
         database,
         feature_store,
@@ -555,7 +618,9 @@ def create_default_app(settings: Settings | None = None) -> FastAPI:
         TencentQuoteProvider(),
         outbox=outbox,
     )
-    return create_app(ApiContext(database, bars, screening, market_sync, monitoring))
+    return create_app(
+        ApiContext(database, bars, screening, market_sync, monitoring, benchmark)
+    )
 
 
 __all__ = ["ApiContext", "create_app", "create_default_app"]

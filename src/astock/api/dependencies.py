@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
+from astock.features.benchmark import BenchmarkService
 from astock.live.service import MonitoringService
 from astock.screening.service import ScreeningService
 from astock.storage.bars import BarStore
@@ -19,3 +20,4 @@ class ApiContext:
     screening: ScreeningService
     market_sync: MarketSyncReader
     monitoring: MonitoringService | None = None
+    benchmark: BenchmarkService | None = None
