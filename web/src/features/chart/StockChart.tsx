@@ -35,6 +35,7 @@ export interface StockChartProps {
   selectedIndicators?: ChartIndicator[];
   drawing?: boolean;
   onAnchor?: (anchor: DrawingAnchor) => void;
+  onBarSelect?: (bar: Bar) => void;
 }
 
 type ChartLinePointerParams = {
@@ -60,10 +61,12 @@ function linePointerParams(params: unknown): ChartLinePointerParams | undefined 
   return candidate;
 }
 
-export function StockChart({ bars, zones, indicators = [], selectedIndicators, drawing = false, onAnchor }: StockChartProps) {
+export function StockChart({ bars, zones, indicators = [], selectedIndicators, drawing = false, onAnchor, onBarSelect }: StockChartProps) {
   const element = useRef<HTMLDivElement>(null);
   const anchorCallback = useRef(onAnchor);
+  const barSelectCallback = useRef(onBarSelect);
   anchorCallback.current = onAnchor;
+  barSelectCallback.current = onBarSelect;
 
   useEffect(() => {
     if (!element.current) return;
@@ -73,13 +76,23 @@ export function StockChart({ bars, zones, indicators = [], selectedIndicators, d
     const resizeObserver = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(resize);
     resizeObserver?.observe(element.current);
     window.addEventListener("resize", resize);
-    const click = (event: { offsetX: number; offsetY: number }) => {
+    const selectAnchor = (event: { offsetX: number; offsetY: number }) => {
       if (!anchorCallback.current) return;
       const point = chart.convertFromPixel({ gridIndex: 0 }, [event.offsetX, event.offsetY]);
       if (!Array.isArray(point) || !Number.isFinite(Number(point[0])) || !Number.isFinite(Number(point[1]))) return;
       const index = Math.max(0, Math.min(bars.length - 1, Math.round(Number(point[0]))));
       const bar = bars[index];
       if (bar) anchorCallback.current({ date: bar.timestamp.slice(0, 10), price: Number(Number(point[1]).toFixed(3)) });
+    };
+    const selectBar = (params: { seriesType?: unknown; dataIndex?: unknown }) => {
+      if (
+        drawing
+        || params.seriesType !== "candlestick"
+        || typeof params.dataIndex !== "number"
+        || !Number.isInteger(params.dataIndex)
+      ) return;
+      const bar = bars[params.dataIndex];
+      if (bar) barSelectCallback.current?.(bar);
     };
     const showLineTooltip = (params: unknown) => {
       const line = linePointerParams(params);
@@ -108,18 +121,20 @@ export function StockChart({ bars, zones, indicators = [], selectedIndicators, d
       if (!linePointerParams(params)) return;
       chart.dispatchAction({ type: "hideTip" });
     };
-    chart.getZr().on("click", click);
+    chart.getZr().on("click", selectAnchor);
+    chart.on("click", selectBar);
     chart.on("mousemove", showLineTooltip);
     chart.on("mouseout", hideLineTooltip);
     return () => {
-      chart.getZr().off("click", click);
+      chart.getZr().off("click", selectAnchor);
+      chart.off("click", selectBar);
       chart.off("mousemove", showLineTooltip);
       chart.off("mouseout", hideLineTooltip);
       resizeObserver?.disconnect();
       window.removeEventListener("resize", resize);
       chart.dispose();
     };
-  }, [bars, indicators, selectedIndicators, zones]);
+  }, [bars, drawing, indicators, selectedIndicators, zones]);
 
   const subPaneCount = selectedIndicators?.filter((item) => ["macd", "kdj", "rsi", "obv", "atr"].includes(item)).length ?? 0;
   const chartStyle = {

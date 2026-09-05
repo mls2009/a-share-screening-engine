@@ -126,3 +126,37 @@ it("忽略手动标签形状和无效的系列或坐标事件", () => {
   act(() => mousemove({ seriesType: "line", selfType: "line", seriesIndex: 3, event: { offsetX: 120, offsetY: 80 } }));
   expect(echartsMock.chart.dispatchAction).not.toHaveBeenCalled();
 });
+
+it("点击蜡烛系列时上报对应 K 线", () => {
+  const onBarSelect = vi.fn();
+  render(<StockChart bars={bars} zones={[]} onBarSelect={onBarSelect} />);
+
+  const click = echartsMock.chartHandlers.get("click");
+  expect(click).toBeTypeOf("function");
+  act(() => click?.({ seriesType: "candlestick", dataIndex: 1 }));
+  act(() => click?.({ seriesType: "line", dataIndex: 1 }));
+
+  expect(onBarSelect).toHaveBeenCalledTimes(1);
+  expect(onBarSelect).toHaveBeenCalledWith(bars[1]);
+});
+
+it("手动画线时蜡烛点击不触发下钻并继续选择锚点", () => {
+  const onBarSelect = vi.fn();
+  const onAnchor = vi.fn();
+  echartsMock.chart.convertFromPixel.mockReturnValue([1, 10.25]);
+  render(
+    <StockChart
+      bars={bars}
+      zones={[]}
+      drawing
+      onBarSelect={onBarSelect}
+      onAnchor={onAnchor}
+    />,
+  );
+
+  act(() => echartsMock.chartHandlers.get("click")?.({ seriesType: "candlestick", dataIndex: 1 }));
+  act(() => echartsMock.zrHandlers.get("click")?.({ offsetX: 120, offsetY: 80 }));
+
+  expect(onBarSelect).not.toHaveBeenCalled();
+  expect(onAnchor).toHaveBeenCalledWith({ date: "2026-08-19", price: 10.25 });
+});
