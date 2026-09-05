@@ -79,3 +79,74 @@ class AkShareProvider:
             )
             for row in frame.to_dict("records")
         ]
+
+    def index_history(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: date,
+        end: date,
+    ) -> list[Bar]:
+        code, exchange = symbol.split(".")
+        if timeframe == Timeframe.DAY:
+            frame = self._module().stock_zh_index_daily_em(
+                symbol=f"{exchange.lower()}{code}",
+                start_date=start.strftime("%Y%m%d"),
+                end_date=end.strftime("%Y%m%d"),
+            )
+            rows = frame.rename(
+                columns={
+                    "date": "timestamp",
+                    "volume": "volume_shares",
+                    "amount": "amount_cny",
+                }
+            ).to_dict("records")
+            timestamps = [
+                datetime.combine(
+                    pd.Timestamp(row["timestamp"]).date(), time(15), tzinfo=SHANGHAI
+                )
+                for row in rows
+            ]
+            volume_multiplier = 1
+        elif timeframe == Timeframe.MIN_5:
+            frame = self._module().index_zh_a_hist_min_em(
+                symbol=code,
+                period="5",
+                start_date=f"{start.isoformat()} 00:00:00",
+                end_date=f"{end.isoformat()} 23:59:59",
+            )
+            rows = frame.rename(
+                columns={
+                    "时间": "timestamp",
+                    "开盘": "open",
+                    "收盘": "close",
+                    "最高": "high",
+                    "最低": "low",
+                    "成交量": "volume_shares",
+                    "成交额": "amount_cny",
+                }
+            ).to_dict("records")
+            timestamps = [
+                pd.Timestamp(row["timestamp"]).to_pydatetime().replace(tzinfo=SHANGHAI)
+                for row in rows
+            ]
+            volume_multiplier = 100
+        else:
+            raise ValueError(f"unsupported index timeframe: {timeframe}")
+
+        return [
+            Bar(
+                symbol=symbol,
+                timestamp=timestamp,
+                timeframe=timeframe,
+                open=float(row["open"]),
+                high=float(row["high"]),
+                low=float(row["low"]),
+                close=float(row["close"]),
+                volume_shares=int(float(row["volume_shares"]) * volume_multiplier),
+                amount_cny=float(row["amount_cny"]),
+                adjustment=Adjustment.NONE,
+                source="akshare-eastmoney-index",
+            )
+            for row, timestamp in zip(rows, timestamps, strict=True)
+        ]
