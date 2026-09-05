@@ -24,6 +24,12 @@ async function hoverChartValue(page: Page, dataIndex: number, value: number) {
   await page.mouse.move(box.x + point[0], box.y + point[1]);
 }
 
+async function clickChartValue(page: Page, dataIndex: number, value: number) {
+  await hoverChartValue(page, dataIndex, value);
+  await page.mouse.down();
+  await page.mouse.up();
+}
+
 test("workbench and chart desk render without browser errors", async ({ page }) => {
   const errors: string[] = [];
   page.on("console", (message) => {
@@ -142,14 +148,34 @@ async function mockMobileWorkbench(page: Page) {
     operators: ["gte", "lt"], group: "price", family: "price_change", period: 20,
     directions: [{ value: "rise", label: "上涨幅度" }, { value: "fall", label: "下跌幅度" }],
   }] }));
-  await page.route("**/api/symbols/*/bars?*", async (route) => route.fulfill({ json: Array.from({ length: 60 }, (_, index) => ({
-    symbol: "600519.SH", timestamp: new Date(2026, 5, index + 1).toISOString(), timeframe: "1d",
-    open: 1500 + index, high: 1515 + index, low: 1490 + index, close: 1508 + index,
-    volume_shares: 2_000_000 + index * 10_000, amount_cny: 3_000_000_000,
-    adjustment: "qfq", source: "e2e", is_final: true,
-  })) }));
+  await page.route("**/api/symbols/*/bars?*", async (route) => {
+    const timeframe = new URL(route.request().url()).searchParams.get("timeframe") ?? "1d";
+    const bars = timeframe === "15m"
+      ? Array.from({ length: 16 }, (_, index) => ({
+        symbol: "600519.SH", timestamp: `2026-07-11T${String(9 + Math.floor(index / 4)).padStart(2, "0")}:${String((index % 4) * 15).padStart(2, "0")}:00+08:00`, timeframe,
+        open: 1540 + index / 2, high: 1543 + index / 2, low: 1539 + index / 2, close: 1542 + index / 2,
+        volume_shares: 100_000 + index * 1000, amount_cny: 154_000_000,
+        adjustment: "qfq", source: "e2e", is_final: true,
+      }))
+      : Array.from({ length: 60 }, (_, index) => ({
+        symbol: "600519.SH", timestamp: new Date(2026, 5, index + 1).toISOString(), timeframe,
+        open: 1500 + index, high: 1515 + index, low: 1490 + index, close: 1508 + index,
+        volume_shares: 2_000_000 + index * 10_000, amount_cny: 3_000_000_000,
+        adjustment: "qfq", source: "e2e", is_final: true,
+      }));
+    await route.fulfill({ json: bars });
+  });
   await page.route("**/api/symbols/*/zones?*", async (route) => route.fulfill({ json: [] }));
   await page.route("**/api/symbols/*/indicators?*", async (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/symbols/*/benchmark-comparison?*", async (route) => route.fulfill({ json: {
+    stock_symbol: "600519.SH", stock_name: "贵州茅台", benchmark_symbol: "000001.SH", benchmark_name: "上证指数",
+    points: Array.from({ length: 20 }, (_, index) => ({
+      timestamp: new Date(2026, 5, index + 1).toISOString(),
+      stock_return_pct: index * .8,
+      benchmark_return_pct: index * .35,
+      relative_pct: index * .45,
+    })),
+  } }));
   await page.route("**/api/monitor/tasks", async (route) => route.fulfill({ json: [{
     task_id: "task-mobile", name: "移动端点位监控", symbols: ["600519.SH", "159558.SZ"],
     comparator: "cross_above", threshold: 1600, cooldown_seconds: 300, scope: "watchlist",
@@ -185,6 +211,18 @@ test("mobile workbench fits phones and chart supports landscape focus", async ({
   await expect(page.getByRole("img", { name: "K 线与成交量图" })).toBeVisible();
   await expect(page.getByRole("button", { name: "删除指标 MA 5/10/20/30" })).toBeVisible();
   await expectNoViewportOverflow(page);
+
+  await clickChartValue(page, 40, 1548);
+  await expect(page.getByRole("dialog", { name: "选择小周期" })).toBeVisible();
+  await page.getByRole("button", { name: "查看15分钟" }).click();
+  await expect(page.getByRole("button", { name: "返回日线" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "K 线与成交量图" })).toBeVisible();
+  await page.getByRole("button", { name: "开启大盘对比" }).click();
+  await expect(page.getByRole("img", { name: "大盘走势对比图" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "删除指标 MA 5/10/20/30" })).toBeHidden();
+  await expectNoViewportOverflow(page);
+  await page.getByRole("button", { name: "关闭大盘对比" }).click();
+  await expect(page.getByRole("button", { name: "删除指标 MA 5/10/20/30" })).toBeVisible();
 
   await page.getByRole("button", { name: "全屏看盘" }).click();
   await expect(page.getByTestId("chart-desk")).toHaveClass(/is-fullscreen/);
