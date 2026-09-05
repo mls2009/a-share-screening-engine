@@ -219,3 +219,18 @@ describe("ScreenerPage", () => {
     await waitFor(() => expect(deleteScreenTemplate).toHaveBeenCalledWith("template-1"));
   });
 });
+
+it("零命中也展示缺失原因、条件统计和数据时间", async () => {
+  const fake = {
+    ...client(), runScreen: async () => ({ ...result, match_count: 0, matches: [], diagnostics: {
+      conditions: { root: { true: 0, false: 3, unknown: 2, reasons: { "缺少历史窗口数据": 2 } } },
+      warnings: ["上市日期未知"], data_dates: { "1d": { oldest: "2026-08-19", latest: "2026-08-20" } },
+    } }),
+  };
+  render(<ScreenerPage client={fake} onOpenChart={() => undefined} />);
+  await screen.findByLabelText("指标");
+  await userEvent.click(screen.getByRole("button", { name: "运行全市场筛选" }));
+  expect(await screen.findByText(/缺少历史窗口数据/)).toBeInTheDocument();
+  expect(screen.getByText(/未知 2/)).toBeInTheDocument();
+  expect(screen.getByText(/2026-08-19/)).toBeInTheDocument();
+});

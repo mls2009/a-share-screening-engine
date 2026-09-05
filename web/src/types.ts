@@ -19,6 +19,7 @@ export interface MetricSpec {
   choices?: MetricChoice[];
   multiple?: boolean;
   visible?: boolean;
+  supported_modes?: ("close" | "live" | "backtest")[];
 }
 
 export interface UiConstantOperand {
@@ -46,6 +47,7 @@ export interface UiConditionNode {
   selectedValues?: string[];
   lookback?: number;
   occurrences?: number;
+  comparison_operator?: "gt" | "gte" | "lt" | "lte" | "eq" | "ne";
 }
 
 export interface UiGroupNode {
@@ -71,6 +73,8 @@ export interface Evaluation {
   expected?: unknown;
   unit?: string;
   children: Evaluation[];
+  reason?: string | null;
+  data_time?: string | null;
 }
 
 export interface ScreenRunResult {
@@ -81,6 +85,11 @@ export interface ScreenRunResult {
   realtime_covered: number;
   failed_batches: number;
   matches: ScreenMatch[];
+  diagnostics?: {
+    conditions: Record<string, { true: number; false: number; unknown: number; reasons: Record<string, number> }>;
+    warnings: string[];
+    data_dates: Record<string, { oldest: string | null; latest: string | null }>;
+  };
 }
 
 export interface ScreenValidation {
@@ -187,7 +196,7 @@ export type PriceZone = PriceZoneBase & (
 
 export interface BacktestMetrics {
   total_return: number;
-  annualized_return: number;
+  annualized_return: number | null;
   max_drawdown: number;
   sharpe_ratio: number;
   win_rate: number;
@@ -218,6 +227,17 @@ export interface EquityPoint {
   drawdown: number;
 }
 
+export interface BacktestDiagnostics {
+  effective_start: string | null;
+  effective_end: string | null;
+  execution_bars: number;
+  signal_bars: number;
+  status_covered_bars: number;
+  status_coverage_pct: number;
+  unknown_evaluations: number;
+  warmup_bars: Record<string, number>;
+}
+
 export interface BacktestRun {
   run_id: string;
   result: {
@@ -226,6 +246,8 @@ export interface BacktestRun {
     trades: BacktestTrade[];
     equity_curve: EquityPoint[];
     rejected_orders: string[];
+    warnings?: string[];
+    diagnostics?: BacktestDiagnostics;
   };
 }
 

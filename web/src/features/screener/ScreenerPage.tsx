@@ -196,6 +196,7 @@ export function ScreenerPage({
           <button type="button" className="run-button" aria-label="运行全市场筛选" disabled={loading || !catalog.length} onClick={run}>{mode === "live" ? <Radio size={16} /> : <Play size={16} />}{loading ? "计算中…" : "运行筛选"}</button>
         </div>
       </header>
+      {mode === "live" && <p role="note">盘中仅更新行情、涨跌幅、均线和成交量相关指标；RSI、MACD、形态等动态指标暂不支持实时计算，缺失值不会命中。周/月条件使用最近完整周期。</p>}
       {error && <div className="error-banner" role="alert">{error}</div>}
       <section className="composer-section">
         <div className="section-title"><div><SlidersHorizontal size={17} /><span>条件编排</span></div><button type="button" className="ghost-button" aria-label="导入 JSON" onClick={() => setImportOpen((open) => !open)}><FileJson size={14} />导入 JSON</button></div>
@@ -226,6 +227,15 @@ export function ScreenerPage({
           {result && <div className="run-stats"><span>全市场 <b>{result.universe_size.toLocaleString("zh-CN")}</b></span><span>实时覆盖 <b>{result.realtime_covered.toLocaleString("zh-CN")}</b></span></div>}
         </div>
         {!result ? <div className="result-empty">组合条件后运行，命中股票将在这里显示。</div> : <>
+          {result.diagnostics && <details open className="screen-diagnostics">
+            <summary>数据与条件诊断</summary>
+            {result.diagnostics.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+            {Object.entries(result.diagnostics.data_dates).map(([timeframe, dates]) => <p key={timeframe}>数据时间（{timeframe}）：{dates.oldest ?? "无数据"} 至 {dates.latest ?? "无数据"}，为各股票最近可用记录的时间范围。</p>)}
+            {Object.entries(result.diagnostics.conditions).map(([path, counts], index) => <div key={path}>
+              <p>条件 {index + 1}：成立 {counts.true} · 不成立 {counts.false} · 未知 {counts.unknown}</p>
+              {Object.entries(counts.reasons).map(([reason, count]) => <p key={reason}>{reason}：{count} 只</p>)}
+            </div>)}
+          </details>}
           {watchMessage && <p role="status">{watchMessage}</p>}
           <ResultsTable matches={result.matches} selected={selected?.symbol} onSelect={setSelected} onOpenChart={onOpenChart} onAddWatchlist={addWatchlist} sortBy={sortBy} sortDirection={sortDirection} onSort={changeSort} />
           <div className="results-pagination">

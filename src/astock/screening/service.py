@@ -1,6 +1,6 @@
 import json
-from dataclasses import dataclass
-from datetime import date
+from dataclasses import dataclass, field
+from datetime import date, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -38,6 +38,7 @@ class ScreenRunResult:
     status: str = "completed"
     realtime_covered: int = 0
     failed_batches: int = 0
+    diagnostics: dict = field(default_factory=dict)
 
 
 class ScreenDefinitionError(ValueError):
@@ -67,7 +68,7 @@ def _live_history_limit(metrics: set[str]) -> int:
         if metric == "volume_ratio_20":
             limit = max(limit, 20)
             continue
-        if metric.startswith(("return_", "ma_")):
+        if metric.startswith(("return_", "ma_", "volume_ma_")):
             suffix = metric.rsplit("_", 1)[-1]
             if suffix.isdigit():
                 limit = max(limit, int(suffix))
@@ -127,7 +128,7 @@ class ScreeningService:
             "return_20": "try_cast(json_extract(feature_snapshot, '$.return_20') as double)",
             "volume_ratio_20": "try_cast(json_extract(feature_snapshot, '$.volume_ratio_20') as double)",
         }.get(sort_by or "", "match_rank")
-        direction = sort_direction if sort_by is not None else "asc"
+        direction = "desc" if sort_by is not None and sort_direction == "desc" else "asc"
         cursor = self.connection.execute(
             f"""
             select symbol, match_rank, feature_snapshot, explanation
@@ -158,18 +159,37 @@ class ScreeningService:
         issues = self.validate(tree)
         if issues:
             raise ScreenDefinitionError(issues)
-        symbols = [
-            row[0]
-            for row in self.connection.execute(
-                "select symbol from symbols where is_listed order by symbol"
-            ).fetchall()
-        ]
+        securities = self.connection.execute(
+            "select symbol, name, board, is_listed, listed_on, delisted_on from symbols order by symbol"
+        ).fetchall()
+        symbols = []
+        uncertain = 0
+        for symbol, _, _, is_listed, listed_on, delisted_on in securities:
+            if listed_on is None or (not is_listed and delisted_on is None):
+                uncertain += 1
+            if listed_on is not None and listed_on > as_of:
+                continue
+            if delisted_on is not None and as_of >= delisted_on:
+                continue
+            if not is_listed and delisted_on is None:
+                continue
+            symbols.append(symbol)
+        diagnostics = {"conditions": {}, "warnings": [], "data_dates": {}}
+        if uncertain:
+            diagnostics["warnings"].append(
+                f"{uncertain} 只股票缺少上市或退市日期；兼容当前在市记录，退市日期未知者保守排除。"
+            )
         timeframes, history_limit, metrics = _requirements(tree)
         batch = SnapshotBatchResult((), len(symbols), 0)
         if mode == "live":
             if self.snapshot_provider is None:
                 raise RuntimeError("live screening requires a snapshot provider")
             batch = self.snapshot_provider.snapshot_many(symbols)
+            batch = SnapshotBatchResult(
+                tuple(snapshot for snapshot in batch.snapshots if snapshot.timestamp.date() == as_of),
+                batch.requested,
+                batch.failed_batches,
+            )
             history_limit = max(history_limit, _live_history_limit(metrics))
             timeframes.add(Timeframe.DAY)
         if rank is not None:
@@ -179,16 +199,55 @@ class ScreeningService:
         enrich = bool(metrics & ENRICHED_METRICS)
         histories = {
             timeframe: self.feature_store.read_histories(
-                symbols, timeframe, as_of, history_limit, enrich=enrich
+                symbols,
+                timeframe,
+                as_of - timedelta(days=1) if mode == "live" else as_of,
+                history_limit,
+                enrich=enrich,
             )
             for timeframe in timeframes
         }
-        identities = {
-            row[0]: {"name": row[1], "board": row[2]}
-            for row in self.connection.execute(
-                "select symbol, name, board from symbols where is_listed"
-            ).fetchall()
-        }
+        # Load the right series through the earliest left observation, plus its predecessor.
+        def conditions(node):
+            if isinstance(node, ConditionNode):
+                yield node
+            else:
+                for child in node.children:
+                    yield from conditions(child)
+
+        for condition in conditions(tree):
+            if not isinstance(condition.right, MetricOperand) or condition.timeframe == condition.right.timeframe:
+                continue
+            dates = [row["feature_date"] for rows in histories[condition.timeframe].values()
+                     for row in rows if row.get("feature_date") is not None]
+            if not dates:
+                continue
+            right_timeframe = condition.right.timeframe
+            end = as_of - timedelta(days=1) if mode == "live" else as_of
+            count = self.connection.execute(
+                """select coalesce(max(n), 0) + 1 from (
+                    select count(*) as n from market_features
+                    where symbol in (select unnest(?)) and timeframe = ?
+                      and feature_version = 'v1' and feature_date >= ? and feature_date <= ?
+                    group by symbol)""", [symbols, right_timeframe.value, min(dates), end]
+            ).fetchone()[0]
+            histories[right_timeframe] = self.feature_store.read_histories(
+                symbols, right_timeframe, end, max(history_limit, count), enrich=enrich,
+            )
+        identities = {row[0]: {"name": row[1], "board": row[2]} for row in securities if row[0] in symbols}
+
+        def record(evaluation):
+            if evaluation.children:
+                for child in evaluation.children:
+                    record(child)
+                return
+            counts = diagnostics["conditions"].setdefault(
+                evaluation.path, {"true": 0, "false": 0, "unknown": 0, "reasons": {}}
+            )
+            counts[evaluation.result.value] += 1
+            if evaluation.reason:
+                counts["reasons"][evaluation.reason] = counts["reasons"].get(evaluation.reason, 0) + 1
+
         candidates = []
         for symbol in symbols:
             history = {
@@ -203,7 +262,14 @@ class ScreeningService:
                     history[Timeframe.DAY] = overlay_snapshot(
                         history[Timeframe.DAY], snapshot
                     )
+            for timeframe, rows in history.items():
+                stamp = str(rows[0].get("timestamp") or rows[0].get("feature_date") or "") if rows else ""
+                dates = diagnostics["data_dates"].setdefault(timeframe.value, {"oldest": None, "latest": None})
+                if stamp:
+                    dates["oldest"] = min(dates["oldest"] or stamp, stamp)
+                    dates["latest"] = max(dates["latest"] or stamp, stamp)
             explanation = evaluate_tree(tree, history)
+            record(explanation)
             if explanation.result != TruthValue.TRUE:
                 continue
             snapshot = dict(history.get(Timeframe.DAY, [{}])[0]) if history.get(Timeframe.DAY) else {}
@@ -226,7 +292,7 @@ class ScreeningService:
             ScreenMatch(symbol, index + 1, snapshot, explanation)
             for index, (symbol, snapshot, explanation, _) in enumerate(candidates)
         ]
-        run_id = self._persist_run(tree, as_of, symbols, matches, mode, batch)
+        run_id = self._persist_run(tree, as_of, symbols, matches, mode, batch, diagnostics)
         return ScreenRunResult(
             run_id=run_id,
             universe_size=len(symbols),
@@ -234,6 +300,7 @@ class ScreeningService:
             matches=matches[offset : offset + limit],
             realtime_covered=len(batch.snapshots),
             failed_batches=batch.failed_batches,
+            diagnostics=diagnostics,
         )
 
     def _persist_run(
@@ -244,6 +311,7 @@ class ScreeningService:
         matches: list[ScreenMatch],
         mode: Literal["close", "live"],
         batch: SnapshotBatchResult,
+        diagnostics: dict,
     ) -> UUID:
         run_id = uuid4()
         tree_json = json.dumps(tree.model_dump(mode="json"), ensure_ascii=False)
@@ -251,8 +319,8 @@ class ScreeningService:
             """
             insert into screen_runs
               (run_id, mode, as_of_date, feature_version, condition_tree,
-               universe_size, realtime_covered, failed_batches, status, snapshot, finished_at)
-            values (?, ?, ?, 'v1', ?, ?, ?, ?, 'completed', ?, now())
+               universe_size, realtime_covered, failed_batches, status, snapshot, diagnostics, finished_at)
+            values (?, ?, ?, 'v1', ?, ?, ?, ?, 'completed', ?, ?, now())
             """,
             [
                 run_id,
@@ -266,6 +334,7 @@ class ScreeningService:
                     [snapshot.model_dump(mode="json") for snapshot in batch.snapshots],
                     ensure_ascii=False,
                 ),
+                json.dumps(diagnostics, ensure_ascii=False),
             ],
         )
         if matches:

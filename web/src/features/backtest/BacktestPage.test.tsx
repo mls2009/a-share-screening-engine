@@ -38,6 +38,72 @@ const run: BacktestRun = {
 };
 
 describe("BacktestPage", () => {
+  it("优先按 supported_modes 筛选回测指标", async () => {
+    const client = {
+      catalog: async () => [
+        { ...catalog[0], timeframes: ["1d"], supported_modes: ["backtest"] },
+        { ...catalog[1], supported_modes: ["close", "live"] },
+      ] as unknown as MetricSpec[],
+      runBacktest: async () => run,
+    };
+    render(<BacktestPage client={client} />);
+    const selects = await screen.findAllByRole("combobox", { name: "指标" });
+    expect(selects[0]).toHaveTextContent("近 20 周期涨跌幅");
+    expect(selects[0]).not.toHaveTextContent("成交量");
+  });
+
+  it("显示中文拒单原因与数据覆盖诊断", async () => {
+    const client = {
+      catalog: async () => catalog,
+      runBacktest: async () => ({ ...run, result: { ...run.result,
+        rejected_orders: ["2026-08-19T09:30:00+08:00 600001.SH: limit_up_no_liquidity", "600001.SH: zero_volume", "600001.SH: slippage_outside_price_limits"],
+        warnings: ["历史停牌状态覆盖不足"],
+        diagnostics: {
+          effective_start: "2026-08-18T09:30:00+08:00", effective_end: "2026-08-20T15:00:00+08:00",
+          execution_bars: 3, signal_bars: 2, status_covered_bars: 1,
+          status_coverage_pct: 33.33, unknown_evaluations: 4, warmup_bars: { "600001.SH": 20 },
+        },
+      } }),
+    };
+    render(<BacktestPage client={client} />);
+    await userEvent.click(await screen.findByRole("button", { name: "运行策略回测" }));
+    expect(await screen.findByText("开盘涨停限制买入", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("成交量为零", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("滑点价格超出涨跌停边界", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("历史停牌状态覆盖不足")).toBeInTheDocument();
+    expect(screen.getByText("33.33%", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("无法判定条件：4 次")).toBeInTheDocument();
+  });
+
+  it("空权益曲线与非有限指标仍显示可用报告", async () => {
+    const client = {
+      catalog: async () => catalog,
+      runBacktest: async () => ({ ...run, result: { ...run.result, equity_curve: [], trades: [],
+        metrics: { ...run.result.metrics, total_return: NaN, max_drawdown: Infinity, sharpe_ratio: NaN },
+      } }),
+    };
+    render(<BacktestPage client={client} />);
+    await userEvent.click(await screen.findByRole("button", { name: "运行策略回测" }));
+    expect(await screen.findByText("暂无有效权益数据")).toBeInTheDocument();
+    expect(screen.getByText("暂无成交记录")).toBeInTheDocument();
+    expect(screen.getAllByText("—")).toHaveLength(3);
+    expect(screen.queryByText(/NaN|Infinity/)).not.toBeInTheDocument();
+  });
+
+  it("年化收益不可计算时仍展示回测报告", async () => {
+    const client = {
+      catalog: async () => catalog,
+      runBacktest: async () => ({ ...run, result: { ...run.result,
+        metrics: { ...run.result.metrics, annualized_return: null },
+      } }),
+    };
+    render(<BacktestPage client={client} />);
+    await screen.findByRole("heading", { name: "入场条件" });
+    await userEvent.click(screen.getByRole("button", { name: "运行策略回测" }));
+    expect(await screen.findByText("12.50%")) .toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
   it("用入场和离场条件树运行回测并展示指标与交易", async () => {
     const client = {
       catalog: async () => catalog,

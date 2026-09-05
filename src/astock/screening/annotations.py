@@ -45,7 +45,7 @@ def condition_marks(tree: dict, explanation: dict, histories: dict) -> list[dict
                 add("close", timeframe, rows, index, index + 10, label)
             return
         if node["operator"] in {"continuous", "at_least"}:
-            simple = ConditionNode.model_validate({**node, "operator": "gt", "lookback": None, "occurrences": None})
+            simple = ConditionNode.model_validate({**node, "operator": node.get("comparison_operator", "gt"), "lookback": None, "occurrences": None})
             for index in range(min(node.get("lookback") or node.get("occurrences") or 1, len(rows))):
                 shifted = {key: [row for row in values if row["feature_date"] <= rows[index]["feature_date"]]
                            for key, values in histories.items()}

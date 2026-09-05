@@ -4,8 +4,14 @@ from astock.domain.market import MarketSnapshot
 
 
 def overlay_snapshot(history: list[dict], snapshot: MarketSnapshot) -> list[dict]:
-    previous = deepcopy(history)
-    live = dict(previous[0]) if previous else {}
+    previous = deepcopy([
+        row for row in history
+        if str(row["feature_date"]) < snapshot.timestamp.date().isoformat()
+    ])
+    live = {key: None for key in history[0]} if history else {}
+    for key in ("symbol", "name", "board", "timeframe", "feature_version"):
+        if history and key in history[0]:
+            live[key] = history[0][key]
     live.update(
         {
             "feature_date": snapshot.timestamp.date(),
@@ -39,13 +45,15 @@ def overlay_snapshot(history: list[dict], snapshot: MarketSnapshot) -> list[dict
             if len(prior_closes) == window - 1 and all(value is not None for value in prior_closes)
             else None
         )
-    if snapshot.volume_ratio is not None:
-        live["volume_ratio_20"] = snapshot.volume_ratio
-    elif len(previous) >= 20:
-        volumes = [row.get("volume") for row in previous[:20]]
-        live["volume_ratio_20"] = (
-            snapshot.volume_shares / (sum(volumes) / 20)
-            if all(value is not None for value in volumes) and sum(volumes) > 0
+    for window in (5, 20, 60):
+        volumes = [row.get("volume") for row in previous[:window - 1]]
+        live[f"volume_ma_{window}"] = (
+            (snapshot.volume_shares + sum(volumes)) / window
+            if len(volumes) == window - 1 and all(value is not None for value in volumes)
             else None
         )
+    average_volume = live["volume_ma_20"]
+    live["volume_ratio_20"] = (
+        snapshot.volume_shares / average_volume if average_volume else None
+    )
     return [live, *previous]

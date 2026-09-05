@@ -46,6 +46,7 @@ class MetricSpec:
     choices: tuple[ChoiceSpec, ...] = ()
     multiple: bool = False
     visible: bool = True
+    supported_modes: frozenset[str] = frozenset({"close"})
 
 
 def _metric(
@@ -67,6 +68,11 @@ def _metric(
         family=family,
         period=period,
         directions=directions,
+        supported_modes=frozenset({"close", "backtest", "live"}) if (
+            key in {"open", "high", "low", "close", "volume", "amount", "volume_ratio_20"}
+            or key.startswith(("return_", "volume_ma_"))
+            or (key.startswith("ma_") and key[3:].isdigit())
+        ) else frozenset({"close", "backtest"}),
     )
 
 
@@ -142,7 +148,7 @@ METRICS = [
         for window in (5, 20, 60)
     ],
     _metric("volume_ratio_20", "20周期量比", Unit.RATIO, group="activity", family="volume_ratio"),
-    MetricSpec("volume_ratio", "实时量比", Unit.RATIO, group="activity", family="live_volume_ratio"),
+    MetricSpec("volume_ratio", "实时量比", Unit.RATIO, group="activity", family="live_volume_ratio", supported_modes=frozenset({"live"})),
     *[
         _metric(
             f"volume_change_{window}",
@@ -155,9 +161,9 @@ METRICS = [
         )
         for window in (1, 5, 20)
     ],
-    MetricSpec("turnover_rate", "换手率", Unit.PERCENT, group="activity", family="turnover_rate"),
-    MetricSpec("total_market_cap", "总市值", Unit.AMOUNT, group="attributes", family="total_market_cap"),
-    MetricSpec("float_market_cap", "流通市值", Unit.AMOUNT, group="attributes", family="float_market_cap"),
+    MetricSpec("turnover_rate", "换手率", Unit.PERCENT, group="activity", family="turnover_rate", supported_modes=frozenset({"live"})),
+    MetricSpec("total_market_cap", "总市值", Unit.AMOUNT, group="attributes", family="total_market_cap", supported_modes=frozenset({"live"})),
+    MetricSpec("float_market_cap", "流通市值", Unit.AMOUNT, group="attributes", family="float_market_cap", supported_modes=frozenset({"live"})),
     *[
         _metric(f"ma_{window}", "移动平均线", Unit.PRICE, family="ma", period=window)
         for window in (5, 10, 20, 30, 60, 120, 250)
@@ -215,6 +221,7 @@ METRICS = [
         timeframes=frozenset({Timeframe.DAY}),
         group="price",
         family="burst_return",
+        supported_modes=frozenset({"close"}),
     ),
     *[
         _metric(f"max_drawdown_{window}", "最大回撤", Unit.PERCENT, group="trend", family="max_drawdown", period=window)
@@ -235,6 +242,7 @@ METRICS = [
         timeframes=frozenset({Timeframe.DAY}),
         group="status",
         family="burst_limit_up",
+        supported_modes=frozenset({"close"}),
     ),
     MetricSpec(
         "limit_up_burst_5_count_60",
@@ -243,6 +251,7 @@ METRICS = [
         timeframes=frozenset({Timeframe.DAY}),
         group="status",
         family="burst_limit_up_episodes",
+        supported_modes=frozenset({"close"}),
     ),
     MetricSpec("board", "所属板块", Unit.CATEGORY, operators=CATEGORY_OPERATORS, group="attributes", family="board", choices=BOARD_CHOICES, multiple=True),
     MetricSpec("pattern_type", "K 线形态", Unit.CATEGORY, operators=CATEGORY_OPERATORS, group="candlestick", family="pattern", choices=PATTERN_CHOICES, multiple=True),

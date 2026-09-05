@@ -1,4 +1,5 @@
 from datetime import UTC, date, datetime, timedelta
+from math import isclose, isfinite
 from uuid import UUID, uuid4
 
 from astock.backtest.engine import BacktestEngine
@@ -9,15 +10,15 @@ from astock.backtest.models import (
     ExecutionStatus,
 )
 from astock.data.service import MarketDataService
-from astock.domain.market import Timeframe
+from astock.domain.market import Adjustment, Timeframe
 from astock.storage.bars import BarStore
 from astock.storage.database import Database
 
 
 class BacktestDataError(RuntimeError):
-    def __init__(self, symbols: list[str]) -> None:
+    def __init__(self, symbols: list[str], message: str | None = None) -> None:
         self.symbols = symbols
-        super().__init__(f"missing local bars for: {', '.join(symbols)}")
+        super().__init__(message or f"本地缺少区间内有效回测行情，请同步股票和周期：{', '.join(symbols)}")
 
 
 class BacktestService:
@@ -63,6 +64,12 @@ class BacktestService:
         base = self._base_timeframe(request.timeframe)
         warmup_start = self._warmup_start(request.start, request.timeframe)
         market = {}
+        execution_market = {}
+        source_bars = {}
+        calendar = dict(self.database.connection.execute(
+            "select trade_date, is_open from trading_calendar where trade_date between ? and ?",
+            [warmup_start, request.end + timedelta(days=35)],
+        ).fetchall())
         missing = []
         for symbol in request.symbols:
             bars = self.bar_store.read_range(
@@ -72,10 +79,22 @@ class BacktestService:
                 warmup_start,
                 request.end,
             )
-            if not bars:
+            bars = [bar for bar in bars if bar.is_final]
+            if any(not isfinite(value) or value <= 0 for bar in bars
+                   for value in (bar.open, bar.high, bar.low, bar.close)):
+                raise BacktestDataError([symbol], f"{symbol}: 行情价格必须为有限正数")
+            derived = MarketDataService.derive(bars, request.timeframe, calendar=calendar or None)
+            if not any(
+                bar.is_final and request.start <= bar.timestamp.date() <= request.end
+                for bar in derived
+            ):
                 missing.append(symbol)
                 continue
-            market[symbol] = MarketDataService.derive(bars, request.timeframe)
+            market[symbol] = derived
+            source_bars[symbol] = bars
+            execution_market[symbol] = bars if request.timeframe in {
+                Timeframe.WEEK, Timeframe.MONTH
+            } else derived
         if missing:
             raise BacktestDataError(missing)
 
@@ -93,7 +112,47 @@ class BacktestService:
             )
             for row in rows
         }
-        result = self.engine.run(request, market, statuses)
+        converted = False
+        if request.mode.value == "realistic" and request.adjustment != Adjustment.NONE:
+            for symbol in request.symbols:
+                limit_dates = {day for (key, day), status in statuses.items()
+                               if key == symbol and (status.limit_up is not None
+                                                     or status.limit_down is not None)}
+                if not limit_dates:
+                    continue
+                raw = {bar.timestamp: bar for bar in self.bar_store.read_range(
+                    symbol, base, Adjustment.NONE, request.start, request.end
+                ) if bar.is_final}
+                factors = {}
+                for bar in source_bars[symbol]:
+                    day = bar.timestamp.date()
+                    if day not in limit_dates:
+                        continue
+                    original = raw.get(bar.timestamp)
+                    if original is None or not isfinite(original.open) or original.open <= 0:
+                        raise BacktestDataError([symbol],
+                            f"{symbol} {day}: 缺少可靠对应的未复权开盘价，无法换算涨跌停价格尺度")
+                    factor = bar.open / original.open
+                    if not isfinite(factor) or (day in factors and not isclose(
+                        factors[day], factor, rel_tol=1e-6
+                    )):
+                        raise BacktestDataError([symbol],
+                            f"{symbol} {day}: 日内复权比例不一致，无法可靠换算涨跌停价格尺度")
+                    factors[day] = factor
+                for day, factor in factors.items():
+                    status = statuses[(symbol, day)]
+                    statuses[(symbol, day)] = status.model_copy(update={
+                        "limit_up": status.limit_up * factor if status.limit_up is not None else None,
+                        "limit_down": status.limit_down * factor if status.limit_down is not None else None,
+                    })
+                    converted = True
+        result = self.engine.run(request, market, statuses, execution_market=execution_market)
+        warnings = list(result.warnings)
+        if request.adjustment != Adjustment.NONE:
+            warnings.append("使用复权价格进行研究性撮合，未逐笔模拟分红送转与真实现金流。")
+        if converted:
+            warnings.append("涨跌停价按当日对应复权/未复权开盘价比例近似换算；不等同真实成交复盘。")
+        result = result.model_copy(update={"warnings": warnings})
         run = BacktestRun(run_id=uuid4(), result=result)
         self._persist(run)
         return run

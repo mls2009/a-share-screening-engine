@@ -102,6 +102,7 @@ function nextCondition(
     selectedValues: metric.multiple && firstChoice ? [firstChoice] : undefined,
     lookback: undefined,
     occurrences: undefined,
+    comparison_operator: undefined,
   };
 }
 
@@ -255,6 +256,9 @@ function ConditionRow({
       )}
       {(["at_least", "continuous"].includes(node.operator)) && (
         <div className="lookback-fields">
+          <select aria-label="窗口比较方式" value={node.comparison_operator ?? "gt"} onChange={(event) => onUpdate({ ...node, comparison_operator: event.target.value as UiConditionNode["comparison_operator"] })}>
+            {["gt", "gte", "lt", "lte", "eq", "ne"].map((operator) => <option key={operator} value={operator}>{operatorLabels[operator]}</option>)}
+          </select>
           <input aria-label="回看周期" type="number" min="1" value={node.lookback ?? 5} onChange={(event) => onUpdate({ ...node, lookback: Number(event.target.value) })} />
           {node.operator === "at_least" && <input aria-label="成立次数" type="number" min="1" value={node.occurrences ?? 3} onChange={(event) => onUpdate({ ...node, occurrences: Number(event.target.value) })} />}
         </div>

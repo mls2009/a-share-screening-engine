@@ -66,6 +66,7 @@ class ConditionNode(BaseModel):
     timeframe: Timeframe
     operator: Operator
     right: Operand
+    comparison_operator: Literal["gt", "gte", "lt", "lte", "eq", "ne"] = "gt"
     lookback: int | None = Field(default=None, ge=1, le=1000)
     occurrences: int | None = Field(default=None, ge=1, le=1000)
 

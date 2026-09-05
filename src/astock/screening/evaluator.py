@@ -1,6 +1,8 @@
 from dataclasses import dataclass
+from datetime import date, datetime, time
 from enum import StrEnum
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from astock.domain.market import Timeframe
 from astock.screening.catalog import DEFAULT_CATALOG
@@ -28,10 +30,14 @@ class Evaluation:
     expected: Any = None
     unit: str | None = None
     children: tuple["Evaluation", ...] = ()
+    reason: str | None = None
+    data_time: str | None = None
 
     def to_dict(self) -> dict:
         return {
             "path": self.path,
+            "reason": self.reason,
+            "data_time": self.data_time,
             "result": self.result.value,
             "actual": self.actual,
             "expected": self.expected,
@@ -82,6 +88,20 @@ def _value(history: dict[Timeframe, list[dict]], timeframe: Timeframe, metric: s
     return rows[index].get(metric) if index < len(rows) else None
 
 
+def _row_time(row: dict) -> datetime | None:
+    value = row.get("timestamp") or row.get("feature_date")
+    if value is None:
+        return None
+    try:
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value) if len(value) > 10 else date.fromisoformat(value)
+        if isinstance(value, date) and not isinstance(value, datetime):
+            value = datetime.combine(value, time(15))
+        return value.replace(tzinfo=ZoneInfo("Asia/Shanghai")) if value.tzinfo is None else value
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
 def _right_value(
     node: ConditionNode,
     history: dict[Timeframe, list[dict]],
@@ -90,7 +110,18 @@ def _right_value(
     if isinstance(node.right, ConstantOperand):
         return node.right.value
     assert isinstance(node.right, MetricOperand)
-    value = _value(history, node.right.timeframe, node.right.metric, index)
+    if node.timeframe == node.right.timeframe:
+        value = _value(history, node.right.timeframe, node.right.metric, index)
+    else:
+        left_rows = history.get(node.timeframe, [])
+        cutoff = _row_time(left_rows[index]) if index < len(left_rows) else None
+        if cutoff is None:
+            return None
+        available = [
+            (stamp, row) for row in history.get(node.right.timeframe, [])
+            if (stamp := _row_time(row)) is not None and stamp <= cutoff
+        ]
+        value = max(available, key=lambda item: item[0])[1].get(node.right.metric) if available else None
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -108,6 +139,17 @@ def _evaluate_condition(
     unit_spec = DEFAULT_CATALOG.get(node.metric)
     unit = unit_spec.unit.value if unit_spec else None
 
+    rows = history.get(node.timeframe, [])
+    data_time = str(rows[0].get("timestamp") or rows[0].get("feature_date") or "") if rows else None
+
+    def outcome(result: TruthValue) -> Evaluation:
+        reason = None
+        if result == TruthValue.UNKNOWN:
+            reason = "缺少指标值或历史窗口数据"
+            if isinstance(node.right, MetricOperand) and node.right.timeframe != node.timeframe:
+                reason = "跨周期缺少时间戳、时点前已可用指标值或历史窗口数据"
+        return Evaluation(path, result, actual, expected, unit, reason=reason, data_time=data_time)
+
     if node.operator in {Operator.CROSSES_ABOVE, Operator.CROSSES_BELOW}:
         previous_actual = _value(history, node.timeframe, node.metric, 1)
         previous_expected = _right_value(node, history, 1)
@@ -117,7 +159,7 @@ def _evaluate_condition(
             result = _truth(actual > expected and previous_actual <= previous_expected)
         else:
             result = _truth(actual < expected and previous_actual >= previous_expected)
-        return Evaluation(path, result, actual, expected, unit)
+        return outcome(result)
 
     if node.operator in {Operator.AT_LEAST, Operator.CONTINUOUS}:
         lookback = node.lookback or node.occurrences or 1
@@ -125,7 +167,7 @@ def _evaluate_condition(
             _compare(
                 _value(history, node.timeframe, node.metric, index),
                 _right_value(node, history, index),
-                Operator.GT,
+                Operator(node.comparison_operator),
             )
             for index in range(lookback)
         ]
@@ -143,9 +185,9 @@ def _evaluate_condition(
             result = TruthValue.FALSE
         else:
             result = TruthValue.UNKNOWN
-        return Evaluation(path, result, actual, expected, unit)
+        return outcome(result)
 
-    return Evaluation(path, _compare(actual, expected, node.operator), actual, expected, unit)
+    return outcome(_compare(actual, expected, node.operator))
 
 
 def evaluate_tree(

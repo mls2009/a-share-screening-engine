@@ -6,6 +6,7 @@ from typing import Protocol
 import pandas as pd
 
 from astock.data.aggregate import aggregate_daily, aggregate_intraday
+from astock.data.periods import final_session
 from astock.data.providers.base import HistoryProvider, ReferenceDataProvider
 from astock.data.quality import QualityContext, QualityIssue, inspect_rows
 from astock.domain.market import Adjustment, Bar, Timeframe
@@ -280,11 +281,15 @@ class MarketDataService:
             raise
 
     @staticmethod
-    def derive(bars: list[Bar], timeframe: Timeframe) -> list[Bar]:
+    def derive(
+        bars: list[Bar], timeframe: Timeframe,
+        calendar: dict[date, bool] | None = None,
+    ) -> list[Bar]:
         if not bars or bars[0].timeframe == timeframe:
             return bars
 
         frame = pd.DataFrame([bar.model_dump() for bar in bars])
+        source_by_time = {bar.timestamp: bar for bar in bars}
         if timeframe in {Timeframe.MIN_15, Timeframe.MIN_30, Timeframe.MIN_60}:
             minutes = {
                 Timeframe.MIN_15: 15,
@@ -292,9 +297,28 @@ class MarketDataService:
                 Timeframe.MIN_60: 60,
             }[timeframe]
             derived = aggregate_intraday(frame, minutes)
+            finality = {
+                row.timestamp: all(
+                    (source := source_by_time.get(row.timestamp - timedelta(minutes=offset)))
+                    is not None and source.is_final
+                    for offset in range(0, minutes, 5)
+                )
+                for row in derived.itertuples()
+            }
         elif timeframe in {Timeframe.WEEK, Timeframe.MONTH}:
             period = "week" if timeframe == Timeframe.WEEK else "month"
             derived = aggregate_daily(frame, period)
+            rule = "W-FRI" if timeframe == Timeframe.WEEK else "M"
+            component_finality = frame.groupby(
+                frame["timestamp"].dt.tz_localize(None).dt.to_period(rule)
+            )["is_final"].all()
+            finality = {
+                row.timestamp: (
+                    row.timestamp.date() == final_session(row.timestamp.date(), timeframe, calendar)
+                    and bool(component_finality[pd.Period(row.timestamp.date(), freq=rule)])
+                )
+                for row in derived.itertuples()
+            }
         else:
             raise ValueError(f"cannot derive timeframe {timeframe} from {bars[0].timeframe}")
 
@@ -312,7 +336,7 @@ class MarketDataService:
                 amount_cny=row["amount_cny"],
                 adjustment=first.adjustment,
                 source=first.source,
-                is_final=True,
+                is_final=finality[row["timestamp"]],
             )
             for row in derived.to_dict("records")
         ]

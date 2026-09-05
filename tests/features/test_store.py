@@ -2,9 +2,49 @@ import json
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from astock.domain.market import Timeframe
 from astock.features.store import MarketFeatureStore
 from astock.storage.database import Database
+
+
+@pytest.mark.parametrize("method", ["read_latest", "read_history", "read_histories"])
+def test_store_ignores_legacy_partial_week_before_applying_limit(tmp_path: Path, method) -> None:
+    database = Database(tmp_path / "partial-week.duckdb")
+    database.migrate()
+    database.connection.executemany(
+        "insert into market_features "
+        "(symbol, timeframe, feature_date, feature_version, close) "
+        "values ('600001.SH', '1w', ?, 'v1', ?)",
+        [(date(2026, 8, 14), 10), (date(2026, 8, 18), 11), (date(2026, 8, 20), 12)],
+    )
+    store = MarketFeatureStore(database)
+    if method == "read_latest":
+        row = store.read_latest("600001.SH", Timeframe.WEEK, date(2026, 8, 20))
+    elif method == "read_history":
+        row = store.read_history("600001.SH", Timeframe.WEEK, date(2026, 8, 20), 1)[0]
+    else:
+        row = store.read_histories(["600001.SH"], Timeframe.WEEK, date(2026, 8, 20), 1)["600001.SH"][0]
+    assert row is not None and row["feature_date"] == date(2026, 8, 14)
+
+
+def test_store_recognizes_holiday_period_close(tmp_path: Path) -> None:
+    database = Database(tmp_path / "holiday-week.duckdb")
+    database.migrate()
+    database.connection.execute(
+        "insert into market_features "
+        "(symbol, timeframe, feature_date, feature_version, close) "
+        "values ('600001.SH', '1w', '2026-09-30', 'v1', 10)"
+    )
+    database.connection.execute(
+        "insert into trading_calendar values "
+        "('2026-09-30', true), ('2026-10-01', false), ('2026-10-02', false)"
+    )
+    rows = MarketFeatureStore(database).read_history(
+        "600001.SH", Timeframe.WEEK, date(2026, 9, 30), 1,
+    )
+    assert len(rows) == 1
 
 
 def test_history_expands_extra_and_adds_pattern_and_zone_context(tmp_path: Path) -> None:

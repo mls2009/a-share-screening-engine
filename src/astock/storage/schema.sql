@@ -255,6 +255,8 @@ create table if not exists screen_runs (
   finished_at timestamp
 );
 
+alter table screen_runs add column if not exists diagnostics json default '{}';
+
 create table if not exists screen_matches (
   run_id uuid not null,
   symbol varchar not null,

@@ -66,3 +66,13 @@ def test_metric_operand_supports_safe_multiplier_without_formula() -> None:
     )
 
     assert condition.right.multiplier == 1.5
+
+
+def test_catalog_declares_supported_execution_modes() -> None:
+    from astock.screening.catalog import DEFAULT_CATALOG
+
+    assert "backtest" not in DEFAULT_CATALOG.get("return_10_max_60").supported_modes
+    assert "backtest" in DEFAULT_CATALOG.get("rsi_14").supported_modes
+    assert "backtest" not in DEFAULT_CATALOG.get("total_market_cap").supported_modes
+    assert "live" not in DEFAULT_CATALOG.get("rsi_14").supported_modes
+    assert "live" in DEFAULT_CATALOG.get("ma_20").supported_modes

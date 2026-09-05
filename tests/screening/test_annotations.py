@@ -4,6 +4,16 @@ from astock.domain.market import Timeframe
 from astock.screening.annotations import condition_marks
 
 
+def test_window_marks_respect_less_than_comparison():
+    tree = {"kind": "condition", "metric": "close", "timeframe": "1d",
+            "operator": "at_least", "comparison_operator": "lt", "lookback": 2,
+            "occurrences": 1, "right": {"kind": "constant", "value": 10, "unit": "price"}}
+    rows = [{"feature_date": date(2026, 9, 4), "close": 9},
+            {"feature_date": date(2026, 9, 3), "close": 11}]
+    marks = condition_marks(tree, {"result": "true"}, {Timeframe.DAY: rows})
+    assert [mark["date"] for mark in marks] == ["2026-09-04"]
+
+
 def test_continuous_marks_actual_days_and_both_price_and_average():
     tree = {"kind": "condition", "metric": "close", "timeframe": "1d", "operator": "continuous",
             "lookback": 3, "right": {"kind": "metric", "metric": "ma_20", "timeframe": "1d"}}

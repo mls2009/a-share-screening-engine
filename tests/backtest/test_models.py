@@ -53,3 +53,20 @@ def test_backtest_request_rejects_unknown_metrics() -> None:
             exit_tree=CONDITION,
             initial_cash=100_000,
         )
+
+
+@pytest.mark.parametrize("operand", ["left", "right"])
+def test_backtest_rejects_metrics_that_engine_does_not_compute(operand) -> None:
+    tree = {
+        **CONDITION, "metric": "pattern_strength",
+        "right": {"kind": "constant", "value": 1, "unit": "score"},
+    } if operand == "left" else {
+        **CONDITION, "metric": "rsi_14",
+        "right": {"kind": "metric", "metric": "pattern_strength", "timeframe": "1d"},
+    }
+    with pytest.raises(ValidationError, match="unsupported backtest metric"):
+        BacktestRequest(
+            symbols=["600001.SH"], timeframe="1d",
+            start=date(2026, 8, 19), end=date(2026, 8, 20),
+            entry_tree=tree, exit_tree=CONDITION, initial_cash=100_000,
+        )

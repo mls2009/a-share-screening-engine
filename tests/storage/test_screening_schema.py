@@ -44,6 +44,9 @@ def test_screening_schema_contains_required_tables_and_symbol_columns(tmp_path: 
         "timeframe",
         "as_of_date",
     }
+    assert "diagnostics" in {
+        row[1] for row in db.connection.execute("pragma table_info('screen_runs')").fetchall()
+    }
 
 
 def test_migration_backfills_existing_automatic_zone_batches(tmp_path: Path) -> None:

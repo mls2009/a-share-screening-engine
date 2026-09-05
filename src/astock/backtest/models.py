@@ -7,8 +7,13 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astock.domain.market import Adjustment, Timeframe
+from astock.screening.catalog import DEFAULT_CATALOG, MetricCatalog
 from astock.screening.models import ConditionNode, GroupNode, MetricOperand, Node
 from astock.screening.validation import validate_tree
+
+BACKTEST_CATALOG = MetricCatalog([
+    metric for metric in DEFAULT_CATALOG.all() if "backtest" in metric.supported_modes
+])
 
 
 def _tree_timeframes(tree: Node) -> set[Timeframe]:
@@ -33,13 +38,13 @@ class BacktestMode(StrEnum):
 
 
 class FeeSchedule(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, allow_inf_nan=False)
 
     commission_rate: float = Field(default=0.0003, ge=0)
     minimum_commission: float = Field(default=5, ge=0)
     sell_stamp_tax_rate: float = Field(default=0.0005, ge=0)
     transfer_fee_rate: float = Field(default=0.00001, ge=0)
-    slippage_bps: float = Field(default=2, ge=0)
+    slippage_bps: float = Field(default=2, ge=0, lt=10_000)
 
     @classmethod
     def zero(cls) -> FeeSchedule:
@@ -88,6 +93,12 @@ class BacktestRequest(BaseModel):
         if issues:
             details = "; ".join(f"{issue.path}: {issue.message}" for issue in issues)
             raise ValueError(f"invalid backtest condition: {details}")
+        unsupported = validate_tree(self.entry_tree, catalog=BACKTEST_CATALOG) + validate_tree(
+            self.exit_tree, catalog=BACKTEST_CATALOG
+        )
+        if unsupported:
+            details = "; ".join(f"{issue.path}: {issue.message}" for issue in unsupported)
+            raise ValueError(f"unsupported backtest metric: {details}")
         return self
 
 
@@ -121,13 +132,24 @@ class BacktestMetrics(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     total_return: float
-    annualized_return: float
+    annualized_return: float | None
     max_drawdown: float
     sharpe_ratio: float
     win_rate: float
     profit_loss_ratio: float
     trade_count: int
     total_fees: float
+
+
+class BacktestDiagnostics(BaseModel):
+    effective_start: datetime | None = None
+    effective_end: datetime | None = None
+    execution_bars: int = 0
+    signal_bars: int = 0
+    status_covered_bars: int = 0
+    status_coverage_pct: float = 0
+    unknown_evaluations: int = 0
+    warmup_bars: dict[str, int] = Field(default_factory=dict)
 
 
 class BacktestResult(BaseModel):
@@ -138,6 +160,8 @@ class BacktestResult(BaseModel):
     trades: list[BacktestTrade]
     equity_curve: list[EquityPoint]
     rejected_orders: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    diagnostics: BacktestDiagnostics = Field(default_factory=BacktestDiagnostics)
 
 
 class BacktestRun(BaseModel):

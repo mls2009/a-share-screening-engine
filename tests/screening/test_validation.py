@@ -1,5 +1,35 @@
+import pytest
+
 from astock.screening.models import ConditionNode, GroupNode
 from astock.screening.validation import validate_tree
+
+
+@pytest.mark.parametrize("value", ["abc", [1, 2], True, float("nan"), float("inf")])
+def test_rejects_non_numeric_or_non_finite_numeric_thresholds(value) -> None:
+    condition = ConditionNode.model_validate({
+        "metric": "close", "timeframe": "1d", "operator": "gt",
+        "right": {"kind": "constant", "value": value, "unit": "price"},
+    })
+    assert "invalid_constant" in {issue.code for issue in validate_tree(condition)}
+
+
+def test_rejects_more_occurrences_than_lookback() -> None:
+    condition = ConditionNode.model_validate({
+        "metric": "close", "timeframe": "1d", "operator": "at_least",
+        "right": {"kind": "constant", "value": 10, "unit": "price"},
+        "lookback": 2, "occurrences": 3,
+    })
+    assert "invalid_occurrences" in {issue.code for issue in validate_tree(condition)}
+
+
+@pytest.mark.parametrize("multiplier", [float("nan"), float("inf")])
+def test_rejects_non_finite_metric_multiplier(multiplier) -> None:
+    condition = ConditionNode.model_validate({
+        "metric": "close", "timeframe": "1d", "operator": "gt",
+        "right": {"kind": "metric", "metric": "ma_20", "timeframe": "1d",
+                  "multiplier": multiplier},
+    })
+    assert "invalid_multiplier" in {issue.code for issue in validate_tree(condition)}
 
 
 def test_catalog_contains_extended_price_volume_pattern_and_risk_metrics() -> None:

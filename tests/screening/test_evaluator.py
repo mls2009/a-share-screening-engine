@@ -122,3 +122,33 @@ def test_membership_and_legacy_equality_match_any_detected_pattern() -> None:
 
     assert evaluate_tree(membership, history).result == TruthValue.TRUE
     assert evaluate_tree(legacy, history).result == TruthValue.TRUE
+
+
+def test_cross_timeframe_uses_each_left_date_without_future_values() -> None:
+    node = _condition(metric="close", operator="crosses_above", right={
+        "kind": "metric", "metric": "ma_20", "timeframe": "1w",
+    })
+    history = {
+        Timeframe.DAY: [{"feature_date": "2026-08-20", "close": 11},
+                        {"feature_date": "2026-08-19", "close": 9}],
+        Timeframe.WEEK: [{"feature_date": "2026-08-21", "ma_20": 100},
+                         {"feature_date": "2026-08-14", "ma_20": 10}],
+    }
+    assert evaluate_tree(node, history).result == TruthValue.TRUE
+    history[Timeframe.DAY] = [{"close": 11}, {"close": 9}]
+    assert evaluate_tree(node, history).result == TruthValue.UNKNOWN
+
+
+def test_recent_window_supports_less_than_comparison() -> None:
+    node = _condition(operator="at_least", comparison_operator="lt", lookback=3,
+                      occurrences=2, right={"kind": "constant", "value": 0, "unit": "percent"})
+    result = evaluate_tree(node, {Timeframe.DAY: [
+        {"return_20": -1}, {"return_20": 2}, {"return_20": -3},
+    ]})
+    assert result.result == TruthValue.TRUE
+
+
+def test_unknown_explanation_includes_reason_and_data_time() -> None:
+    result = evaluate_tree(_condition(), {Timeframe.DAY: [{"feature_date": "2026-08-20"}]})
+    assert result.to_dict()["reason"]
+    assert result.to_dict()["data_time"] == "2026-08-20"

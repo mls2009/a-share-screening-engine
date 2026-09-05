@@ -1,0 +1,20 @@
+{
+  "kind": "group",
+  "logic": "or",
+  "children": [
+    {
+      "kind": "condition",
+      "metric": "limit_up_burst_5_count_60",
+      "timeframe": "1d",
+      "operator": "gte",
+      "right": {"kind": "constant", "value": 2, "unit": "count"}
+    },
+    {
+      "kind": "condition",
+      "metric": "return_10_max_60",
+      "timeframe": "1d",
+      "operator": "gt",
+      "right": {"kind": "constant", "value": 40, "unit": "percent"}
+    }
+  ]
+}

@@ -4,7 +4,7 @@ from threading import Lock
 
 import pandas as pd
 
-from astock.data.aggregate import aggregate_daily
+from astock.data.periods import period_end
 from astock.data.service import MarketDataService
 from astock.domain.market import Adjustment, Bar, Timeframe
 from astock.features.patterns import detect_patterns, persist_pattern_events
@@ -153,12 +153,29 @@ class FeatureBuilder:
             ).fetchall()
         }
 
-        frames = {
-            Timeframe.DAY: daily,
-            Timeframe.WEEK: aggregate_daily(daily, "week"),
-            Timeframe.MONTH: aggregate_daily(daily, "month"),
-        }
+        calendar = dict(self.connection.execute(
+            "select trade_date, is_open from trading_calendar where trade_date between ? and ?",
+            [date_index[0], max(period_end(as_of, Timeframe.WEEK), period_end(as_of, Timeframe.MONTH))],
+        ).fetchall())
+        frames = {Timeframe.DAY: daily}
+        for timeframe in (Timeframe.WEEK, Timeframe.MONTH):
+            complete = [bar for bar in MarketDataService.derive(bars, timeframe, calendar)
+                        if bar.is_final]
+            frames[timeframe] = _bar_frame(complete)
         for timeframe, frame in frames.items():
+            if timeframe != Timeframe.DAY:
+                self.connection.execute(
+                    "delete from market_features where symbol = ? and timeframe = ? "
+                    "and feature_version = 'v1' and feature_date between ? and ?",
+                    [symbol, timeframe.value, date_index[0], as_of],
+                )
+                self.connection.execute(
+                    "delete from pattern_events where symbol = ? and timeframe = ? "
+                    "and event_date between ? and ?",
+                    [symbol, timeframe.value, date_index[0], as_of],
+                )
+            if frame.empty:
+                continue
             features = compute_technical_features(frame)
             listing_days = []
             for timestamp in features["timestamp"]:

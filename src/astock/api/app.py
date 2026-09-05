@@ -95,6 +95,7 @@ def _catalog() -> list[dict]:
             "label": metric.label,
             "unit": metric.unit.value,
             "timeframes": sorted(item.value for item in metric.timeframes),
+            "supported_modes": sorted(metric.supported_modes),
             "operators": sorted(item.value for item in metric.operators),
             "group": metric.group,
             "family": metric.family or metric.key,
@@ -122,6 +123,7 @@ def _run_response(result: object) -> dict:
         "match_count": result.match_count,
         "realtime_covered": result.realtime_covered,
         "failed_batches": result.failed_batches,
+        "diagnostics": result.diagnostics,
         "matches": [
             {
                 "symbol": match.symbol,
@@ -325,7 +327,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             select status, mode, as_of_date, universe_size, realtime_covered,
                    failed_batches,
                    (select count(*) from screen_matches
-                    where screen_matches.run_id = screen_runs.run_id)
+                    where screen_matches.run_id = screen_runs.run_id), diagnostics
             from screen_runs where run_id = ?
             """,
             [run_id],
@@ -344,6 +346,8 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             "realtime_covered": row[4],
             "failed_batches": row[5],
             "match_count": row[6],
+            "diagnostics": {"conditions": {}, "warnings": [], "data_dates": {},
+                            **(json.loads(row[7]) if row[7] else {})},
             "matches": context.screening.results(
                 run_id, limit, offset, sort_by, sort_direction
             ),
@@ -597,7 +601,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
                 status_code=422,
                 content={
                     "code": "missing_backtest_data",
-                    "message": "本地数据库缺少回测行情，请先同步对应股票和周期",
+                    "message": str(error),
                     "symbols": error.symbols,
                 },
             )

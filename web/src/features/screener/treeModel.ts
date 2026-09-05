@@ -157,6 +157,7 @@ export function fromApiNode(value: unknown, metrics: MetricSpec[]): UiNode {
     right: operand,
     direction,
     selectedValues,
+    ...(typeof node.comparison_operator === "string" ? { comparison_operator: node.comparison_operator as UiConditionNode["comparison_operator"] } : {}),
     ...(typeof node.lookback === "number" ? { lookback: node.lookback } : {}),
     ...(typeof node.occurrences === "number" ? { occurrences: node.occurrences } : {}),
   };
@@ -190,6 +191,7 @@ export function toApiNode(node: UiNode, metrics: MetricSpec[]): object {
     timeframe: node.timeframe,
     operator: negativeDirection ? inverseOperator[node.operator] ?? node.operator : node.operator,
     right,
+    ...(node.comparison_operator ? { comparison_operator: node.comparison_operator } : {}),
     ...(node.lookback ? { lookback: node.lookback } : {}),
     ...(node.occurrences ? { occurrences: node.occurrences } : {}),
   };

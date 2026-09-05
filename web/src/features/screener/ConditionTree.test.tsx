@@ -102,3 +102,12 @@ describe("ConditionTree", () => {
     expect(screen.queryByRole("option", { name: "true" })).not.toBeInTheDocument();
   });
 });
+
+it("窗口条件允许选择每个周期的比较方式", async () => {
+  const tree = createGroup();
+  tree.children = [{ id: "window", kind: "condition", metric: "volume", timeframe: "1d", operator: "at_least", right: { kind: "constant", value: "10" } }];
+  const onChange = vi.fn();
+  render(<ConditionTree tree={tree} catalog={catalog.map((item) => item.key === "volume" ? { ...item, operators: ["gt", "at_least"] } : item)} onChange={onChange} />);
+  await userEvent.selectOptions(screen.getByLabelText("窗口比较方式"), "lt");
+  expect(onChange.mock.calls[0][0].children[0].comparison_operator).toBe("lt");
+});

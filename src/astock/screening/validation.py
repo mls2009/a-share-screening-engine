@@ -2,7 +2,15 @@ import math
 from dataclasses import dataclass
 
 from astock.screening.catalog import DEFAULT_CATALOG, MetricCatalog
-from astock.screening.models import ConditionNode, ConstantOperand, GroupNode, MetricOperand, Node
+from astock.screening.models import (
+    ConditionNode,
+    ConstantOperand,
+    GroupNode,
+    MetricOperand,
+    Node,
+    Operator,
+    Unit,
+)
 
 
 @dataclass(frozen=True)
@@ -44,10 +52,32 @@ def validate_tree(
             issue("unsupported_timeframe", f"unsupported timeframe: {node.timeframe}", path)
         if node.operator not in left.operators:
             issue("unsupported_operator", f"unsupported operator: {node.operator}", path)
+        if (
+            node.operator == Operator.AT_LEAST
+            and node.lookback is not None
+            and (node.occurrences or 1) > node.lookback
+        ):
+            issue("invalid_occurrences", "occurrences cannot exceed lookback", path)
 
         if isinstance(node.right, ConstantOperand):
             if node.right.unit != left.unit:
                 issue("unit_mismatch", f"{left.unit} cannot compare with {node.right.unit}", path)
+            if node.operator not in {
+                Operator.BETWEEN, Operator.NOT_BETWEEN, Operator.IN, Operator.NOT_IN,
+            }:
+                value = node.right.value
+                if left.unit == Unit.BOOLEAN:
+                    valid = isinstance(value, bool)
+                elif left.unit == Unit.CATEGORY:
+                    valid = isinstance(value, str)
+                else:
+                    valid = (
+                        isinstance(value, (int, float))
+                        and not isinstance(value, bool)
+                        and math.isfinite(value)
+                    )
+                if not valid:
+                    issue("invalid_constant", f"invalid constant for {left.unit}", path)
             if node.operator.value in {"between", "not_between"}:
                 value = node.right.value
                 valid_range = (
@@ -81,6 +111,10 @@ def validate_tree(
             return
 
         assert isinstance(node.right, MetricOperand)
+        if not math.isfinite(node.right.multiplier) or (
+            left.unit in {Unit.BOOLEAN, Unit.CATEGORY} and node.right.multiplier != 1
+        ):
+            issue("invalid_multiplier", "metric multiplier must be finite and numeric", path)
         if node.operator.value in {"in", "not_in"}:
             issue(
                 "invalid_membership",

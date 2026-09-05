@@ -23,8 +23,27 @@ function oneYearAgo() {
   }).format(value);
 }
 
+function formatNumber(value: number | null | undefined, digits = 2, suffix = "") {
+  return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(digits)}${suffix}` : "—";
+}
+
+const rejectionReasons: Record<string, string> = {
+  suspended: "停牌",
+  zero_volume: "成交量为零",
+  slippage_outside_price_limits: "滑点价格超出涨跌停边界",
+  limit_up_no_liquidity: "开盘涨停限制买入",
+  limit_down_no_liquidity: "开盘跌停限制卖出",
+  "insufficient cash": "可用资金不足",
+};
+
+function rejectionText(order: string) {
+  const separator = order.lastIndexOf(": ");
+  const reason = order.slice(separator + 2);
+  return separator < 0 ? rejectionReasons[order] ?? order : `${order.slice(0, separator)}：${rejectionReasons[reason] ?? reason}`;
+}
+
 function EquitySparkline({ run }: { run: BacktestRun }) {
-  const values = run.result.equity_curve.map((point) => point.equity);
+  const values = run.result.equity_curve.map((point) => point.equity).filter(Number.isFinite);
   const points = useMemo(() => {
     if (!values.length) return "";
     const min = Math.min(...values);
@@ -35,6 +54,7 @@ function EquitySparkline({ run }: { run: BacktestRun }) {
       return `${x},${38 - (value - min) / spread * 34}`;
     }).join(" ");
   }, [values]);
+  if (!values.length) return <p>暂无有效权益数据</p>;
   return (
     <div className="equity-chart" aria-label="权益曲线">
       <svg viewBox="0 0 100 42" preserveAspectRatio="none"><polyline points={points} /></svg>
@@ -57,7 +77,7 @@ export function BacktestPage({ client = api }: { client?: BacktestClient }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const backtestCatalog = useMemo(
-    () => catalog.filter((metric) => metric.timeframes.length === 7),
+    () => catalog.filter((metric) => metric.supported_modes ? metric.supported_modes.includes("backtest") : metric.timeframes.length === 7),
     [catalog],
   );
 
@@ -113,16 +133,25 @@ export function BacktestPage({ client = api }: { client?: BacktestClient }) {
       </div>
       {!run ? <section className="result-empty backtest-empty">配置入场与离场条件后运行。信号按收盘计算，下一根 K 线开盘撮合，避免未来函数。</section> : (
         <section className="backtest-report">
+          {!!run.result.warnings?.length && <div className="report-panel" role="status"><h2>回测警告</h2><ul>{run.result.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></div>}
+          {run.result.diagnostics && <div className="report-panel"><h2>数据覆盖</h2>
+            <p>有效区间：{run.result.diagnostics.effective_start ?? "—"} 至 {run.result.diagnostics.effective_end ?? "—"}</p>
+            <p>执行 K 线：{run.result.diagnostics.execution_bars} 根；信号 K 线：{run.result.diagnostics.signal_bars} 根</p>
+            <p>历史状态覆盖：{run.result.diagnostics.status_covered_bars} 根（{formatNumber(run.result.diagnostics.status_coverage_pct, 2, "%")}）</p>
+            <p>无法判定条件：{run.result.diagnostics.unknown_evaluations} 次</p>
+            <p>预热 K 线：{Object.entries(run.result.diagnostics.warmup_bars).map(([symbol, count]) => `${symbol} ${count} 根`).join("；") || "无"}</p>
+          </div>}
           <div className="metrics-grid">
-            <div><span>总收益</span><strong>{run.result.metrics.total_return.toFixed(2)}%</strong></div>
-            <div><span>年化收益</span><strong>{run.result.metrics.annualized_return.toFixed(2)}%</strong></div>
-            <div><span>最大回撤</span><strong>{run.result.metrics.max_drawdown.toFixed(2)}%</strong></div>
-            <div><span>夏普</span><strong>{run.result.metrics.sharpe_ratio.toFixed(2)}</strong></div>
-            <div><span>胜率</span><strong>{run.result.metrics.win_rate.toFixed(1)}%</strong></div>
-            <div><span>完成交易</span><strong>{run.result.metrics.trade_count}</strong></div>
+            <div><span>总收益</span><strong>{formatNumber(run.result.metrics.total_return, 2, "%")}</strong></div>
+            <div><span>年化收益</span><strong>{formatNumber(run.result.metrics.annualized_return, 2, "%")}</strong></div>
+            <div><span>最大回撤</span><strong>{formatNumber(run.result.metrics.max_drawdown, 2, "%")}</strong></div>
+            <div><span>夏普</span><strong>{formatNumber(run.result.metrics.sharpe_ratio)}</strong></div>
+            <div><span>胜率</span><strong>{formatNumber(run.result.metrics.win_rate, 1, "%")}</strong></div>
+            <div><span>完成交易</span><strong>{formatNumber(run.result.metrics.trade_count, 0)}</strong></div>
           </div>
           <div className="report-panel"><h2><Activity size={17} />权益曲线</h2><EquitySparkline run={run} /></div>
-          <div className="report-panel"><h2>交易明细</h2><div className="table-scroll" role="region" aria-label="交易明细表格" tabIndex={0}><table><thead><tr><th>证券</th><th>方向</th><th>信号时间</th><th>成交时间</th><th>数量</th><th>价格</th><th>费用</th></tr></thead><tbody>{run.result.trades.map((trade, index) => <tr key={`${trade.timestamp}-${index}`}><td>{trade.symbol}</td><td className={trade.side}>{trade.side === "buy" ? "买入" : "卖出"}</td><td>{new Date(trade.signal_at).toLocaleString("zh-CN")}</td><td>{new Date(trade.timestamp).toLocaleString("zh-CN")}</td><td>{trade.quantity.toLocaleString("zh-CN")}</td><td>{trade.price.toFixed(3)}</td><td>{(trade.commission + trade.tax + trade.transfer_fee).toFixed(2)}</td></tr>)}</tbody></table></div></div>
+          <div className="report-panel"><h2>拒单记录（{run.result.rejected_orders.length} 次）</h2>{run.result.rejected_orders.length ? <ul>{run.result.rejected_orders.map((order, index) => <li key={index}>{rejectionText(order)}</li>)}</ul> : <p>无拒单记录</p>}</div>
+          <div className="report-panel"><h2>交易明细</h2>{!run.result.trades.length && <p>暂无成交记录</p>}<div className="table-scroll" role="region" aria-label="交易明细表格" tabIndex={0}><table><thead><tr><th>证券</th><th>方向</th><th>信号时间</th><th>成交时间</th><th>数量</th><th>价格</th><th>费用</th></tr></thead><tbody>{run.result.trades.map((trade, index) => <tr key={`${trade.timestamp}-${index}`}><td>{trade.symbol}</td><td className={trade.side}>{trade.side === "buy" ? "买入" : "卖出"}</td><td>{new Date(trade.signal_at).toLocaleString("zh-CN")}</td><td>{new Date(trade.timestamp).toLocaleString("zh-CN")}</td><td>{trade.quantity.toLocaleString("zh-CN")}</td><td>{trade.price.toFixed(3)}</td><td>{(trade.commission + trade.tax + trade.transfer_fee).toFixed(2)}</td></tr>)}</tbody></table></div></div>
         </section>
       )}
     </main>

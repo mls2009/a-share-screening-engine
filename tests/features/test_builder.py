@@ -68,7 +68,7 @@ def test_builder_persists_idempotent_daily_weekly_monthly_features(tmp_path: Pat
     latest = store.read_latest("600000.SH", Timeframe.DAY, dates[-1].date())
     assert counts["1d"] == 40
     assert counts["1w"] > 1
-    assert counts["1mo"] == 2
+    assert counts["1mo"] == 1
     assert database.connection.execute(
         "select count(*) from pattern_events where symbol = '600000.SH'"
     ).fetchone()[0] > 0
@@ -78,6 +78,33 @@ def test_builder_persists_idempotent_daily_weekly_monthly_features(tmp_path: Pat
     assert latest["is_secondary_new"] is True
     assert latest["high_history"] == 41.0
     assert latest["low_history"] == 0.0
+
+
+def test_builder_removes_legacy_partial_period_rows_when_rebuilding(tmp_path: Path) -> None:
+    database = Database(tmp_path / "completed.duckdb")
+    database.migrate()
+    bar_store = BarStore(tmp_path / "bars")
+    dates = pd.date_range("2026-08-10", "2026-08-20", freq="B")
+    bar_store.upsert([
+        Bar(symbol="600001.SH", timestamp=datetime.combine(stamp.date(), datetime.min.time(), TZ),
+            timeframe=Timeframe.DAY, open=10, high=11, low=9, close=10,
+            volume_shares=100, amount_cny=1000, adjustment=Adjustment.QFQ)
+        for stamp in dates
+    ])
+    database.connection.execute(
+        "insert into market_features "
+        "(symbol, timeframe, feature_date, feature_version, close) "
+        "values ('600001.SH', '1w', '2026-08-18', 'v1', 99), "
+        "('600001.SH', '1mo', '2026-08-18', 'v1', 99)"
+    )
+    FeatureBuilder(bar_store, MarketFeatureStore(database), database).build_symbol(
+        "600001.SH", date(2026, 8, 20),
+    )
+    rows = database.connection.execute(
+        "select timeframe, feature_date from market_features "
+        "where timeframe != '1d' order by feature_date"
+    ).fetchall()
+    assert rows == [("1w", date(2026, 8, 14))]
 
 
 def test_builder_computes_three_month_rolling_burst_metrics(tmp_path: Path) -> None:

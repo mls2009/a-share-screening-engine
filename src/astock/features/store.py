@@ -3,6 +3,7 @@ from datetime import date
 
 import pandas as pd
 
+from astock.data.periods import final_session, period_end
 from astock.domain.market import Timeframe
 from astock.features.zones import nearest_zones
 from astock.storage.database import Database
@@ -88,6 +89,20 @@ class MarketFeatureStore:
     def __init__(self, database: Database) -> None:
         self.connection = database.connection
 
+    def _period_filter(self, timeframe: Timeframe, end: date) -> tuple[str, list]:
+        if timeframe not in {Timeframe.WEEK, Timeframe.MONTH}:
+            return "", []
+        dates = [row[0] for row in self.connection.execute(
+            "select distinct feature_date from market_features "
+            "where timeframe = ? and feature_date <= ?", [timeframe.value, end],
+        ).fetchall()]
+        calendar = dict(self.connection.execute(
+            "select trade_date, is_open from trading_calendar where trade_date between ? and ?",
+            [min(dates, default=end), period_end(end, timeframe)],
+        ).fetchall())
+        completed = [day for day in dates if day == final_session(day, timeframe, calendar)]
+        return " and feature_date in (select unnest(?::date[]))", [completed]
+
     def upsert(
         self,
         symbol: str,
@@ -129,13 +144,15 @@ class MarketFeatureStore:
         as_of: date,
         feature_version: str = "v1",
     ) -> dict | None:
+        period_filter, period_args = self._period_filter(timeframe, as_of)
         cursor = self.connection.execute(
-            """
+            f"""
             select * from market_features
             where symbol = ? and timeframe = ? and feature_version = ? and feature_date <= ?
+              {period_filter}
             order by feature_date desc limit 1
             """,
-            [symbol, timeframe.value, feature_version, as_of],
+            [symbol, timeframe.value, feature_version, as_of, *period_args],
         )
         row = cursor.fetchone()
         if row is None:
@@ -153,13 +170,15 @@ class MarketFeatureStore:
         *,
         enrich: bool = True,
     ) -> list[dict]:
+        period_filter, period_args = self._period_filter(timeframe, end)
         cursor = self.connection.execute(
-            """
+            f"""
             select * from market_features
             where symbol = ? and timeframe = ? and feature_version = ? and feature_date <= ?
+              {period_filter}
             order by feature_date desc limit ?
             """,
-            [symbol, timeframe.value, feature_version, end, limit],
+            [symbol, timeframe.value, feature_version, end, *period_args, limit],
         )
         columns = [column[0] for column in cursor.description]
         rows = [self._decode(dict(zip(columns, row, strict=True))) for row in cursor.fetchall()]
@@ -177,8 +196,9 @@ class MarketFeatureStore:
     ) -> dict[str, list[dict]]:
         if not symbols:
             return {}
+        period_filter, period_args = self._period_filter(timeframe, end)
         cursor = self.connection.execute(
-            """
+            f"""
             select * exclude (history_rank) from (
               select *, row_number() over (
                 partition by symbol order by feature_date desc
@@ -186,10 +206,11 @@ class MarketFeatureStore:
               from market_features
               where symbol in (select unnest(?))
                 and timeframe = ? and feature_version = ? and feature_date <= ?
+                {period_filter}
             ) where history_rank <= ?
             order by symbol, feature_date desc
             """,
-            [symbols, timeframe.value, feature_version, end, limit],
+            [symbols, timeframe.value, feature_version, end, *period_args, limit],
         )
         columns = [column[0] for column in cursor.description]
         histories = {symbol: [] for symbol in symbols}

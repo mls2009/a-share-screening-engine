@@ -98,3 +98,63 @@ def test_service_reads_a_warmup_window_before_the_requested_start(tmp_path: Path
 
     assert store.call is not None
     assert store.call[3] < _request().start
+
+
+def test_service_rejects_data_that_only_covers_warmup(tmp_path: Path) -> None:
+    service, database, bars = _service(tmp_path)
+    bars.upsert(_daily_bars())
+    request = _request().model_copy(update={"start": date(2026, 8, 20),
+                                           "end": date(2026, 8, 25)})
+    with pytest.raises(BacktestDataError):
+        service.run(request)
+    assert database.connection.execute("select count(*) from backtest_runs").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("raw_available", [True, False])
+def test_realistic_adjusted_limits_require_matching_raw_open(tmp_path: Path, raw_available) -> None:
+    service, database, store = _service(tmp_path)
+    bars = _daily_bars()[:3]
+    store.upsert(bars)
+    if raw_available:
+        store.upsert([bar.model_copy(update={"adjustment": Adjustment.NONE,
+            "open": bar.open * 2, "high": bar.high * 2, "low": bar.low * 2,
+            "close": bar.close * 2}) for bar in bars])
+    database.connection.execute(
+        "insert into security_status values (?, ?, 'main', false, false, 20, 22, 18)",
+        ["600001.SH", date(2026, 8, 4)],
+    )
+    condition = {"kind": "condition", "metric": "close", "timeframe": "1d",
+                 "operator": "gt", "right": {"kind": "constant", "value": 0, "unit": "price"}}
+    request = BacktestRequest(symbols=["600001.SH"], timeframe="1d", start=date(2026, 8, 3),
+        end=date(2026, 8, 5), entry_tree=condition, exit_tree=condition,
+        initial_cash=100_000, mode="realistic", fees=FeeSchedule.zero())
+    if not raw_available:
+        with pytest.raises(BacktestDataError, match="未复权开盘价"):
+            service.run(request)
+        return
+    result = service.run(request).result
+    assert any("limit_up_no_liquidity" in item for item in result.rejected_orders)
+    assert not any(trade.timestamp.date() == date(2026, 8, 4) for trade in result.trades)
+    assert any("近似换算" in warning for warning in result.warnings)
+
+
+@pytest.mark.parametrize("timeframe,signal_day,next_day", [
+    (Timeframe.WEEK, date(2026, 4, 30), date(2026, 5, 6)),
+    (Timeframe.MONTH, date(2026, 4, 30), date(2026, 5, 6)),
+])
+def test_period_signal_executes_after_holiday(tmp_path, timeframe, signal_day, next_day) -> None:
+    service, database, store = _service(tmp_path)
+    source = _daily_bars()[0]
+    store.upsert([source.model_copy(update={"timestamp": datetime.combine(day, datetime.min.time(), TZ)})
+                  for day in [signal_day, next_day]])
+    database.connection.executemany("insert into trading_calendar values (?, ?)",
+        [(signal_day + timedelta(days=i), i in [0, 6]) for i in range(7)])
+    condition = {"kind": "condition", "metric": "close", "timeframe": timeframe,
+                 "operator": "gt", "right": {"kind": "constant", "value": 0, "unit": "price"}}
+    request = BacktestRequest(symbols=["600001.SH"], timeframe=timeframe, start=signal_day,
+        end=next_day, entry_tree=condition, exit_tree=condition,
+        initial_cash=100_000, fees=FeeSchedule.zero())
+    result = service.run(request).result
+    assert result.trades[0].signal_at.hour == 15
+    assert result.trades[0].signal_at.date() == signal_day
+    assert result.trades[0].timestamp == datetime(2026, 5, 6, 9, 30, tzinfo=TZ)
