@@ -94,6 +94,33 @@ export interface Bar {
   amount_cny: number;
 }
 
+export interface BenchmarkComparisonPoint {
+  timestamp: string;
+  stock_return_pct: number;
+  benchmark_return_pct: number;
+  relative_pct: number;
+}
+
+export interface BenchmarkComparison {
+  stock_symbol: string;
+  stock_name: string;
+  benchmark_symbol: string;
+  benchmark_name: string;
+  points: BenchmarkComparisonPoint[];
+}
+
+export interface ChartDataSyncRequest {
+  timeframe: Timeframe;
+  start: string;
+  end: string;
+  include_benchmark: boolean;
+}
+
+export interface ChartDataSyncResult {
+  stock_bars: number;
+  benchmark_bars: number;
+}
+
 export type ChartIndicator = "ma" | "boll" | "macd" | "kdj" | "rsi" | "volume_ma" | "obv" | "atr";
 
 export interface ChartIndicatorPoint {

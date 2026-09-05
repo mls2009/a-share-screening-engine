@@ -1,4 +1,4 @@
-import type { BacktestRun, Bar, ChartIndicatorPoint, MetricSpec, MonitorSignal, MonitorStatus, MonitorTask, PriceZone, ScreenRunResult, SymbolSearchResult, Timeframe } from "./types";
+import type { BacktestRun, Bar, BenchmarkComparison, ChartDataSyncRequest, ChartDataSyncResult, ChartIndicatorPoint, MetricSpec, MonitorSignal, MonitorStatus, MonitorTask, PriceZone, ScreenRunResult, SymbolSearchResult, Timeframe } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -39,6 +39,26 @@ export const api = {
   indicators: (symbol: string, timeframe: Timeframe, start: string, end: string) =>
     request<ChartIndicatorPoint[]>(
       `/api/symbols/${encodeURIComponent(symbol)}/indicators?${new URLSearchParams({ timeframe, start, end })}`,
+    ),
+  benchmarkComparison: (
+    symbol: string,
+    timeframe: Timeframe,
+    start: string,
+    end: string,
+    startAt?: string,
+    endAt?: string,
+  ) => {
+    const params = new URLSearchParams({ timeframe, start, end });
+    if (startAt) params.set("start_at", startAt);
+    if (endAt) params.set("end_at", endAt);
+    return request<BenchmarkComparison>(
+      `/api/symbols/${encodeURIComponent(symbol)}/benchmark-comparison?${params}`,
+    );
+  },
+  syncChartData: (symbol: string, payload: ChartDataSyncRequest) =>
+    request<ChartDataSyncResult>(
+      `/api/symbols/${encodeURIComponent(symbol)}/chart-data/sync`,
+      { method: "POST", body: JSON.stringify(payload) },
     ),
   zones: (symbol: string, timeframe: Timeframe, asOf: string) =>
     request<PriceZone[]>(
