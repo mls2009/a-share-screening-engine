@@ -37,6 +37,7 @@ export interface UiMetricOperand {
 export type UiOperand = UiConstantOperand | UiMetricOperand;
 
 export interface UiConditionNode {
+  disabled?: boolean;
   id: string;
   kind: "condition";
   metric: string;
@@ -51,6 +52,7 @@ export interface UiConditionNode {
 }
 
 export interface UiGroupNode {
+  disabled?: boolean;
   id: string;
   kind: "group";
   logic: "and" | "or" | "not";

@@ -24,14 +24,14 @@ const comparatorLabels: Record<PriceComparator, string> = {
   cross_below: "向下跌破",
 };
 
-export function MonitorPage({ client = api }: { client?: MonitorClient }) {
+export function MonitorPage({ client = api, initialDraft }: { client?: MonitorClient; initialDraft?: {symbol:string;price:number} }) {
   const [tasks, setTasks] = useState<MonitorTask[]>([]);
   const [status, setStatus] = useState<MonitorStatus>();
   const [signals, setSignals] = useState<MonitorSignal[]>([]);
   const [name, setName] = useState("价格点位提醒");
-  const [symbols, setSymbols] = useState("600519.SH");
+  const [symbols, setSymbols] = useState(initialDraft?.symbol ?? "600519.SH");
   const [comparator, setComparator] = useState<PriceComparator>("cross_above");
-  const [threshold, setThreshold] = useState(1500);
+  const [threshold, setThreshold] = useState(initialDraft?.price ?? 1500);
   const [cooldown, setCooldown] = useState(300);
   const [scope, setScope] = useState<"watchlist" | "market">("watchlist");
   const [message, setMessage] = useState("");

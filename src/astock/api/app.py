@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from astock.api.dependencies import ApiContext
+from astock.api.workbench import register_workbench
 from astock.backtest.models import BacktestRequest
 from astock.backtest.service import BacktestDataError, BacktestService
 from astock.config import Settings
@@ -20,6 +21,7 @@ from astock.data.market_sync import MarketSyncService
 from astock.data.providers.akshare import AkShareProvider
 from astock.data.providers.routing import build_default_market_providers
 from astock.data.providers.tencent import TencentQuoteProvider
+from astock.data.sectors import SectorStore
 from astock.data.service import MarketDataService
 from astock.domain.market import Adjustment, Timeframe
 from astock.features.benchmark import BenchmarkDataError, BenchmarkService
@@ -39,9 +41,10 @@ from astock.live.scheduler import MonitoringScheduler
 from astock.live.service import MonitoringService
 from astock.notifications.feishu import FeishuNotifier
 from astock.notifications.outbox import OutboxWorker
-from astock.screening.annotations import condition_marks
+from astock.screening.annotations import condition_marks, entry_histories
 from astock.screening.catalog import DEFAULT_CATALOG
 from astock.screening.models import Node
+from astock.screening.scheduler import ScreenScheduleRunner
 from astock.screening.service import ScreenDefinitionError, ScreeningService
 from astock.storage.bars import BarStore
 from astock.storage.database import Database
@@ -54,6 +57,12 @@ class ScreenRunRequest(BaseModel):
     as_of: date
     limit: int = Field(default=100, ge=1, le=1000)
     offset: int = Field(default=0, ge=0)
+    scope: Literal["market", "watchlist", "run", "board"] = "market"
+    source_run_id: UUID | None = None
+    boards: list[str] = Field(default_factory=list)
+    instrument_type: Literal["all", "stock", "etf"] = "all"
+    extra_timeframes: list[Timeframe] = Field(default_factory=list)
+    extra_columns: list[str] = Field(default_factory=list, max_length=200)
 
 
 class EnabledRequest(BaseModel):
@@ -147,6 +156,10 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
     monitor_scheduler = MonitoringScheduler(monitoring)
     data_update_scheduler = DailyMarketUpdateScheduler(context.market_sync)
     app.state.monitoring = monitoring
+    screen_scheduler = ScreenScheduleRunner(context, getattr(monitoring, "outbox", None))
+    app.state.screen_scheduler = screen_scheduler
+    app.add_event_handler("startup", screen_scheduler.start)
+    app.add_event_handler("shutdown", screen_scheduler.stop)
     app.state.monitor_scheduler = monitor_scheduler
     app.state.data_update_scheduler = data_update_scheduler
     app.add_event_handler("startup", data_update_scheduler.start)
@@ -155,10 +168,24 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
     feature_builder = FeatureBuilder(
         context.bar_store, MarketFeatureStore(context.database), context.database
     )
+    sector_store = SectorStore(context.database)
+
+    @app.get("/api/sectors/status")
+    def sector_status():
+        return sector_store.status()
+
+    @app.post("/api/sectors/sync", status_code=202)
+    def sync_sectors():
+        sector_store.start()
+        return sector_store.status()
 
     @app.get("/api/catalog")
     def catalog() -> list[dict]:
-        return _catalog()
+        result = _catalog()
+        for metric in result:
+            if metric["key"] in {"em_industry", "em_concept"}:
+                metric["choices"] = sector_store.choices(metric["key"])
+        return result
 
     @app.get("/api/watchlist")
     def list_watchlist():
@@ -180,7 +207,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         sources = json.loads(existing[0]) if existing else []
         if payload.run_id is not None:
             source = con.execute(
-                """select r.as_of_date, r.condition_tree, m.explanation, r.mode
+                """select r.as_of_date, r.condition_tree, m.explanation, r.mode, m.feature_snapshot
                 from screen_runs r join screen_matches m on r.run_id = m.run_id
                 where r.run_id = ? and m.symbol = ?""",
                 [payload.run_id, payload.symbol],
@@ -192,6 +219,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
                 histories = {timeframe: MarketFeatureStore(context.database).read_history(
                     payload.symbol, timeframe, source[0], 1000, enrich=False
                 ) for timeframe in Timeframe}
+                histories = entry_histories(histories, source[3], source[0], json.loads(source[4]))
                 sources.append({"run_id": str(payload.run_id), "as_of": source[0].isoformat(),
                                 "tree": stored_tree, "explanation": stored_result,
                                 "marks": condition_marks(stored_tree, stored_result, histories),
@@ -202,6 +230,8 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             [payload.symbol, security[0], json.dumps(sources, ensure_ascii=False)],
         )
         return {"symbol": payload.symbol, "name": security[0], "sources": sources}
+
+    register_workbench(app, context, add_watchlist, WatchlistRequest)
 
     @app.delete("/api/watchlist/{symbol}", status_code=204)
     def remove_watchlist(symbol: str):
@@ -290,6 +320,21 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
 
     @app.post("/api/screens/run")
     def run_screen(request: ScreenRunRequest):
+        scope_symbols = None
+        con = context.database.connection
+        if request.scope == "watchlist":
+            scope_symbols = [row[0] for row in con.execute("select symbol from watchlist").fetchall()]
+        elif request.scope == "run":
+            if request.source_run_id is None or not con.execute("select 1 from screen_runs where run_id = ?", [request.source_run_id]).fetchone():
+                return JSONResponse(status_code=422, content={"message": "请选择有效的来源筛选"})
+            scope_symbols = [row[0] for row in con.execute("select symbol from screen_matches where run_id = ?", [request.source_run_id]).fetchall()]
+        elif request.scope == "board":
+            if not request.boards:
+                return JSONResponse(status_code=422, content={"message": "请至少选择一个板块"})
+            scope_symbols = [row[0] for row in con.execute("select symbol from symbols where board in (select unnest(?))", [request.boards]).fetchall()]
+        if request.instrument_type != "all":
+            typed = {row[0] for row in con.execute("select symbol from symbols where instrument_type = ?", [request.instrument_type]).fetchall()}
+            scope_symbols = sorted(typed if scope_symbols is None else typed.intersection(scope_symbols))
         try:
             result = context.screening.run(
                 request.tree,
@@ -297,6 +342,10 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
                 mode=request.mode,
                 limit=request.limit,
                 offset=request.offset,
+                scope_symbols=scope_symbols,
+                scope_metadata=request.model_dump(mode="json", include={"scope", "source_run_id", "boards", "instrument_type"}),
+                extra_timeframes=request.extra_timeframes,
+                extra_columns=request.extra_columns,
             )
         except ScreenDefinitionError as error:
             return JSONResponse(
@@ -319,7 +368,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         run_id: UUID,
         limit: int = Query(default=100, ge=1, le=1000),
         offset: int = Query(default=0, ge=0),
-        sort_by: Literal["rank", "symbol", "close", "return_20", "volume_ratio_20"] | None = None,
+        sort_by: str | None = None,
         sort_direction: Literal["asc", "desc"] | None = None,
     ) -> dict:
         row = context.database.connection.execute(

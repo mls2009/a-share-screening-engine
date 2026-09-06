@@ -49,3 +49,5 @@ class Database:
     def migrate(self) -> None:
         sql = files("astock.storage").joinpath("schema.sql").read_text(encoding="utf-8")
         self.connection.execute(sql)
+        # Persist DDL now: DuckDB can fail to replay ALTER defaults after a forced stop.
+        self.connection.execute("checkpoint")

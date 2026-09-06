@@ -48,6 +48,14 @@ class FeishuNotifier:
 
     @staticmethod
     def _card(message: dict) -> dict:
+        if message.get("kind") == "screen_summary":
+            return {"header": {"template": "blue", "title": {"tag": "plain_text", "content": "AStock 收盘选股结果"}},
+                    "elements": [{"tag": "markdown", "content":
+                        f"{message['task_name']} · {message['date']}\n命中 {message['matches']} 只\n"
+                        + ("首次执行或模板版本改变，建立新的对比基线。\n" if message.get("baseline") else "")
+                        + f"新入选 {len(message['entered'])} 只：" + "、".join(message['entered'][:30])
+                        + f"\n退出 {len(message['exited'])} 只：" + "、".join(message['exited'][:30])
+                        + "\n名单最多展示30只，完整结果见工作台历史记录。"}]}
         comparator = {
             "above": "达到上方",
             "below": "达到下方",

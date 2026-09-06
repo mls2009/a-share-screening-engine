@@ -242,6 +242,108 @@ def test_watchlist_preserves_screen_source_and_deduplicates(tmp_path: Path) -> N
     assert client.get("/api/watchlist").json() == []
 
 
+def test_workbench_details_comparison_scope_and_export(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    run = client.post("/api/screens/run", json={"tree": CONDITION, "as_of": "2026-08-20"}).json()
+    run_id = run["run_id"]
+    assert run["matches"][0]["features"]["metric_values"]["1d:return_20"] == 35
+    detail = client.get(f"/api/workbench/runs/{run_id}/detail/600001.SH").json()
+    assert detail["source"]["explanation"]["result"] == "true"
+    assert detail["recent"][0]["date"] == "2026-08-20"
+    assert detail["recent"][0]["evaluation"]["result"] == "true"
+    export = client.get(f"/api/workbench/runs/{run_id}/export?columns=1d:return_20")
+    assert "600001.SH" in export.text and "35" in export.text
+    assert "text/csv" in export.headers["content-type"]
+    batch = client.post(f"/api/workbench/runs/{run_id}/watchlist", json={"all_matches": True})
+    assert batch.json() == {"added": 1}
+    selected = client.post("/api/screens/run", json={"tree": CONDITION, "as_of": "2026-08-20", "scope": "watchlist"}).json()
+    assert selected["universe_size"] == 1
+    assert client.post("/api/screens/run", json={"tree": CONDITION, "as_of": "2026-08-20", "scope": "run"}).status_code == 422
+    stricter = {**CONDITION, "right": {"kind": "constant", "value": 40, "unit": "percent"}}
+    empty = client.post("/api/screens/run", json={"tree": stricter, "as_of": "2026-08-20", "scope": "run", "source_run_id": run_id}).json()
+    assert empty["match_count"] == 0
+    diff = client.get(f"/api/workbench/runs/{empty['run_id']}/compare/{run_id}").json()
+    assert diff["same_definition"] is False
+    assert diff["same_scope"] is False
+    assert diff["exited"][0]["symbol"] == "600001.SH"
+    assert len(client.get("/api/workbench/runs").json()) == 3
+
+
+def test_workbench_support_condition_uses_same_values_as_screen(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    zone = client.post("/api/symbols/600001.SH/zones/manual", json={
+        "timeframe": "1d", "as_of_date": "2026-08-20", "zone_kind": "support",
+        "geometry": "horizontal", "lower_price": 11, "center_price": 11,
+        "upper_price": 11, "anchors": [["2026-08-20", 11]],
+    })
+    assert zone.status_code == 201
+    tree = {**CONDITION, "metric": "support_distance", "operator": "lte", "right": {"kind": "constant", "value": 10, "unit": "percent"}}
+    run = client.post("/api/screens/run", json={"tree": tree, "as_of": "2026-08-20"}).json()
+    assert run["match_count"] == 1
+    detail = client.get(f"/api/workbench/runs/{run['run_id']}/detail/600001.SH").json()
+    assert detail["recent"][-1]["evaluation"]["result"] == "true"
+
+
+def test_extra_result_columns_include_enriched_metrics(tmp_path: Path) -> None:
+    client, database = _client(tmp_path)
+    database.connection.execute("insert into security_status(symbol,trade_date,board,is_st,is_suspended) values ('600001.SH','2026-08-20','main',true,false)")
+    run = client.post("/api/screens/run", json={"tree": CONDITION, "as_of": "2026-08-20", "extra_columns": ["1d:is_st"]}).json()
+    assert run["matches"][0]["features"]["metric_values"].get("1d:is_st") is True
+
+
+def test_eastmoney_sector_filter_labels_and_current_membership_warning(tmp_path: Path) -> None:
+    from astock.data.sectors import SectorStore
+    client, database = _client(tmp_path)
+    store = SectorStore(database)
+    store.replace([{"kind":"concept","code":"BK1","name":"存储芯片","members":["600001"]},
+                   {"kind":"industry","code":"BK2","name":"半导体","members":["600001"]}], date(2026,9,6))
+    catalog = client.get("/api/catalog").json()
+    assert next(item for item in catalog if item["key"] == "em_concept")["choices"][0]["value"] == "存储芯片"
+    tree = {**CONDITION,"metric":"em_concept","operator":"in","right":{"kind":"constant","value":["存储芯片"],"unit":"category"}}
+    run = client.post("/api/screens/run", json={"tree":tree,"as_of":"2026-08-20"}).json()
+    assert run["match_count"] == 1
+    assert run["matches"][0]["features"]["em_industry"] == ["半导体"]
+    assert any("当前成分" in warning for warning in run["diagnostics"]["warnings"])
+    assert client.get("/api/sectors/status").json()["concepts"] == 1
+    detail = client.get(f"/api/workbench/runs/{run['run_id']}/detail/600001.SH").json()
+    assert detail["recent"][-1]["evaluation"]["result"] == "unknown"
+    latest = client.get(f"/api/workbench/runs/{run['run_id']}/detail/600001.SH?latest=true").json()
+    assert latest["source"]["explanation"]["result"] == "true"
+
+
+def test_live_detail_marks_keep_the_entry_snapshot_date(tmp_path: Path) -> None:
+    client, database = _client(tmp_path)
+    run = client.post("/api/screens/run", json={"tree": CONDITION, "as_of": "2026-08-20"}).json()
+    database.connection.execute("update screen_runs set mode='live',as_of_date='2026-08-21' where run_id=?", [run["run_id"]])
+    detail = client.get(f"/api/workbench/runs/{run['run_id']}/detail/600001.SH").json()
+    assert detail["source"]["marks"][0]["date"] == "2026-08-21"
+    assert detail["recent"][-1]["date"] == "2026-08-20"
+
+
+def test_dynamic_column_sort_happens_before_paging(tmp_path: Path) -> None:
+    client, database = _client(tmp_path)
+    database.connection.execute("insert into symbols(symbol,name,exchange,board,is_listed) values ('600002.SH','股票二','SH','main',true)")
+    database.connection.execute("insert into market_features(symbol,timeframe,feature_date,feature_version,return_20) values ('600002.SH','1d','2026-08-20','v1',60)")
+    run = client.post("/api/screens/run", json={"tree": CONDITION, "as_of": "2026-08-20", "limit": 1}).json()
+    page = client.get(f"/api/screens/runs/{run['run_id']}?limit=1&sort_by=1d:return_20&sort_direction=desc").json()
+    assert page["matches"][0]["symbol"] == "600002.SH"
+    second = client.get(f"/api/screens/runs/{run['run_id']}?limit=1&offset=1&sort_by=1d:return_20&sort_direction=desc").json()
+    assert second["matches"][0]["symbol"] == "600001.SH"
+
+
+def test_screen_schedule_runs_only_after_close_and_once(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    template = client.post("/api/screens/templates", json={"name": "每日筛选", "tree": CONDITION}).json()
+    identifier = template["template_id"]
+    assert client.put(f"/api/workbench/schedules/{identifier}", json={"enabled": True, "notify": True}).status_code == 422
+    assert client.put(f"/api/workbench/schedules/{identifier}", json={"enabled": True}).status_code == 200
+    runner = client.app.state.screen_scheduler
+    assert runner.run_due(datetime(2026, 8, 20, 15, tzinfo=ZoneInfo("Asia/Shanghai"))) == 0
+    assert runner.run_due(datetime(2026, 8, 20, 17, tzinfo=ZoneInfo("Asia/Shanghai"))) == 1
+    assert runner.run_due(datetime(2026, 8, 20, 18, tzinfo=ZoneInfo("Asia/Shanghai"))) == 0
+    assert client.get("/api/workbench/schedules").json()[0]["last_date"] == "2026-08-20"
+
+
 def test_symbol_search_matches_etf_code_and_chinese_name(tmp_path: Path) -> None:
     client, database = _client(tmp_path)
     database.connection.executemany(

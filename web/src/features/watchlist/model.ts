@@ -8,7 +8,7 @@ export interface SourceNode {
   timeframe?: Timeframe;
   operator?: string;
   lookback?: number;
-  right?: { kind: string; metric?: string; timeframe?: Timeframe; value?: unknown };
+  right?: { kind: string; metric?: string; timeframe?: Timeframe; value?: unknown; multiplier?: number };
 }
 export interface WatchSource {
   run_id: string;
@@ -25,6 +25,7 @@ export interface WatchItem {
   added_at?: string;
 }
 export interface ConditionMark {
+  path?: string;
   metric: string;
   timeframe: Timeframe;
   date: string;

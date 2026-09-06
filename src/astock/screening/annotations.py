@@ -6,24 +6,37 @@ from astock.screening.evaluator import TruthValue, evaluate_tree
 from astock.screening.models import ConditionNode
 
 
+def entry_histories(histories: dict, mode: str, as_of, snapshot: dict) -> dict:
+    """Keep intraday evidence independent of subsequently downloaded closing bars."""
+    if mode != "live":
+        return histories
+    result = {timeframe: [row for row in rows if row["feature_date"] < as_of]
+              for timeframe, rows in histories.items()}
+    result[Timeframe.DAY] = [{**snapshot, "feature_date": as_of}, *result.get(Timeframe.DAY, [])]
+    return result
+
+
 def condition_marks(tree: dict, explanation: dict, histories: dict) -> list[dict]:
     marks = []
+    active_path = "root"
 
     def add(metric, timeframe, rows, start, end, label):
         if not rows or start >= len(rows):
             return
         end = min(end, len(rows) - 1)
-        marks.append({"metric": metric, "timeframe": timeframe,
+        marks.append({"metric": metric, "timeframe": timeframe, "path": active_path,
                       "date": str(rows[start]["feature_date"]),
                       "startDate": str(rows[end]["feature_date"]),
                       "periods": end - start + 1, "label": label})
 
-    def visit(node, result):
+    def visit(node, result, path="root"):
+        nonlocal active_path
+        active_path = path
         if result["result"] != "true" or node.get("logic") == "not":
             return
         if node["kind"] == "group":
-            for child, child_result in zip(node["children"], result["children"], strict=True):
-                visit(child, child_result)
+            for index, (child, child_result) in enumerate(zip(node["children"], result["children"], strict=True)):
+                visit(child, child_result, f"{path}.children[{index}]")
             return
         metric, timeframe = node["metric"], node["timeframe"]
         rows = histories.get(Timeframe(timeframe), [])

@@ -5,9 +5,11 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from astock.data.providers.tencent import SnapshotBatchResult
+from astock.data.sectors import SECTOR_KEYS, SectorStore
 from astock.data.snapshots import overlay_snapshot
 from astock.domain.market import Timeframe
 from astock.features.store import MarketFeatureStore
+from astock.screening.catalog import DEFAULT_CATALOG
 from astock.screening.evaluator import Evaluation, TruthValue, evaluate_tree
 from astock.screening.models import ConditionNode, GroupNode, MetricOperand, Node, Operator
 from astock.screening.validation import ScreenValidationIssue, validate_tree
@@ -107,6 +109,7 @@ class ScreeningService:
         snapshot_provider: SnapshotProvider | None = None,
     ) -> None:
         self.connection = database.connection
+        self.database = database
         self.feature_store = feature_store
         self.snapshot_provider = snapshot_provider
 
@@ -121,13 +124,19 @@ class ScreeningService:
         sort_by: str | None = None,
         sort_direction: Literal["asc", "desc"] | None = None,
     ) -> list[dict]:
+        metric_sort = None
+        if sort_by and ":" in sort_by:
+            timeframe_key, metric_key = sort_by.split(":", 1)
+            if timeframe_key in {item.value for item in Timeframe} and DEFAULT_CATALOG.get(metric_key):
+                spec = DEFAULT_CATALOG.get(metric_key)
+                metric_sort = f"json_extract_string(feature_snapshot, '$.metric_values.\"{sort_by}\"')" if spec.unit.value in {"category", "boolean"} else f"try_cast(json_extract(feature_snapshot, '$.metric_values.\"{sort_by}\"') as double)"
         order_by = {
             "rank": "match_rank",
             "symbol": "coalesce(json_extract_string(feature_snapshot, '$.name'), symbol)",
             "close": "try_cast(json_extract(feature_snapshot, '$.close') as double)",
             "return_20": "try_cast(json_extract(feature_snapshot, '$.return_20') as double)",
             "volume_ratio_20": "try_cast(json_extract(feature_snapshot, '$.volume_ratio_20') as double)",
-        }.get(sort_by or "", "match_rank")
+        }.get(sort_by or "", metric_sort or "match_rank")
         direction = "desc" if sort_by is not None and sort_direction == "desc" else "asc"
         cursor = self.connection.execute(
             f"""
@@ -155,6 +164,10 @@ class ScreeningService:
         limit: int = 100,
         offset: int = 0,
         mode: Literal["close", "live"] = "close",
+        scope_symbols: list[str] | None = None,
+        scope_metadata: dict | None = None,
+        extra_timeframes: list[Timeframe] | None = None,
+        extra_columns: list[str] | None = None,
     ) -> ScreenRunResult:
         issues = self.validate(tree)
         if issues:
@@ -163,8 +176,11 @@ class ScreeningService:
             "select symbol, name, board, is_listed, listed_on, delisted_on from symbols order by symbol"
         ).fetchall()
         symbols = []
+        allowed = set(scope_symbols) if scope_symbols is not None else None
         uncertain = 0
         for symbol, _, _, is_listed, listed_on, delisted_on in securities:
+            if allowed is not None and symbol not in allowed:
+                continue
             if listed_on is None or (not is_listed and delisted_on is None):
                 uncertain += 1
             if listed_on is not None and listed_on > as_of:
@@ -174,12 +190,21 @@ class ScreeningService:
             if not is_listed and delisted_on is None:
                 continue
             symbols.append(symbol)
-        diagnostics = {"conditions": {}, "warnings": [], "data_dates": {}}
+        diagnostics = {"conditions": {}, "warnings": [], "data_dates": {}, "scope": scope_metadata or {"scope": "market"}}
         if uncertain:
             diagnostics["warnings"].append(
                 f"{uncertain} 只股票缺少上市或退市日期；兼容当前在市记录，退市日期未知者保守排除。"
             )
         timeframes, history_limit, metrics = _requirements(tree)
+        sector_values = SectorStore(self.database).values()
+        if metrics & SECTOR_KEYS.keys():
+            diagnostics["warnings"].append("东方财富行业/概念按当前成分名单筛选，不代表数据日期当时的归属；历史回测不支持此类条件。")
+        timeframes.update(extra_timeframes or [])
+        for column in extra_columns or []:
+            frame, _, key = column.partition(":")
+            if frame in {item.value for item in Timeframe} and DEFAULT_CATALOG.get(key):
+                timeframes.add(Timeframe(frame))
+                metrics.add(key)
         batch = SnapshotBatchResult((), len(symbols), 0)
         if mode == "live":
             if self.snapshot_provider is None:
@@ -236,15 +261,17 @@ class ScreeningService:
             )
         identities = {row[0]: {"name": row[1], "board": row[2]} for row in securities if row[0] in symbols}
 
-        def record(evaluation):
+        def record(evaluation, symbol):
             if evaluation.children:
                 for child in evaluation.children:
-                    record(child)
+                    record(child, symbol)
                 return
             counts = diagnostics["conditions"].setdefault(
-                evaluation.path, {"true": 0, "false": 0, "unknown": 0, "reasons": {}}
+                evaluation.path, {"true": 0, "false": 0, "unknown": 0, "reasons": {}, "unknown_symbols": []}
             )
             counts[evaluation.result.value] += 1
+            if evaluation.result == TruthValue.UNKNOWN:
+                counts["unknown_symbols"].append({"symbol": symbol, "name": identities.get(symbol, {}).get("name", symbol), "reason": evaluation.reason or "缺少指标数据"})
             if evaluation.reason:
                 counts["reasons"][evaluation.reason] = counts["reasons"].get(evaluation.reason, 0) + 1
 
@@ -263,16 +290,22 @@ class ScreeningService:
                         history[Timeframe.DAY], snapshot
                     )
             for timeframe, rows in history.items():
+                if rows:
+                    rows[0].update(sector_values.get(symbol, {}))
                 stamp = str(rows[0].get("timestamp") or rows[0].get("feature_date") or "") if rows else ""
                 dates = diagnostics["data_dates"].setdefault(timeframe.value, {"oldest": None, "latest": None})
                 if stamp:
                     dates["oldest"] = min(dates["oldest"] or stamp, stamp)
                     dates["latest"] = max(dates["latest"] or stamp, stamp)
             explanation = evaluate_tree(tree, history)
-            record(explanation)
+            record(explanation, symbol)
             if explanation.result != TruthValue.TRUE:
                 continue
             snapshot = dict(history.get(Timeframe.DAY, [{}])[0]) if history.get(Timeframe.DAY) else {}
+            snapshot["metric_values"] = {f"{timeframe.value}:{key}": value
+                                         for timeframe, rows in history.items() if rows
+                                         for key, value in rows[0].items()
+                                         if DEFAULT_CATALOG.get(key)}
             snapshot.update({key: value for key, value in identities.get(symbol, {}).items() if key not in snapshot})
             rank_value = None
             if rank is not None:

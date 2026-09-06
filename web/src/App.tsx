@@ -9,6 +9,7 @@ import {
 import { lazy, Suspense, useState } from "react";
 
 import { ScreenerPage } from "./features/screener/ScreenerPage";
+import type { SourceNode } from "./features/watchlist/model";
 
 const ChartPage = lazy(() => import("./features/chart/ChartPage").then((module) => ({ default: module.ChartPage })));
 const BacktestPage = lazy(() => import("./features/backtest/BacktestPage").then((module) => ({ default: module.BacktestPage })));
@@ -28,6 +29,8 @@ const pages = [
 export function App() {
   const [page, setPage] = useState<Page>("screener");
   const [chartSymbol, setChartSymbol] = useState("600519.SH");
+  const [backtestDraft, setBacktestDraft] = useState<{symbol:string;tree:SourceNode}>();
+  const [monitorDraft, setMonitorDraft] = useState<{symbol:string;price:number}>();
   return (
     <div className="app-frame">
       <aside className="rail">
@@ -58,7 +61,7 @@ export function App() {
         </div>
       </aside>
       {page === "screener" ? (
-        <ScreenerPage onOpenChart={(symbol) => { setChartSymbol(symbol); setPage("chart"); }} />
+        <ScreenerPage onOpenChart={(symbol) => { setChartSymbol(symbol); setPage("chart"); }} onBacktest={(symbol,tree)=>{setBacktestDraft({symbol,tree});setPage("backtest");}} onMonitor={(symbol,price)=>{setMonitorDraft({symbol,price});setPage("monitor");}} />
       ) : page === "watchlist" ? (
         <Suspense fallback={<main className="empty-page">正在加载自选股…</main>}><WatchlistPage /></Suspense>
       ) : page === "chart" ? (
@@ -67,11 +70,11 @@ export function App() {
         </Suspense>
       ) : page === "backtest" ? (
         <Suspense fallback={<main className="empty-page"><p className="eyebrow">LOADING BACKTEST ENGINE</p></main>}>
-          <BacktestPage />
+          <BacktestPage initialDraft={backtestDraft}/>
         </Suspense>
       ) : (
         <Suspense fallback={<main className="empty-page"><p className="eyebrow">LOADING LIVE MONITOR</p></main>}>
-          <MonitorPage />
+          <MonitorPage initialDraft={monitorDraft}/>
         </Suspense>
       )}
     </div>

@@ -254,6 +254,8 @@ METRICS = [
         supported_modes=frozenset({"close"}),
     ),
     MetricSpec("board", "所属板块", Unit.CATEGORY, operators=CATEGORY_OPERATORS, group="attributes", family="board", choices=BOARD_CHOICES, multiple=True),
+    MetricSpec("em_industry", "东方财富行业", Unit.CATEGORY, timeframes=frozenset({Timeframe.DAY}), operators=MEMBERSHIP_OPERATORS, group="attributes", family="em_industry", multiple=True, supported_modes=frozenset({"close", "live"})),
+    MetricSpec("em_concept", "东方财富概念", Unit.CATEGORY, timeframes=frozenset({Timeframe.DAY}), operators=MEMBERSHIP_OPERATORS, group="attributes", family="em_concept", multiple=True, supported_modes=frozenset({"close", "live"})),
     MetricSpec("pattern_type", "K 线形态", Unit.CATEGORY, operators=CATEGORY_OPERATORS, group="candlestick", family="pattern", choices=PATTERN_CHOICES, multiple=True),
     MetricSpec("pattern_strength", "形态强度", Unit.SCORE, group="candlestick", family="pattern_strength"),
     MetricSpec("support_distance", "距支撑位", Unit.PERCENT, group="trend", family="support_distance"),

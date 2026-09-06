@@ -1,7 +1,9 @@
 import { Brackets, Check, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
 
 import type { MetricChoice, MetricSpec, Timeframe, UiConditionNode, UiGroupNode, UiNode } from "../../types";
-import { createCondition, createGroup, removeNode, updateNode } from "./treeModel";
+import { cloneNode, createCondition, createGroup, moveNode, removeNode, updateNode } from "./treeModel";
+import { metricHelp, metricLabel } from "./presentation";
 
 const operatorLabels: Record<string, string> = {
   eq: "等于", ne: "不等于", gt: "大于", gte: "至少", lt: "小于", lte: "至多",
@@ -116,6 +118,7 @@ function ChoicePanel({
   onChange: (values: string[]) => void;
 }) {
   const choices = metric.choices ?? [];
+  const [query, setQuery] = useState("");
   const selectedLabels = choices.filter((choice) => selected.includes(choice.value)).map((choice) => choice.label);
   const toggle = (choice: MetricChoice) => {
     if (selected.includes(choice.value)) {
@@ -127,11 +130,12 @@ function ChoicePanel({
   return (
     <details className="choice-panel">
       <summary aria-label={`选择${metric.label}选项`}>
-        <span>{selectedLabels.length <= 2 ? selectedLabels.join(" / ") : `已选 ${selectedLabels.length} 项`}</span>
+        <span>{!selectedLabels.length ? "请选择（未同步时请先更新板块）" : selectedLabels.length <= 2 ? selectedLabels.join(" / ") : `已选 ${selectedLabels.length} 项`}</span>
         <ChevronDown size={13} />
       </summary>
       <div className="choice-popover">
-        {choices.map((choice) => (
+        <input aria-label={`搜索${metric.label}选项`} placeholder="搜索板块/选项名称" value={query} onChange={event=>setQuery(event.target.value)} />
+        {choices.filter(choice=>selected.includes(choice.value)||choice.label.includes(query)).map((choice) => (
           <label key={choice.value}>
             <input type="checkbox" checked={selected.includes(choice.value)} onChange={() => toggle(choice)} />
             <i><Check size={11} /></i><span>{choice.label}</span>
@@ -154,6 +158,7 @@ function ConditionRow({
   onRemove: () => void;
 }) {
   const spec = catalog.find((metric) => metric.key === node.metric) ?? catalog[0];
+  const [search, setSearch] = useState("");
   if (!spec) return null;
   const group = metricGroup(spec);
   const groups = [...new Set(catalog.filter((metric) => metric.visible !== false).map(metricGroup))];
@@ -184,8 +189,13 @@ function ConditionRow({
   };
 
   return (
-    <div className="condition-row">
+    <div className={`condition-row ${node.disabled ? "condition-disabled" : ""}`} draggable onDragStart={(event) => event.dataTransfer.setData("text/plain", node.id)}>
       <div className="condition-path">
+        <input aria-label="搜索指标" placeholder="搜索指标：均线、涨停…" value={search} onChange={(event) => setSearch(event.target.value)} />
+        {search && <select aria-label="搜索结果" value="" onChange={(event) => {
+          const metric = catalog.find((item) => item.key === event.target.value);
+          if (metric) { onUpdate(nextCondition(node, { value: metricFamily(metric), label: metric.label, family: metricFamily(metric), metrics: [metric] }, spec)); setSearch(""); }
+        }}><option value="">选择匹配指标</option>{catalog.filter((item) => item.visible !== false && `${item.label} ${item.key}`.toLowerCase().includes(search.toLowerCase())).map((item) => <option key={item.key} value={item.key}>{metricLabel(item.key, catalog)}</option>)}</select>}
         <select aria-label="指标分类" value={group} onChange={(event) => changeGroup(event.target.value)}>
           {groups.map((item) => <option key={item} value={item}>{groupLabels[item] ?? item}</option>)}
         </select>
@@ -214,7 +224,7 @@ function ConditionRow({
         {operators.map((operator) => <option key={operator} value={operator}>{operatorLabels[operator] ?? operator}</option>)}
       </select>
       {spec.multiple ? (
-        <ChoicePanel metric={spec} selected={node.selectedValues ?? [spec.choices?.[0]?.value ?? ""]} onChange={(selectedValues) => onUpdate({ ...node, selectedValues })} />
+        <ChoicePanel key={spec.key} metric={spec} selected={node.selectedValues ?? []} onChange={(selectedValues) => onUpdate({ ...node, selectedValues })} />
       ) : spec.unit === "boolean" ? (
         <select aria-label="比较值" value={node.right.kind === "constant" ? node.right.value : ""} onChange={(event) => onUpdate({ ...node, right: { kind: "constant", value: event.target.value } })}>
           {(spec.choices ?? []).map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
@@ -247,8 +257,9 @@ function ConditionRow({
           ) : metricOperand ? (
             <div className="metric-operand">
               <select aria-label="对比指标" value={metricOperand.metric} onChange={(event) => onUpdate({ ...node, right: { ...metricOperand, metric: event.target.value } })}>
-                {metricPeers.map((metric) => <option key={metric.key} value={metric.key}>{metric.label}</option>)}
+                {metricPeers.map((metric) => <option key={metric.key} value={metric.key}>{metricLabel(metric.key, catalog)}</option>)}
               </select>
+              <select aria-label="对比指标周期" value={metricOperand.timeframe} onChange={(event) => onUpdate({ ...node, right: { ...metricOperand, timeframe: event.target.value as Timeframe } })}>{(catalog.find((item) => item.key === metricOperand.metric)?.timeframes ?? spec.timeframes).map((value) => <option key={value} value={value}>{timeframeLabels[value]}</option>)}</select>
               <input aria-label="倍数" type="number" step="0.1" value={metricOperand.multiplier} onChange={(event) => onUpdate({ ...node, right: { ...metricOperand, multiplier: Number(event.target.value) } })} />
             </div>
           ) : null}
@@ -264,16 +275,18 @@ function ConditionRow({
         </div>
       )}
       <button type="button" className="icon-button danger" aria-label="删除条件" onClick={onRemove}><Trash2 size={15} /></button>
+      <button type="button" onClick={() => onUpdate({ ...node, disabled: !node.disabled })}>{node.disabled ? "启用条件" : "暂停条件"}</button>
+      <details className="metric-help"><summary>公式与例子</summary><p>{metricHelp(spec)}</p></details>
     </div>
   );
 }
 
-function Group({ node, catalog, root, onChange }: { node: UiGroupNode; catalog: MetricSpec[]; root: boolean; onChange: (tree: UiNode) => void }) {
+function Group({ node, catalog, root, onChange, onMove }: { node: UiGroupNode; catalog: MetricSpec[]; root: boolean; onChange: (tree: UiNode) => void; onMove?: (source: string, target: string) => void }) {
   const groupName = root ? "根分组" : "子分组";
   const setGroup = (next: UiGroupNode) => onChange(next);
   return (
     <section className={`condition-group ${root ? "root-group" : "nested-group"}`}>
-      <header className="group-header">
+      <header className="group-header" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); onMove?.(event.dataTransfer.getData("text/plain"), node.id); }}>
         <Brackets size={16} />
         <select aria-label="组合逻辑" value={node.logic} onChange={(event) => {
           const logic = event.target.value as UiGroupNode["logic"];
@@ -288,9 +301,9 @@ function Group({ node, catalog, root, onChange }: { node: UiGroupNode; catalog: 
       </header>
       <div className="group-children">
         {node.children.map((child) => child.kind === "condition" ? (
-          <ConditionRow key={child.id} node={child} catalog={catalog} onUpdate={(next) => setGroup(updateNode(node, child.id, () => next) as UiGroupNode)} onRemove={() => setGroup(removeNode(node, child.id) as UiGroupNode)} />
+          <div key={child.id}><ConditionRow node={child} catalog={catalog} onUpdate={(next) => setGroup(updateNode(node, child.id, () => next) as UiGroupNode)} onRemove={() => setGroup(removeNode(node, child.id) as UiGroupNode)} /><button type="button" disabled={node.logic === "not"} onClick={() => setGroup({ ...node, children: [...node.children, cloneNode(child)] })}>复制条件</button></div>
         ) : (
-          <Group key={child.id} node={child} catalog={catalog} root={false} onChange={(next) => setGroup(updateNode(node, child.id, () => next) as UiGroupNode)} />
+          <div key={child.id} draggable onDragStart={(event) => { if (event.target === event.currentTarget) event.dataTransfer.setData("text/plain", child.id); }}><Group node={child} catalog={catalog} root={false} onMove={onMove} onChange={(next) => setGroup(updateNode(node, child.id, () => next) as UiGroupNode)} /><button type="button" onClick={() => setGroup(removeNode(node, child.id) as UiGroupNode)}>删除整个分组</button></div>
         ))}
       </div>
     </section>
@@ -299,5 +312,5 @@ function Group({ node, catalog, root, onChange }: { node: UiGroupNode; catalog: 
 
 export function ConditionTree({ tree, catalog, onChange }: Props) {
   if (tree.kind !== "group") return null;
-  return <Group node={tree} catalog={catalog} root onChange={onChange} />;
+  return <Group node={tree} catalog={catalog} root onChange={onChange} onMove={(source, target) => onChange(moveNode(tree, source, target))} />;
 }

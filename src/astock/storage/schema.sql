@@ -346,3 +346,19 @@ create table if not exists notification_outbox (
   last_error varchar,
   updated_at timestamp not null default current_timestamp
 );
+
+create table if not exists eastmoney_sector_snapshot (
+  id integer primary key check(id=1),
+  observed_on date not null,
+  sectors json not null
+);
+
+create table if not exists screen_schedules (
+  definition_id uuid primary key,
+  enabled boolean not null default false,
+  notify boolean not null default false,
+  last_date date,
+  last_version integer,
+  last_run_id uuid,
+  last_error varchar
+);

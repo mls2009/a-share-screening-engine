@@ -25,6 +25,15 @@ function Harness() {
 }
 
 describe("ConditionTree", () => {
+  it("多选板块可以搜索，保留已选项", async () => {
+    render(<Harness />);
+    await userEvent.selectOptions(screen.getByRole("combobox",{name:"指标分类"}),"attributes");
+    await userEvent.click(screen.getByLabelText("选择所属板块选项"));
+    await userEvent.type(screen.getByRole("textbox",{name:"搜索所属板块选项"}),"创业");
+    expect(screen.getByRole("checkbox",{name:"创业板"})).toBeInTheDocument();
+    expect(screen.getByRole("checkbox",{name:"主板"})).toBeChecked();
+    expect(screen.queryByRole("checkbox",{name:"科创板"})).not.toBeInTheDocument();
+  });
   it("可在根分组增加条件和嵌套分组", async () => {
     render(<Harness />);
 

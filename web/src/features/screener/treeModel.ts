@@ -1,7 +1,23 @@
 import type { MetricSpec, Timeframe, UiConditionNode, UiGroupNode, UiNode, Unit } from "../../types";
 
 let sequence = 0;
-const id = (prefix: string) => `${prefix}-${++sequence}`;
+const id = (prefix: string) => `${prefix}-${Date.now()}-${++sequence}`;
+
+export function cloneNode(node: UiNode): UiNode {
+  return node.kind === "condition" ? { ...structuredClone(node), id: id("condition") }
+    : { ...node, id: id("group"), children: node.children.map(cloneNode) };
+}
+
+export function enabledNode(node: UiNode): boolean {
+  return !node.disabled && (node.kind === "condition" || node.children.some(enabledNode));
+}
+
+export function moveNode(root: UiNode, sourceId: string, groupId: string): UiNode {
+  const find = (node: UiNode, wanted: string): UiNode | undefined => node.id === wanted ? node : node.kind === "group" ? node.children.map((child) => find(child, wanted)).find(Boolean) : undefined;
+  const source = find(root, sourceId), target = find(root, groupId);
+  if (!source || !target || target.kind !== "group" || sourceId === root.id || find(source, groupId) || (target.logic === "not" && target.children.length)) return root;
+  return updateNode(removeNode(root, sourceId), groupId, (node) => node.kind === "group" ? { ...node, children: [...node.children, source] } : node);
+}
 
 export function createCondition(metric = "return_20"): UiConditionNode {
   return {
@@ -165,7 +181,7 @@ export function fromApiNode(value: unknown, metrics: MetricSpec[]): UiNode {
 
 export function toApiNode(node: UiNode, metrics: MetricSpec[]): object {
   if (node.kind === "group") {
-    return { kind: "group", logic: node.logic, children: node.children.map((child) => toApiNode(child, metrics)) };
+    return { kind: "group", logic: node.logic, children: node.children.filter(enabledNode).map((child) => toApiNode(child, metrics)) };
   }
   const metric = metrics.find((item) => item.key === node.metric);
   if (!metric) throw new Error(`未知指标：${node.metric}`);

@@ -4,6 +4,13 @@ from pathlib import Path
 from astock.storage.database import Database
 
 
+def test_migration_checkpoints_schema_changes(tmp_path: Path) -> None:
+    db = Database(tmp_path / "checkpoint.duckdb")
+    db.migrate()
+    wal = tmp_path / "checkpoint.duckdb.wal"
+    assert not wal.exists() or wal.stat().st_size == 0
+
+
 def test_database_migrates_required_tables(tmp_path: Path) -> None:
     db = Database(tmp_path / "test.duckdb")
     db.migrate()

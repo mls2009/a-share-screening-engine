@@ -7,13 +7,21 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const detail = await response.json().catch(() => null);
-    throw new Error(detail?.message ?? detail?.errors?.[0]?.message ?? `HTTP ${response.status}`);
+    throw new Error(detail?.message ?? detail?.errors?.[0]?.message ?? (typeof detail?.detail === "string" ? detail.detail : `HTTP ${response.status}`));
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
 export const api = {
+  sectorStatus: () => request<{source:string;updated_at:string|null;running:boolean;done:number;total:number;current:string;error:string;industries:number;concepts:number}>("/api/sectors/status"),
+  syncSectors: () => request<object>("/api/sectors/sync",{method:"POST"}),
+  screenSchedules: () => request<Array<{template_id:string;enabled:boolean;notify:boolean;last_date:string|null;last_error:string|null;last_run_id:string|null}>>("/api/workbench/schedules"),
+  saveScreenSchedule: (templateId:string,enabled:boolean,notify:boolean) => request<object>(`/api/workbench/schedules/${encodeURIComponent(templateId)}`,{method:"PUT",body:JSON.stringify({enabled,notify})}),
+  screenRuns: () => request<import("./features/screener/workbenchTypes").RunSummary[]>("/api/workbench/runs"),
+  screenDetail: (runId: string, symbol: string, latest = false) => request<import("./features/screener/workbenchTypes").StockDetail>(`/api/workbench/runs/${encodeURIComponent(runId)}/detail/${encodeURIComponent(symbol)}?latest=${latest}`),
+  compareRuns: (runId: string, previousId: string) => request<import("./features/screener/workbenchTypes").RunComparison>(`/api/workbench/runs/${encodeURIComponent(runId)}/compare/${encodeURIComponent(previousId)}`),
+  batchWatchlist: (runId: string, symbols: string[], allMatches: boolean) => request<{added:number}>(`/api/workbench/runs/${encodeURIComponent(runId)}/watchlist`, {method:"POST", body:JSON.stringify({symbols, all_matches:allMatches})}),
   watchlist: () => request<import("./features/watchlist/model").WatchItem[]>("/api/watchlist"),
   addWatchlist: (symbol: string, runId?: string) => request<import("./features/watchlist/model").WatchItem>("/api/watchlist", {
     method: "POST", body: JSON.stringify({ symbol, run_id: runId }),

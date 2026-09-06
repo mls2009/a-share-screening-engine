@@ -1,8 +1,10 @@
 import { ArrowUpRight, ChevronRight } from "lucide-react";
 
 import type { Evaluation, ScreenMatch } from "../../types";
+import type { MetricSpec } from "../../types";
+import { formatValue, metricLabel } from "./presentation";
 
-export type ScreenSortField = "rank" | "symbol" | "close" | "return_20" | "volume_ratio_20";
+export type ScreenSortField = string;
 export type SortDirection = "asc" | "desc";
 
 function number(value: unknown, digits = 2): string {
@@ -13,7 +15,12 @@ function leaves(evaluation: Evaluation): Evaluation[] {
   return evaluation.children.length ? evaluation.children.flatMap(leaves) : [evaluation];
 }
 
-export function ResultsTable({ matches, selected, onSelect, onOpenChart, onAddWatchlist, sortBy, sortDirection, onSort }: {
+export function ResultsTable({ matches, selected, onSelect, onOpenChart, onAddWatchlist, sortBy, sortDirection, onSort, columns, catalog = [], checked, onCheck, hideExplanation }: {
+  columns?: string[];
+  catalog?: MetricSpec[];
+  checked?: string[];
+  onCheck?: (symbol: string) => void;
+  hideExplanation?: boolean;
   matches: ScreenMatch[];
   selected?: string;
   onSelect: (match: ScreenMatch) => void;
@@ -28,24 +35,25 @@ export function ResultsTable({ matches, selected, onSelect, onOpenChart, onAddWa
     <div className="results-layout">
       <div className="results-table-wrap" role="region" aria-label="筛选结果表格" tabIndex={0}>
         <table className="results-table">
-          <thead><tr>{([
+          <thead><tr>{onCheck && <th>选择</th>}{(columns ? [["rank", "#"], ["symbol", "证券"], ...columns.map((key) => [key, metricLabel(key, catalog)])] : [
             ["rank", "#"], ["symbol", "证券"], ["close", "现价"], ["return_20", "20 周期"], ["volume_ratio_20", "量比"],
-          ] as const).map(([field, label]) => <th key={field}><button type="button" aria-label={`按 ${label} 排序`} onClick={() => onSort(field)}>{label}{sortBy === field && <span aria-hidden="true"> {sortDirection === "desc" ? "↓" : "↑"}</span>}</button></th>)}<th /></tr></thead>
+          ]).map(([field, label]) => <th key={field}><button type="button" aria-label={`按 ${label} 排序`} onClick={() => onSort(field)}>{label}{sortBy === field && <span aria-hidden="true"> {sortDirection === "desc" ? "↓" : "↑"}</span>}</button></th>)}<th /></tr></thead>
           <tbody>
             {matches.map((match) => (
               <tr key={match.symbol} className={selected === match.symbol ? "selected" : ""} onClick={() => onSelect(match)}>
+                {onCheck && <td><input type="checkbox" aria-label={`勾选 ${match.symbol}`} checked={checked?.includes(match.symbol) ?? false} onClick={(event) => event.stopPropagation()} onChange={() => onCheck(match.symbol)} /></td>}
                 <td>{String(match.rank).padStart(2, "0")}</td>
                 <td><strong>{String(match.features.name ?? match.symbol)}</strong><small>{match.symbol}</small></td>
-                <td>{number(match.features.close)}</td>
+                {columns ? columns.map((key) => {const value=formatValue(key.includes(":") ? (match.features.metric_values as Record<string, unknown> | undefined)?.[key] : match.features[key], catalog.find((item) => item.key === key.split(":").at(-1)));return <td key={key} className={key.includes("em_")?"sector-cell":undefined} title={value}>{value}</td>;}) : <><td>{number(match.features.close)}</td>
                 <td className={Number(match.features.return_20) >= 0 ? "positive" : "negative"}>{number(match.features.return_20)}%</td>
-                <td>{number(match.features.volume_ratio_20)}x</td>
+                <td>{number(match.features.volume_ratio_20)}x</td></>}
                 <td>{onAddWatchlist && <button type="button" aria-label={`加入自选 ${match.symbol}`} onClick={(event) => { event.stopPropagation(); onAddWatchlist(match.symbol); }}>+ 自选</button>}<button type="button" aria-label={`查看 ${match.symbol} K 线`} onClick={(event) => { event.stopPropagation(); onOpenChart(match.symbol); }}><ArrowUpRight size={15} /></button></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      {selected && (() => {
+      {selected && !hideExplanation && (() => {
         const match = matches.find((item) => item.symbol === selected)!;
         return (
           <aside className="explanation-panel">

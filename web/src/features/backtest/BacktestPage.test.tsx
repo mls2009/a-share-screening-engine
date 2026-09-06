@@ -38,6 +38,12 @@ const run: BacktestRun = {
 };
 
 describe("BacktestPage", () => {
+  it("保留带入的非回测指标并提示，不静默替换入场条件", async () => {
+    const client = {catalog:async()=>[...catalog,{key:"board",label:"板块",unit:"category",timeframes:["1d"],operators:["eq"],supported_modes:["close"],choices:[{value:"beijing",label:"北交所"}]}] as MetricSpec[],runBacktest:vi.fn()};
+    render(<BacktestPage client={client} initialDraft={{symbol:"920001.BJ",tree:{kind:"condition",metric:"board",timeframe:"1d",operator:"eq",right:{kind:"constant",value:"beijing"}}}} />);
+    expect(await screen.findByText(/以下入场指标暂不支持回测：板块/)).toBeInTheDocument();
+    expect(screen.getByRole("button",{name:"运行策略回测"})).toBeDisabled();
+  });
   it("优先按 supported_modes 筛选回测指标", async () => {
     const client = {
       catalog: async () => [

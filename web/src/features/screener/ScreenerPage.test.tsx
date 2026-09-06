@@ -231,6 +231,6 @@ it("零命中也展示缺失原因、条件统计和数据时间", async () => {
   await screen.findByLabelText("指标");
   await userEvent.click(screen.getByRole("button", { name: "运行全市场筛选" }));
   expect(await screen.findByText(/缺少历史窗口数据/)).toBeInTheDocument();
-  expect(screen.getByText(/未知 2/)).toBeInTheDocument();
+  expect(screen.getByText(/数据不足 2/)).toBeInTheDocument();
   expect(screen.getByText(/2026-08-19/)).toBeInTheDocument();
 });

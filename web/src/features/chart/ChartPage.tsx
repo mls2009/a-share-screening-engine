@@ -59,9 +59,11 @@ export function ChartPage({
   Chart = StockChart,
   ComparisonChart = BenchmarkChart,
   watchSource,
+  focusMark,
 }: {
   initialSymbol?: string;
   watchSource?: import("../watchlist/model").WatchSource;
+  focusMark?: import("../watchlist/model").ConditionMark;
   client?: ChartClient;
   Chart?: ComponentType<StockChartProps>;
   ComparisonChart?: ComponentType<{ comparison: BenchmarkComparison }>;
@@ -70,7 +72,7 @@ export function ChartPage({
   const [symbol, setSymbol] = useState(initialSymbol);
   const [suggestions, setSuggestions] = useState<SymbolSearchResult[]>([]);
   const [searchActive, setSearchActive] = useState(false);
-  const [timeframe, setTimeframe] = useState<Timeframe>(watchSource ? sourceMarks(watchSource)[0]?.timeframe ?? "1d" : "1d");
+  const [timeframe, setTimeframe] = useState<Timeframe>(focusMark?.timeframe ?? (watchSource ? sourceMarks(watchSource)[0]?.timeframe ?? "1d" : "1d"));
   const [bars, setBars] = useState<Bar[]>([]);
   const [indicators, setIndicators] = useState<ChartIndicatorPoint[]>([]);
   const [selectedIndicators, setSelectedIndicators] = useState<ChartIndicator[]>(["ma"]);
@@ -94,7 +96,7 @@ export function ChartPage({
   const activeWindow = drillStack.at(-1)?.window;
   const [defaultStart, defaultEnd] = range(timeframe);
   const requestStart = activeWindow?.start ?? (watchSource ? new Date(new Date(watchSource.as_of).getTime() - 730 * 86400000).toISOString().slice(0, 10) : defaultStart);
-  const requestEnd = activeWindow?.end ?? (watchSource?.as_of ?? defaultEnd);
+  const requestEnd = activeWindow?.end ?? (focusMark?.date ?? watchSource?.as_of ?? defaultEnd);
   const requestStartAt = activeWindow?.startAt;
   const requestEndAt = activeWindow?.endAt;
 
