@@ -21,7 +21,7 @@ class PatternEvent:
     parameters: dict[str, float]
 
 
-def detect_patterns(bars: pd.DataFrame, rule_version: str = "v1") -> list[PatternEvent]:
+def detect_patterns(bars: pd.DataFrame, rule_version: str = "v1", *, start_date: date | None = None) -> list[PatternEvent]:
     data = bars.copy().sort_values("timestamp").reset_index(drop=True)
     events: list[PatternEvent] = []
 
@@ -46,7 +46,8 @@ def detect_patterns(bars: pd.DataFrame, rule_version: str = "v1") -> list[Patter
             )
         )
 
-    for index, row in data.iterrows():
+    selected = data if start_date is None else data[pd.to_datetime(data["timestamp"]).dt.date >= start_date]
+    for index, row in selected.iterrows():
         candle_range = max(float(row["high"] - row["low"]), 1e-12)
         body = abs(float(row["close"] - row["open"]))
         upper = float(row["high"] - max(row["open"], row["close"]))

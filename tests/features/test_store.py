@@ -204,3 +204,19 @@ def test_history_exposes_all_patterns_detected_on_the_same_day(tmp_path: Path) -
 
     assert row["pattern_type"] == ["hammer", "doji"]
     assert row["pattern_strength"] == 0.9
+
+
+def test_weekly_price_action_is_attached_and_partial_week_is_excluded(tmp_path, monkeypatch):
+    import astock.features.store as module
+    database=Database(tmp_path/'weekly-pa.duckdb');database.migrate()
+    for tf, stamp in [('1d','2026-09-18'),('1w','2026-09-18'),('1w','2026-09-21')]:
+        database.connection.execute("insert into market_features(symbol,timeframe,feature_date,feature_version,open,high,low,close) values ('600001.SH',?,?,'v1',10,11,9,10)",[tf,stamp])
+    seen=[]
+    def compute(weekly,daily,targets):
+        seen.append((weekly,daily,targets))
+        return [{'pw_bull_within_156':True} for _ in weekly]
+    monkeypatch.setattr(module,'weekly_price_action_features',compute)
+    result=MarketFeatureStore(database).read_history('600001.SH',Timeframe.WEEK,date(2026,9,21),1,enrich=False,include_price_action=True)
+    assert result[0]['pw_bull_within_156'] is True
+    assert [r['feature_date'] for r in seen[0][0]]==[date(2026,9,18)]
+    assert seen[0][1][0]['feature_date']==date(2026,9,18)

@@ -1,3 +1,4 @@
+import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -92,10 +93,11 @@ class TencentQuoteProvider:
 
     @staticmethod
     def _optional_float(fields: list[str], index: int, multiplier: float = 1) -> float | None:
-        if index >= len(fields) or not fields[index]:
+        if index >= len(fields) or fields[index].strip() in {"", "-", "--", "N/A"}:
             return None
         try:
-            return float(fields[index]) * multiplier
+            value = float(fields[index]) * multiplier
+            return value if math.isfinite(value) else None
         except ValueError as error:
             raise TencentQuoteError(f"invalid optional field at index {index}") from error
 
@@ -113,6 +115,8 @@ class TencentQuoteProvider:
             volume_shares=quote.volume_shares,
             amount_cny=quote.amount_cny,
             turnover_rate=cls._optional_float(fields, 38),
+            pe_ratio=cls._optional_float(fields, 39),
+            pb_ratio=cls._optional_float(fields, 46),
             float_market_cap=cls._optional_float(fields, 44, 100_000_000),
             total_market_cap=cls._optional_float(fields, 45, 100_000_000),
             volume_ratio=cls._optional_float(fields, 49),

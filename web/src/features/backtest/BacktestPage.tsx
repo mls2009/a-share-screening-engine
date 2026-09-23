@@ -1,10 +1,12 @@
+import { DataDateInput } from "../../components/DataDateInput";
 import { Activity, Play, TrendingDown, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { api } from "../../api";
 import type { BacktestRun, MetricSpec, Timeframe, UiGroupNode, UiNode } from "../../types";
+import { ConditionJsonImport } from "./ConditionJsonImport";
 import { ConditionTree } from "../screener/ConditionTree";
-import { createGroup, fromApiNode, setTreeTimeframe, toApiNode } from "../screener/treeModel";
+import { createGroup, fromApiNode, toApiNode } from "../screener/treeModel";
 import { conditionEntries } from "../screener/presentation";
 
 export interface BacktestClient {
@@ -68,9 +70,24 @@ export function BacktestPage({ client = api, initialDraft }: { client?: Backtest
   const [entryTree, setEntryTree] = useState<UiGroupNode>(() => createGroup());
   const [exitTree, setExitTree] = useState<UiGroupNode>(() => createGroup());
   const [symbols, setSymbols] = useState(initialDraft?.symbol ?? "600519.SH");
+  const [stockSource, setStockSource] = useState("manual");
+  const [groups, setGroups] = useState<import("../watchlist/model").WatchGroup[]>([]);
+  const [groupId, setGroupId] = useState("");
+  const [groupStocks, setGroupStocks] = useState<import("../watchlist/model").WatchItem[]>([]);
+  const [batchMode, setBatchMode] = useState("portfolio");
+  const [batchResults, setBatchResults] = useState<Array<{ symbol: string; run?: BacktestRun; error?: string }>>([]);
+  const [progress, setProgress] = useState("");
+  useEffect(() => {
+    if (stockSource !== "group") return;
+    let active = true;
+    Promise.all([api.watchGroups(), api.watchlist()]).then(([nextGroups, stocks]) => {
+      if (active) { setGroups(nextGroups); setGroupStocks(stocks); }
+    }).catch((cause: Error) => { if (active) setError(cause.message); });
+    return () => { active = false; };
+  }, [stockSource]);
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [start, setStart] = useState(oneYearAgo);
-  const [end, setEnd] = useState(today);
+  const [end, setEnd] = useState("");
   const [cash, setCash] = useState(1_000_000);
   const [positionSize, setPositionSize] = useState(20);
   const [mode, setMode] = useState<"simple" | "realistic">("realistic");
@@ -81,8 +98,8 @@ export function BacktestPage({ client = api, initialDraft }: { client?: Backtest
     () => catalog.filter((metric) => metric.supported_modes ? metric.supported_modes.includes("backtest") : metric.timeframes.length === 7),
     [catalog],
   );
-  const entryCatalog = initialDraft ? catalog : backtestCatalog;
-  const unsupportedEntry = conditionEntries(entryTree).flatMap(({node}) => [node.metric, node.right?.kind === "metric" ? node.right.metric : undefined]).filter((key): key is string => Boolean(key) && catalog.length > 0 && !backtestCatalog.some(metric=>metric.key===key));
+  const entryCatalog = catalog;
+  const unsupportedEntry = [...conditionEntries(entryTree), ...conditionEntries(exitTree)].flatMap(({node}) => [node.metric, node.right?.kind === "metric" ? node.right.metric : undefined]).filter((key): key is string => Boolean(key) && catalog.length > 0 && !backtestCatalog.some(metric=>metric.key===key));
 
   useEffect(() => {
     client.catalog().then(metrics=>{
@@ -97,22 +114,42 @@ export function BacktestPage({ client = api, initialDraft }: { client?: Backtest
   }, [client,initialDraft]);
 
   const execute = async () => {
-    setLoading(true); setError("");
+    setLoading(true); setError(""); setRun(undefined); setBatchResults([]); setProgress("");
     try {
-      const parsedSymbols = symbols.split(/[，,\s]+/).map((value) => value.trim().toUpperCase()).filter(Boolean);
-      const result = await client.runBacktest({
-        symbols: parsedSymbols,
+      let parsedSymbols = [...new Set(symbols.split(/[，,\s]+/).map((value) => value.trim().toUpperCase()).filter(Boolean))];
+      if (stockSource === "group") {
+        if (!groupId) throw new Error("请选择自选分组");
+        const [latestGroups, latestStocks] = await Promise.all([api.watchGroups(), api.watchlist()]);
+        if (!latestGroups.some(group => group.id === groupId)) throw new Error("所选分组已不存在，请重新选择");
+        setGroups(latestGroups); setGroupStocks(latestStocks);
+        parsedSymbols = latestStocks.filter(stock => stock.groups?.some(group => group.id === groupId)).map(stock => stock.symbol);
+      }
+      if (!parsedSymbols.length) throw new Error("回测范围没有股票，请先添加股票");
+      const payload = {
         timeframe,
         start,
-        end,
+        end: end || today(),
         entry_tree: toApiNode(entryTree, entryCatalog),
-        exit_tree: toApiNode(exitTree, backtestCatalog),
+        exit_tree: toApiNode(exitTree, catalog),
         initial_cash: cash,
         position_size: positionSize / 100,
         mode,
         adjustment: "qfq",
-      });
-      setRun(result);
+      };
+      if (batchMode === "individual") {
+        for (const [index, symbol] of parsedSymbols.entries()) {
+          setProgress(`正在回测 ${index + 1} / ${parsedSymbols.length}：${symbol}`);
+          try {
+            const result = await client.runBacktest({ ...payload, symbols: [symbol] });
+            setBatchResults(previous => [...previous, { symbol, run: result }]);
+          } catch (cause) {
+            setBatchResults(previous => [...previous, { symbol, error: cause instanceof Error ? cause.message : "回测失败" }]);
+          }
+        }
+        setProgress(`批量回测结束，共处理 ${parsedSymbols.length} 只股票`);
+      } else {
+        setRun(await client.runBacktest({ ...payload, symbols: parsedSymbols }));
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "回测失败");
     } finally {
@@ -123,28 +160,36 @@ export function BacktestPage({ client = api, initialDraft }: { client?: Backtest
   return (
     <main className="backtest-page">
       <header className="compact-heading">
-        <div><p className="eyebrow">CAUSAL ENGINE / NEXT OPEN EXECUTION</p><h1>策略回测</h1></div>
+        <div><p className="eyebrow">设置买卖规则 · 查看历史表现</p><h1>策略回测</h1></div>
         <button className="run-button" type="button" aria-label="运行策略回测" disabled={!backtestCatalog.length || loading || unsupportedEntry.length > 0} onClick={execute}>
           <Play size={16} />{loading ? "计算中…" : "运行回测"}
         </button>
       </header>
       {error && <div className="error-banner" role="alert">{error}</div>}
-      {unsupportedEntry.length > 0 && <p role="alert">以下入场指标暂不支持回测：{[...new Set(unsupportedEntry)].map(key=>catalog.find(metric=>metric.key===key)?.label??key).join("、")}。已保留原条件，请删除或替换这些条件后再运行。</p>}
+      {unsupportedEntry.length > 0 && <p role="alert">以下指标缺少可用的历史回测支持：{[...new Set(unsupportedEntry)].map(key=>catalog.find(metric=>metric.key===key)?.label??key).join("、")}。已保留原条件，请删除或替换这些条件后再运行。</p>}
       <section className="backtest-config">
-        <label><span>证券代码（逗号分隔）</span><input aria-label="回测证券代码" value={symbols} onChange={(event) => setSymbols(event.target.value)} /></label>
-        <label><span>周期</span><select aria-label="回测周期" value={timeframe} onChange={(event) => { const next = event.target.value as Timeframe; setTimeframe(next); setEntryTree((tree) => setTreeTimeframe(tree, next) as UiGroupNode); setExitTree((tree) => setTreeTimeframe(tree, next) as UiGroupNode); }}>{["5m", "15m", "30m", "60m", "1d", "1w", "1mo"].map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label><span>股票来源</span><select aria-label="回测股票来源" disabled={loading} value={stockSource} onChange={event=>setStockSource(event.target.value)}><option value="manual">输入证券代码</option><option value="group">自选股分组</option></select></label>
+        <label><span>回测方式</span><select aria-label="回测方式" disabled={loading} value={batchMode} onChange={event=>setBatchMode(event.target.value)}><option value="portfolio">组合回测（共用资金）</option><option value="individual">逐只批量回测（独立资金）</option></select></label>
+        {stockSource === "group" ? <label><span>自选分组</span><select aria-label="回测自选分组" disabled={loading} value={groupId} onChange={event=>setGroupId(event.target.value)}><option value="">请选择分组</option>{groups.map(group=><option key={group.id} value={group.id}>{group.name} · {groupStocks.filter(stock=>stock.groups?.some(value=>value.id===group.id)).length} 只</option>)}</select></label> : <label><span>证券代码（逗号分隔）</span><input aria-label="回测证券代码" value={symbols} onChange={(event) => setSymbols(event.target.value)} /></label>}
+        <label><span>信号检查周期</span><select aria-label="回测周期" value={timeframe} onChange={(event) => { setTimeframe(event.target.value as Timeframe); }}>{["5m", "15m", "30m", "60m", "1d", "1w", "1mo"].map((item) => <option key={item}>{item}</option>)}</select></label>
         <label><span>开始</span><input aria-label="回测开始日期" type="date" value={start} onChange={(event) => setStart(event.target.value)} /></label>
-        <label><span>结束</span><input aria-label="回测结束日期" type="date" value={end} onChange={(event) => setEnd(event.target.value)} /></label>
+        <DataDateInput label="回测结束日期" value={end} onChange={setEnd} />
         <label><span>初始资金</span><input aria-label="初始资金" type="number" min="1" value={cash} onChange={(event) => setCash(Number(event.target.value))} /></label>
         <label><span>单次仓位 %</span><input aria-label="单次仓位" type="number" min="1" max="100" value={positionSize} onChange={(event) => setPositionSize(Number(event.target.value))} /></label>
         <label><span>撮合模式</span><select aria-label="撮合模式" value={mode} onChange={(event) => setMode(event.target.value as "simple" | "realistic")}><option value="realistic">A 股规则近似</option><option value="simple">简化模式</option></select></label>
       </section>
+      <p>{batchMode === "individual" ? "每只股票独立使用上述初始资金和相同策略，逐只生成结果；单只失败会记录原因并继续。" : "所有选定股票共用上述初始资金，生成一个组合回测结果。"}{stockSource === "group" && "运行时读取该分组的最新成员。"}</p>
+      {stockSource === "group" && groupId && <p>范围预览：{groupStocks.filter(stock=>stock.groups?.some(group=>group.id===groupId)).map(stock=>`${stock.name}（${stock.symbol}）`).join("、") || "当前分组为空"}</p>}
+      <p>按信号检查周期的收盘时点判断条件，各条件可单独选择周期；仅使用当时已经收完的 K 线。JSON 导入不会改写条件周期。</p>
       <div className="strategy-trees">
-        <section className="strategy-tree"><h2><TrendingUp size={17} />入场条件</h2>{entryCatalog.length > 0 && <ConditionTree tree={entryTree} catalog={entryCatalog} onChange={(tree: UiNode) => setEntryTree(tree as UiGroupNode)} />}</section>
-        <section className="strategy-tree"><h2><TrendingDown size={17} />离场条件</h2>{backtestCatalog.length > 0 && <ConditionTree tree={exitTree} catalog={backtestCatalog} onChange={(tree: UiNode) => setExitTree(tree as UiGroupNode)} />}</section>
+        <section className="strategy-tree"><h2><TrendingUp size={17} />入场条件</h2><ConditionJsonImport label="入场" catalog={catalog} onImport={tree=>setEntryTree(tree as UiGroupNode)} />{entryCatalog.length > 0 && <ConditionTree tree={entryTree} catalog={entryCatalog} onChange={(tree: UiNode) => setEntryTree(tree as UiGroupNode)} />}</section>
+        <section className="strategy-tree"><h2><TrendingDown size={17} />离场条件</h2><ConditionJsonImport label="离场" catalog={catalog} onImport={tree=>setExitTree(tree as UiGroupNode)} />{backtestCatalog.length > 0 && <ConditionTree tree={exitTree} catalog={catalog} onChange={(tree: UiNode) => setExitTree(tree as UiGroupNode)} />}</section>
       </div>
-      {!run ? <section className="result-empty backtest-empty">配置入场与离场条件后运行。信号按收盘计算，下一根 K 线开盘撮合，避免未来函数。</section> : (
+      {progress && <p className="backtest-progress" role="status">{progress}</p>}
+      {!!batchResults.length && <section className="report-panel"><h2>逐只回测结果</h2><div className="table-scroll"><table><thead><tr><th>证券</th><th>总收益</th><th>最大回撤</th><th>完成交易</th><th>结果</th></tr></thead><tbody>{batchResults.map(item=><tr key={item.symbol}><td>{item.symbol}</td><td>{formatNumber(item.run?.result.metrics.total_return, 2, "%")}</td><td>{formatNumber(item.run?.result.metrics.max_drawdown, 2, "%")}</td><td>{formatNumber(item.run?.result.metrics.trade_count, 0)}</td><td>{item.run ? <button className="ghost-button" onClick={()=>setRun(item.run)}>查看 {item.symbol} 报告</button> : item.error}</td></tr>)}</tbody></table></div></section>}
+      {!run ? <section className="result-empty backtest-empty">{batchResults.length ? "点击上方结果查看单只股票的详细报告。" : "配置入场与离场条件后运行。信号按收盘计算，使用之后的开盘价撮合。"}</section> : (
         <section className="backtest-report">
+          <h2>回测报告 · {run.result.request.symbols.join("、")}</h2>
           {!!run.result.warnings?.length && <div className="report-panel" role="status"><h2>回测警告</h2><ul>{run.result.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></div>}
           {run.result.diagnostics && <div className="report-panel"><h2>数据覆盖</h2>
             <p>有效区间：{run.result.diagnostics.effective_start ?? "—"} 至 {run.result.diagnostics.effective_end ?? "—"}</p>

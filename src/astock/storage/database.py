@@ -16,7 +16,7 @@ class _ThreadLocalConnection:
     def _current(self) -> duckdb.DuckDBPyConnection:
         connection = getattr(self._local, "connection", None)
         if connection is None:
-            connection = duckdb.connect(str(self.path))
+            connection = duckdb.connect(str(self.path), config={"threads": 2, "preserve_insertion_order": False})
             self._local.connection = connection
             with self._connections_lock:
                 self._connections.append(connection)

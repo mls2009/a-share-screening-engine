@@ -86,9 +86,6 @@ class BacktestRequest(BaseModel):
             raise ValueError("start must be on or before end")
         if len(set(self.symbols)) != len(self.symbols):
             raise ValueError("symbols must be unique")
-        tree_timeframes = _tree_timeframes(self.entry_tree) | _tree_timeframes(self.exit_tree)
-        if tree_timeframes != {self.timeframe}:
-            raise ValueError("condition timeframe must match backtest timeframe")
         issues = validate_tree(self.entry_tree) + validate_tree(self.exit_tree)
         if issues:
             details = "; ".join(f"{issue.path}: {issue.message}" for issue in issues)

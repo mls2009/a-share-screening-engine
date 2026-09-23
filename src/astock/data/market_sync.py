@@ -1,10 +1,14 @@
+import shutil
+
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import date
+from threading import Event
 from typing import Protocol
 from uuid import UUID
 
 from astock.data.providers.base import ReferenceDataProvider
+from astock.data.updates import MarketUpdates
 from astock.domain.market import Adjustment, Timeframe
 from astock.domain.security import Security
 from astock.storage.jobs import SyncJobRepository
@@ -48,6 +52,15 @@ class MarketSyncService:
         self.reference_provider = reference_provider
         self.jobs = jobs
         self.feature_builder = feature_builder
+        self.updates = MarketUpdates()
+        self.stopping = Event()
+
+    def _check_disk_space(self) -> None:
+        if shutil.disk_usage(self.jobs.connection.path.parent).free < 3 * 1024**3:
+            raise RuntimeError("可用空间不足 3 GiB，暂停行情更新以保护数据库")
+
+    def stop(self) -> None:
+        self.stopping.set()
 
     @staticmethod
     def _years_before(value: date, years: int) -> date:
@@ -59,6 +72,18 @@ class MarketSyncService:
     def start(self, end: date, years: int = 3) -> SyncSummary:
         if years <= 0:
             raise ValueError("years must be positive")
+        self._check_disk_space()
+        refresh = getattr(self.market_data, "sync_watchlist_status", None)
+        if refresh is not None:
+            refresh(end)
+            self.updates.publish()
+        pending = self.jobs.connection.execute(
+            """select job_id from data_sync_jobs where end_date = ?
+            and status in ('running', 'completed_with_errors')
+            order by started_at desc limit 1""", [end],
+        ).fetchone()
+        if pending:
+            return self.resume(pending[0])
         start = self._years_before(end, years)
         securities = self.market_data.sync_universe(start, end)
         symbols = [security.symbol for security in securities if security.is_listed]
@@ -66,11 +91,13 @@ class MarketSyncService:
         return self._run(job_id, symbols)
 
     def retry_failed(self, job_id: UUID) -> SyncSummary:
+        self._check_disk_space()
         symbols = self.jobs.failed_symbols(job_id)
         self.jobs.reopen(job_id)
         return self._run(job_id, symbols)
 
     def resume(self, job_id: UUID) -> SyncSummary:
+        self._check_disk_space()
         job = self.jobs.get(job_id)
         succeeded = self.jobs.succeeded_symbols(job_id)
         symbols = [
@@ -99,6 +126,9 @@ class MarketSyncService:
         session = getattr(self.market_data, "bulk_session", nullcontext)
         with session():
             for symbol in symbols:
+                if self.stopping.is_set():
+                    break
+                self._check_disk_space()
                 try:
                     self.market_data.history(
                         symbol,
@@ -108,12 +138,14 @@ class MarketSyncService:
                         Adjustment.QFQ,
                     )
                     if self.feature_builder is not None:
-                        self.feature_builder.build_symbol(symbol, job.end_date)
+                        getattr(self.feature_builder, "build_incremental_symbol", self.feature_builder.build_symbol)(symbol, job.end_date)
                 except Exception as error:  # noqa: BLE001 - one stock must not abort the batch
                     self.jobs.mark_failed(job_id, symbol, str(error))
                 else:
                     self.jobs.mark_succeeded(job_id, symbol)
-        self.jobs.complete(job_id)
+        if not self.stopping.is_set():
+            self.jobs.complete(job_id)
+        self.updates.publish()
         completed = self.jobs.get(job_id)
         return SyncSummary(
             job_id=job_id,

@@ -6,6 +6,9 @@ import pandas as pd
 from astock.data.periods import final_session, period_end
 from astock.domain.market import Timeframe
 from astock.features.zones import nearest_zones
+from astock.features.vacuum import vacuum_features
+from astock.features.chart_shapes import chart_shape_features
+from astock.features.price_action import price_action_features, weekly_price_action_features
 from astock.storage.database import Database
 
 FEATURE_COLUMNS = [
@@ -169,6 +172,9 @@ class MarketFeatureStore:
         feature_version: str = "v1",
         *,
         enrich: bool = True,
+        include_vacuum: bool = False,
+        include_price_action: bool = False,
+        include_shapes: bool = False,
     ) -> list[dict]:
         period_filter, period_args = self._period_filter(timeframe, end)
         cursor = self.connection.execute(
@@ -182,6 +188,12 @@ class MarketFeatureStore:
         )
         columns = [column[0] for column in cursor.description]
         rows = [self._decode(dict(zip(columns, row, strict=True))) for row in cursor.fetchall()]
+        if include_vacuum and timeframe == Timeframe.DAY:
+            self.attach_vacuum({symbol: rows}, end, feature_version)
+        if include_shapes and timeframe == Timeframe.DAY:
+            self.attach_shapes({symbol: rows}, end, feature_version)
+        if include_price_action and timeframe in {Timeframe.DAY, Timeframe.WEEK}:
+            self.attach_price_action({symbol: rows}, end, feature_version, timeframe)
         return [self._enrich(symbol, timeframe, row) for row in rows] if enrich else rows
 
     def read_histories(
@@ -193,6 +205,10 @@ class MarketFeatureStore:
         feature_version: str = "v1",
         *,
         enrich: bool = True,
+        include_vacuum: bool = False,
+        include_price_action: bool = False,
+        include_shapes: bool = False,
+        progress=None,
     ) -> dict[str, list[dict]]:
         if not symbols:
             return {}
@@ -219,7 +235,86 @@ class MarketFeatureStore:
             if enrich:
                 row = self._enrich(row["symbol"], timeframe, row)
             histories[row["symbol"]].append(row)
+        if include_vacuum and timeframe == Timeframe.DAY:
+            self.attach_vacuum(histories, end, feature_version, progress=progress)
+        if include_shapes and timeframe == Timeframe.DAY:
+            self.attach_shapes(histories, end, feature_version, progress=progress)
+        if include_price_action and timeframe in {Timeframe.DAY, Timeframe.WEEK}:
+            self.attach_price_action(histories, end, feature_version, timeframe, progress=progress)
         return histories
+
+    def attach_vacuum(self, histories: dict[str, list[dict]], end: date, feature_version: str = "v1", progress=None) -> None:
+        """Read narrow OHLC batches; derive on demand without rewriting stored features."""
+        symbols = [symbol for symbol, rows in histories.items() if rows]
+        for offset in range(0, len(symbols), 64):
+            batch = symbols[offset:offset + 64]
+            records = {symbol: [] for symbol in batch}
+            cursor = self.connection.execute("""
+                select symbol, feature_date, high, low, close, volume from market_features
+                where symbol in (select unnest(?)) and timeframe = '1d'
+                  and feature_version = ? and feature_date <= ?
+                order by symbol, feature_date
+            """, [batch, feature_version, end])
+            for symbol, stamp, high, low, close, volume in cursor.fetchall():
+                records[symbol].append(dict(feature_date=stamp, high=high, low=low, close=close, volume=volume))
+            for symbol, rows in records.items():
+                targets = {row["feature_date"]: row for row in histories[symbol]}
+                for row, derived in zip(rows, vacuum_features(rows), strict=True):
+                    if row["feature_date"] in targets:
+                        targets[row["feature_date"]].update(derived)
+            if progress:
+                progress("计算真空区", min(offset+64, len(symbols)), len(symbols))
+
+    def attach_price_action(self, histories: dict[str, list[dict]], end: date, feature_version: str = "v1", timeframe: Timeframe = Timeframe.DAY, progress=None) -> None:
+        symbols = [symbol for symbol, rows in histories.items() if rows]
+        for offset in range(0, len(symbols), 64):
+            batch = symbols[offset:offset + 64]
+            records = {symbol: [] for symbol in batch}
+            cursor = self.connection.execute("""
+                select symbol, feature_date, open, high, low, close from market_features
+                where symbol in (select unnest(?)) and timeframe = '1d'
+                  and feature_version = ? and feature_date <= ?
+                order by symbol, feature_date
+            """, [batch, feature_version, end])
+            for symbol, stamp, opening, high, low, close in cursor.fetchall():
+                records[symbol].append(dict(feature_date=stamp, open=opening, high=high, low=low, close=close))
+            weekly_records = {}
+            if timeframe == Timeframe.WEEK:
+                weekly_records = self.read_histories(batch, timeframe, end, 10000, feature_version, enrich=False)
+            for symbol, rows in records.items():
+                targets = {row["feature_date"]: row for row in histories[symbol]}
+                if timeframe == Timeframe.WEEK:
+                    weekly = weekly_records[symbol]
+                    weekly.reverse()
+                    derived_rows = weekly_price_action_features(weekly, rows, set(targets))
+                    rows = weekly
+                else:
+                    derived_rows = price_action_features(rows, set(targets), include_year=True)
+                for row, derived in zip(rows, derived_rows, strict=True):
+                    if row["feature_date"] in targets:
+                        targets[row["feature_date"]].update(derived)
+            if progress:
+                progress("计算裸K及历史形态", min(offset+64, len(symbols)), len(symbols))
+
+    def attach_shapes(self, histories, end, feature_version="v1", progress=None):
+        symbols = [symbol for symbol, rows in histories.items() if rows]
+        for offset in range(0, len(symbols), 64):
+            batch = symbols[offset:offset+64]
+            records = {symbol: [] for symbol in batch}
+            earliest = min(row['feature_date'] for symbol in batch for row in histories[symbol])
+            start = (pd.Timestamp(earliest)-pd.DateOffset(years=2)-pd.Timedelta(days=30)).date()
+            for symbol, stamp, high, low in self.connection.execute(
+                "select symbol,feature_date,high,low from market_features where symbol in (select unnest(?)) "
+                "and timeframe='1d' and feature_version=? and feature_date between ? and ? order by symbol,feature_date",
+                [batch,feature_version,start,end]).fetchall():
+                records[symbol].append(dict(feature_date=stamp,high=high,low=low))
+            for symbol, rows in records.items():
+                targets = {r['feature_date']:r for r in histories[symbol]}
+                for row, feature in zip(rows,chart_shape_features(rows),strict=True):
+                    if row['feature_date'] in targets:
+                        targets[row['feature_date']].update(feature)
+            if progress:
+                progress("计算三角形与震荡区间", min(offset+64, len(symbols)), len(symbols))
 
     @staticmethod
     def _decode(row: dict) -> dict:

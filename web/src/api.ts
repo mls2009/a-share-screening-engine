@@ -14,6 +14,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  stockOverview: (symbol: string) => request<import("./features/stock/StockOverview").StockOverviewData>(`/api/symbols/${encodeURIComponent(symbol)}/overview`),
+  historyWaves: (symbol: string, payload: object) => request<import("./features/watchlist/HistoryWaves").WaveResult>(`/api/watchlist/${encodeURIComponent(symbol)}/waves`, { method: "POST", body: JSON.stringify(payload) }),
   sectorStatus: () => request<{source:string;updated_at:string|null;running:boolean;done:number;total:number;current:string;error:string;industries:number;concepts:number}>("/api/sectors/status"),
   syncSectors: () => request<object>("/api/sectors/sync",{method:"POST"}),
   screenSchedules: () => request<Array<{template_id:string;enabled:boolean;notify:boolean;last_date:string|null;last_error:string|null;last_run_id:string|null}>>("/api/workbench/schedules"),
@@ -21,10 +23,15 @@ export const api = {
   screenRuns: () => request<import("./features/screener/workbenchTypes").RunSummary[]>("/api/workbench/runs"),
   screenDetail: (runId: string, symbol: string, latest = false) => request<import("./features/screener/workbenchTypes").StockDetail>(`/api/workbench/runs/${encodeURIComponent(runId)}/detail/${encodeURIComponent(symbol)}?latest=${latest}`),
   compareRuns: (runId: string, previousId: string) => request<import("./features/screener/workbenchTypes").RunComparison>(`/api/workbench/runs/${encodeURIComponent(runId)}/compare/${encodeURIComponent(previousId)}`),
-  batchWatchlist: (runId: string, symbols: string[], allMatches: boolean) => request<{added:number}>(`/api/workbench/runs/${encodeURIComponent(runId)}/watchlist`, {method:"POST", body:JSON.stringify({symbols, all_matches:allMatches})}),
+  batchWatchlist: (runId: string, symbols: string[], allMatches: boolean, groupId?: string) => request<{added:number}>(`/api/workbench/runs/${encodeURIComponent(runId)}/watchlist`, {method:"POST", body:JSON.stringify({symbols, all_matches:allMatches, group_id:groupId})}),
   watchlist: () => request<import("./features/watchlist/model").WatchItem[]>("/api/watchlist"),
-  addWatchlist: (symbol: string, runId?: string) => request<import("./features/watchlist/model").WatchItem>("/api/watchlist", {
-    method: "POST", body: JSON.stringify({ symbol, run_id: runId }),
+  watchGroups: () => request<import("./features/watchlist/model").WatchGroup[]>("/api/watchlist/groups"),
+  createWatchGroup: (name: string) => request<import("./features/watchlist/model").WatchGroup>("/api/watchlist/groups", { method: "POST", body: JSON.stringify({ name }) }),
+  renameWatchGroup: (id: string, name: string) => request<import("./features/watchlist/model").WatchGroup>(`/api/watchlist/groups/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ name }) }),
+  deleteWatchGroup: (id: string) => request<void>(`/api/watchlist/groups/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  setWatchGroups: (symbol: string, groupIds: string[]) => request<object>(`/api/watchlist/${encodeURIComponent(symbol)}/groups`, { method: "PUT", body: JSON.stringify({ group_ids: groupIds }) }),
+  addWatchlist: (symbol: string, runId?: string, groupId?: string) => request<import("./features/watchlist/model").WatchItem>("/api/watchlist", {
+    method: "POST", body: JSON.stringify({ symbol, run_id: runId, group_id: groupId }),
   }),
   removeWatchlist: (symbol: string) => request<void>(`/api/watchlist/${encodeURIComponent(symbol)}`, { method: "DELETE" }),
   catalog: () => request<MetricSpec[]>("/api/catalog"),
@@ -42,13 +49,20 @@ export const api = {
     request<void>(`/api/screens/templates/${encodeURIComponent(templateId)}`, {
       method: "DELETE",
     }),
-  runScreen: (payload: object) =>
-    request<ScreenRunResult>("/api/screens/run", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-  screenResults: (runId: string, limit: number, offset: number, sortBy?: string, sortDirection?: "asc" | "desc") => {
+  runScreen: async (payload: object, onProgress?: (value: {progress:number;message:string;processed:number;total:number}) => void): Promise<ScreenRunResult> => {
+    type Job = {job_id:string;status:string;progress:number;message:string;processed:number;total:number;result?:ScreenRunResult;error?:string};
+    let job = await request<Job>("/api/screens/tasks", {method:"POST",body:JSON.stringify(payload)});
+    while (true) {
+      onProgress?.(job);
+      if (job.status === "completed" && job.result) return job.result;
+      if (job.status === "failed") throw new Error(job.error || "筛选失败");
+      await new Promise(resolve => window.setTimeout(resolve, 1000));
+      job = await request<Job>(`/api/screens/tasks/${encodeURIComponent(job.job_id)}`);
+    }
+  },
+  screenResults: (runId: string, limit: number, offset: number, sortBy?: string, sortDirection?: "asc" | "desc", newOnly = false) => {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (newOnly) params.set("new_only", "true");
     if (sortBy && sortDirection) {
       params.set("sort_by", sortBy);
       params.set("sort_direction", sortDirection);
@@ -87,6 +101,8 @@ export const api = {
       `/api/symbols/${encodeURIComponent(symbol)}/chart-data/sync`,
       { method: "POST", body: JSON.stringify(payload) },
     ),
+  chartShapes: (symbol: string, asOf: string, signal?: AbortSignal) =>
+    request<{marks: import("./features/watchlist/model").ConditionMark[];data_date:string|null}>(`/api/symbols/${encodeURIComponent(symbol)}/chart-shapes?${new URLSearchParams({as_of:asOf})}`, {signal}),
   zones: (symbol: string, timeframe: Timeframe, asOf: string) =>
     request<PriceZone[]>(
       `/api/symbols/${encodeURIComponent(symbol)}/zones?${new URLSearchParams({ timeframe, as_of: asOf, limit_each: "3" })}`,

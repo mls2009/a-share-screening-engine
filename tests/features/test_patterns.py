@@ -57,3 +57,15 @@ def test_pattern_detection_never_changes_past_events_with_future_rows() -> None:
     after = [event for event in detect_patterns(extended) if event.event_date <= pd.Timestamp("2026-01-02").date()]
 
     assert before == after
+
+
+def test_incremental_patterns_preserve_context_and_exact_results():
+    import numpy as np
+    rng = np.random.default_rng(20260915)
+    close = 10 + rng.random(100).cumsum()
+    frame = pd.DataFrame({'timestamp':pd.date_range('2026-01-01',periods=100),
+        'open':close + rng.uniform(-1,1,100), 'close':close, 'high':close+2,'low':close-2})
+    full = detect_patterns(frame)
+    for offset in (0,1,2,19,20,50,99):
+        start = frame.timestamp.iloc[offset].date()
+        assert detect_patterns(frame,start_date=start) == [event for event in full if event.event_date>=start]

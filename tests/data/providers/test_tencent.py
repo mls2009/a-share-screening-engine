@@ -177,3 +177,15 @@ def test_snapshot_many_chunks_requests_and_reports_failed_batches() -> None:
     assert result.failed_batches == 1
     assert result.requested == 61
     assert result.snapshots == ()
+
+
+def test_valuation_fields_preserve_negative_and_missing_values():
+    fields = snapshot_row('sh600519', '600519').split('"')[1].split('~')
+    fields[39], fields[46] = '-12.5', '1.8'
+    snapshot = TencentQuoteProvider._parse_snapshot('600519.SH', fields)
+    assert snapshot.pe_ratio == -12.5
+    assert snapshot.pb_ratio == 1.8
+    fields[39], fields[46] = '', '--'
+    snapshot = TencentQuoteProvider._parse_snapshot('600519.SH', fields)
+    assert snapshot.pe_ratio is None
+    assert snapshot.pb_ratio is None

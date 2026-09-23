@@ -50,3 +50,31 @@ def test_daily_update_uses_completed_job_to_avoid_repeat_after_restart() -> None
 
     assert scheduler.run_due(moment(4, 17, 0)) is False
     assert service.calls == []
+
+
+def test_failed_start_retries_after_backoff():
+    class Flaky(FakeMarketSync):
+        def start(self, end, years=3):
+            if not self.calls:
+                self.calls.append((end, years))
+                raise RuntimeError('offline')
+            return super().start(end, years)
+
+    import pytest
+    service = Flaky()
+    scheduler = DailyMarketUpdateScheduler(service)
+    with pytest.raises(RuntimeError):
+        scheduler.run_due(moment(4, 16, 10))
+    assert scheduler.last_error == "offline"
+    assert scheduler.last_attempt == moment(4, 16, 10)
+    assert scheduler.target_date == date(2026, 9, 4)
+    assert scheduler.run_due(moment(4, 16, 11)) is False
+    assert scheduler.run_due(moment(4, 16, 40)) is True
+    assert scheduler.last_error is None
+
+
+def test_startup_catches_up_previous_weekday_before_close():
+    service = FakeMarketSync(latest=date(2026, 9, 3))
+    scheduler = DailyMarketUpdateScheduler(service)
+    assert scheduler.run_due(moment(7, 9, 0)) is True
+    assert service.calls == [(date(2026, 9, 4), 3)]

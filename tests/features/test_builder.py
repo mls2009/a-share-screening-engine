@@ -1,5 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from threading import Barrier
 from time import sleep
@@ -871,3 +871,66 @@ def test_current_zone_rule_version_rebuilds_an_older_rule_batch(
           and as_of_date = '2026-08-20' and source = 'auto'
         """
     ).fetchall() == [("v2",)]
+
+
+def test_incremental_build_matches_full_features_without_rewriting_old_days(tmp_path):
+    database=Database(tmp_path/'incremental.duckdb');database.migrate()
+    storage=BarStore(tmp_path/'bars');store=MarketFeatureStore(database)
+    builder=FeatureBuilder(storage,store,database)
+    dates=pd.date_range('2026-01-02',periods=60,freq='B')
+    bars=[Bar(symbol='600000.SH',timestamp=datetime.combine(day.date(),time(15),tzinfo=TZ),
+        timeframe=Timeframe.DAY,open=10+i*.1,high=11+i*.1,low=9+i*.1,close=10.5+i*.1,
+        volume_shares=1000+i,amount_cny=10000+i,adjustment=Adjustment.QFQ) for i,day in enumerate(dates)]
+    storage.upsert(bars[:50]);builder.build_symbol('600000.SH',dates[49].date())
+    storage.upsert(bars[50:])
+    saved=[];original=store.upsert
+    def capture(symbol,timeframe,features,*args):
+        saved.append((timeframe,len(features)))
+        return original(symbol,timeframe,features,*args)
+    store.upsert=capture
+    builder.build_symbol('600000.SH',dates[-1].date(),changed_since=dates[50].date())
+    assert next(count for timeframe,count in saved if timeframe==Timeframe.DAY)==10
+    incremental=database.connection.execute('select * exclude(created_at) from market_features order by timeframe,feature_date').fetchall()
+    builder.build_symbol('600000.SH',dates[-1].date())
+    complete=database.connection.execute('select * exclude(created_at) from market_features order by timeframe,feature_date').fetchall()
+    names=[entry[0] for entry in database.connection.execute("select * exclude(created_at) from market_features limit 0").description]
+    diffs=[(a[1],a[2],[(name,x,y) for name,x,y in zip(names,a,b) if x!=y]) for a,b in zip(incremental,complete) if a!=b]
+    assert not diffs, diffs[:2]
+    database.connection.close()
+
+
+def test_auto_incremental_rebuild_handles_new_bars_corrections_and_no_change(tmp_path):
+    database = Database(tmp_path / 'auto.duckdb')
+    database.migrate()
+    storage = BarStore(tmp_path / 'bars')
+    store = MarketFeatureStore(database)
+    builder = FeatureBuilder(storage, store, database)
+    dates = pd.date_range('2026-01-02', periods=60, freq='B')
+    bars = [Bar(symbol='600000.SH', timestamp=datetime.combine(day.date(), time(15), tzinfo=TZ),
+        timeframe=Timeframe.DAY, open=10+i*.1, high=11+i*.1, low=9+i*.1, close=10.5+i*.1,
+        volume_shares=1000+i, amount_cny=10000+i, adjustment=Adjustment.QFQ)
+        for i, day in enumerate(dates)]
+    storage.upsert(bars[:50])
+    builder.build_symbol('600000.SH', dates[49].date())
+    saved = []
+    original = store.upsert
+    def capture(symbol, timeframe, features, *args):
+        saved.append((timeframe, len(features)))
+        return original(symbol, timeframe, features, *args)
+    store.upsert = capture
+    storage.upsert(bars[50:])
+    builder.build_incremental_symbol('600000.SH', dates[-1].date())
+    assert next(n for tf, n in saved if tf == Timeframe.DAY) == 10
+    saved.clear()
+    builder.build_incremental_symbol('600000.SH', dates[-1].date())
+    assert saved == []
+    storage.upsert([bars[20].model_copy(update={'close': bars[20].close + .1})])
+    builder.build_incremental_symbol('600000.SH', dates[-1].date())
+    assert next(n for tf, n in saved if tf == Timeframe.DAY) == 40
+    incremental = database.connection.execute('select * exclude(created_at) from market_features order by timeframe,feature_date').fetchall()
+    builder.build_symbol('600000.SH', dates[-1].date())
+    assert incremental == database.connection.execute('select * exclude(created_at) from market_features order by timeframe,feature_date').fetchall()
+    database.connection.execute("delete from market_features where timeframe='1w' and feature_date=(select min(feature_date) from market_features where timeframe='1w')")
+    builder.build_incremental_symbol('600000.SH', dates[-1].date())
+    assert incremental == database.connection.execute('select * exclude(created_at) from market_features order by timeframe,feature_date').fetchall()
+    database.connection.close()

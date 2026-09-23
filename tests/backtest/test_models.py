@@ -27,17 +27,13 @@ def test_backtest_request_rejects_reverse_dates_and_empty_symbols() -> None:
         )
 
 
-def test_backtest_request_rejects_condition_from_a_different_timeframe() -> None:
-    with pytest.raises(ValidationError, match="condition timeframe must match backtest timeframe"):
-        BacktestRequest(
-            symbols=["600001.SH"],
-            timeframe="5m",
-            start=date(2026, 8, 19),
-            end=date(2026, 8, 20),
-            entry_tree=CONDITION,
-            exit_tree=CONDITION,
-            initial_cash=100_000,
-        )
+def test_backtest_request_accepts_mixed_condition_timeframes() -> None:
+    request = BacktestRequest(
+        symbols=["600001.SH"], timeframe="5m", start=date(2026, 8, 19),
+        end=date(2026, 8, 20), entry_tree=CONDITION, exit_tree=CONDITION,
+        initial_cash=100_000,
+    )
+    assert request.entry_tree.timeframe.value == "1d"
 
 
 def test_backtest_request_rejects_unknown_metrics() -> None:
@@ -58,11 +54,11 @@ def test_backtest_request_rejects_unknown_metrics() -> None:
 @pytest.mark.parametrize("operand", ["left", "right"])
 def test_backtest_rejects_metrics_that_engine_does_not_compute(operand) -> None:
     tree = {
-        **CONDITION, "metric": "pattern_strength",
-        "right": {"kind": "constant", "value": 1, "unit": "score"},
+        **CONDITION, "metric": "turnover_rate",
+        "right": {"kind": "constant", "value": 1, "unit": "percent"},
     } if operand == "left" else {
-        **CONDITION, "metric": "rsi_14",
-        "right": {"kind": "metric", "metric": "pattern_strength", "timeframe": "1d"},
+        **CONDITION, "metric": "return_1",
+        "right": {"kind": "metric", "metric": "turnover_rate", "timeframe": "1d"},
     }
     with pytest.raises(ValidationError, match="unsupported backtest metric"):
         BacktestRequest(

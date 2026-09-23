@@ -1,0 +1,432 @@
+{
+  "kind": "group",
+  "logic": "or",
+  "children": [
+    {
+      "kind": "group",
+      "logic": "and",
+      "children": [
+        {
+          "kind": "condition",
+          "metric": "pa_bear_pinbar",
+          "timeframe": "1d",
+          "operator": "eq",
+          "right": {
+            "kind": "constant",
+            "value": true,
+            "unit": "boolean"
+          }
+        },
+        {
+          "kind": "condition",
+          "metric": "pa_bear_key_level",
+          "timeframe": "1d",
+          "operator": "eq",
+          "right": {
+            "kind": "constant",
+            "value": true,
+            "unit": "boolean"
+          }
+        },
+        {
+          "kind": "condition",
+          "metric": "pa_bear_local_extreme",
+          "timeframe": "1d",
+          "operator": "eq",
+          "right": {
+            "kind": "constant",
+            "value": true,
+            "unit": "boolean"
+          }
+        },
+        {
+          "kind": "group",
+          "logic": "or",
+          "children": [
+            {
+              "kind": "group",
+              "logic": "and",
+              "children": [
+                {
+                  "kind": "condition",
+                  "metric": "pa_prominent",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                },
+                {
+                  "kind": "condition",
+                  "metric": "pa_bear_false_break",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "group",
+              "logic": "and",
+              "children": [
+                {
+                  "kind": "condition",
+                  "metric": "pa_prominent",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                },
+                {
+                  "kind": "condition",
+                  "metric": "pa_left_eye",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "group",
+              "logic": "and",
+              "children": [
+                {
+                  "kind": "condition",
+                  "metric": "pa_prominent",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                },
+                {
+                  "kind": "condition",
+                  "metric": "pa_bear_trend",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "group",
+              "logic": "and",
+              "children": [
+                {
+                  "kind": "condition",
+                  "metric": "pa_bear_false_break",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                },
+                {
+                  "kind": "condition",
+                  "metric": "pa_left_eye",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "group",
+              "logic": "and",
+              "children": [
+                {
+                  "kind": "condition",
+                  "metric": "pa_bear_false_break",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                },
+                {
+                  "kind": "condition",
+                  "metric": "pa_bear_trend",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "group",
+              "logic": "and",
+              "children": [
+                {
+                  "kind": "condition",
+                  "metric": "pa_left_eye",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                },
+                {
+                  "kind": "condition",
+                  "metric": "pa_bear_trend",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "group",
+      "logic": "and",
+      "children": [
+        {
+          "kind": "condition",
+          "metric": "pa2_bear_pinbar",
+          "timeframe": "1d",
+          "operator": "eq",
+          "right": {
+            "kind": "constant",
+            "value": true,
+            "unit": "boolean"
+          }
+        },
+        {
+          "kind": "condition",
+          "metric": "pa2_bear_key_level",
+          "timeframe": "1d",
+          "operator": "eq",
+          "right": {
+            "kind": "constant",
+            "value": true,
+            "unit": "boolean"
+          }
+        },
+        {
+          "kind": "condition",
+          "metric": "pa2_bear_local_extreme",
+          "timeframe": "1d",
+          "operator": "eq",
+          "right": {
+            "kind": "constant",
+            "value": true,
+            "unit": "boolean"
+          }
+        },
+        {
+          "kind": "group",
+          "logic": "or",
+          "children": [
+            {
+              "kind": "group",
+              "logic": "and",
+              "children": [
+                {
+                  "kind": "condition",
+                  "metric": "pa2_prominent",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                },
+                {
+                  "kind": "condition",
+                  "metric": "pa2_bear_false_break",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "group",
+              "logic": "and",
+              "children": [
+                {
+                  "kind": "condition",
+                  "metric": "pa2_prominent",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                },
+                {
+                  "kind": "condition",
+                  "metric": "pa2_left_eye",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "group",
+              "logic": "and",
+              "children": [
+                {
+                  "kind": "condition",
+                  "metric": "pa2_prominent",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                },
+                {
+                  "kind": "condition",
+                  "metric": "pa2_bear_trend",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "group",
+              "logic": "and",
+              "children": [
+                {
+                  "kind": "condition",
+                  "metric": "pa2_bear_false_break",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                },
+                {
+                  "kind": "condition",
+                  "metric": "pa2_left_eye",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "group",
+              "logic": "and",
+              "children": [
+                {
+                  "kind": "condition",
+                  "metric": "pa2_bear_false_break",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                },
+                {
+                  "kind": "condition",
+                  "metric": "pa2_bear_trend",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "group",
+              "logic": "and",
+              "children": [
+                {
+                  "kind": "condition",
+                  "metric": "pa2_left_eye",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                },
+                {
+                  "kind": "condition",
+                  "metric": "pa2_bear_trend",
+                  "timeframe": "1d",
+                  "operator": "eq",
+                  "right": {
+                    "kind": "constant",
+                    "value": true,
+                    "unit": "boolean"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

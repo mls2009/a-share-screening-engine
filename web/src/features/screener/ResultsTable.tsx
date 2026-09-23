@@ -15,7 +15,8 @@ function leaves(evaluation: Evaluation): Evaluation[] {
   return evaluation.children.length ? evaluation.children.flatMap(leaves) : [evaluation];
 }
 
-export function ResultsTable({ matches, selected, onSelect, onOpenChart, onAddWatchlist, sortBy, sortDirection, onSort, columns, catalog = [], checked, onCheck, hideExplanation }: {
+export function ResultsTable({ matches, selected, onSelect, onOpenChart, onAddWatchlist, sortBy, sortDirection, onSort, columns, catalog = [], checked, onCheck, hideExplanation, newSymbols = [] }: {
+  newSymbols?: string[];
   columns?: string[];
   catalog?: MetricSpec[];
   checked?: string[];
@@ -43,7 +44,7 @@ export function ResultsTable({ matches, selected, onSelect, onOpenChart, onAddWa
               <tr key={match.symbol} className={selected === match.symbol ? "selected" : ""} onClick={() => onSelect(match)}>
                 {onCheck && <td><input type="checkbox" aria-label={`勾选 ${match.symbol}`} checked={checked?.includes(match.symbol) ?? false} onClick={(event) => event.stopPropagation()} onChange={() => onCheck(match.symbol)} /></td>}
                 <td>{String(match.rank).padStart(2, "0")}</td>
-                <td><strong>{String(match.features.name ?? match.symbol)}</strong><small>{match.symbol}</small></td>
+                <td><strong>{String(match.features.name ?? match.symbol)}</strong><small>{match.symbol}</small>{newSymbols.includes(match.symbol) && <span className="new-match-badge">新增</span>}</td>
                 {columns ? columns.map((key) => {const value=formatValue(key.includes(":") ? (match.features.metric_values as Record<string, unknown> | undefined)?.[key] : match.features[key], catalog.find((item) => item.key === key.split(":").at(-1)));return <td key={key} className={key.includes("em_")?"sector-cell":undefined} title={value}>{value}</td>;}) : <><td>{number(match.features.close)}</td>
                 <td className={Number(match.features.return_20) >= 0 ? "positive" : "negative"}>{number(match.features.return_20)}%</td>
                 <td>{number(match.features.volume_ratio_20)}x</td></>}

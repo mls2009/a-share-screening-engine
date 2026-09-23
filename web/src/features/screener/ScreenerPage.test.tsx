@@ -47,15 +47,15 @@ describe("ScreenerPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "运行全市场筛选" }));
 
     await userEvent.click(screen.getByRole("button", { name: "按 20 周期 排序" }));
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, "return_20", "desc"));
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, "return_20", "desc", false));
     expect(screen.getByRole("button", { name: "按 20 周期 排序" })).toHaveTextContent("20 周期 ↓");
 
     await userEvent.click(screen.getByRole("button", { name: "按 20 周期 排序" }));
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, "return_20", "asc"));
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, "return_20", "asc", false));
     expect(screen.getByRole("button", { name: "按 20 周期 排序" })).toHaveTextContent("20 周期 ↑");
 
     await userEvent.click(screen.getByRole("button", { name: "按 20 周期 排序" }));
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, undefined, undefined));
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, undefined, undefined, false));
     expect(screen.getByRole("button", { name: "按 20 周期 排序" })).toHaveTextContent("20 周期");
   });
 
@@ -140,11 +140,11 @@ describe("ScreenerPage", () => {
     expect(screen.getByText("第 1 / 3 页")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "下一页" }));
-    await waitFor(() => expect(fetchPage).toHaveBeenCalledWith("run-1", 200, 200, undefined, undefined));
+    await waitFor(() => expect(fetchPage).toHaveBeenCalledWith("run-1", 200, 200, undefined, undefined, false));
     expect((await screen.findAllByText("北交样本")).length).toBeGreaterThanOrEqual(1);
 
     await userEvent.selectOptions(screen.getByLabelText("每页数量"), "50");
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 50, 0, undefined, undefined));
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 50, 0, undefined, undefined, false));
     expect(screen.getByText("第 1 / 9 页")).toBeInTheDocument();
   });
 
@@ -233,4 +233,58 @@ it("零命中也展示缺失原因、条件统计和数据时间", async () => {
   expect(await screen.findByText(/缺少历史窗口数据/)).toBeInTheDocument();
   expect(screen.getByText(/数据不足 2/)).toBeInTheDocument();
   expect(screen.getByText(/2026-08-19/)).toBeInTheDocument();
+});
+
+it('switching bearish to bullish template immediately changes the submitted tree and clears old results',async()=>{
+  const metric=(direction:string)=>({key:`pa_${direction}_within_250`,label:`近一年${direction==='bull'?'看涨':'看跌'}Pinbar`,unit:'boolean',timeframes:['1d'],operators:['eq'],group:'candlestick'}) as MetricSpec;
+  const tree=(direction:string)=>({kind:'group',logic:'and',children:[{kind:'condition',metric:`pa_${direction}_within_250`,timeframe:'1d',operator:'eq',right:{kind:'constant',value:true,unit:'boolean'}}]});
+  const runScreen=vi.fn().mockResolvedValue(result);
+  const fake:ScreenerClient={...client(),catalog:async()=>[...catalog,metric('bull'),metric('bear')],runScreen,listScreenTemplates:async()=>['bear','bull'].map(d=>({template_id:d,name:d==='bull'?'看涨模板':'看跌模板',version:1,tree:tree(d),updated_at:''}))};
+  render(<ScreenerPage client={fake} onOpenChart={()=>{}}/>);
+  await screen.findByRole('option',{name:'看涨模板 · v1'});
+  await userEvent.selectOptions(screen.getByLabelText('已保存模板'),'bear');
+  await userEvent.click(screen.getByRole('button',{name:'加载模板'}));
+  await userEvent.click(screen.getByRole('button',{name:'运行全市场筛选'}));
+  expect((await screen.findAllByText('测试股份')).length).toBeGreaterThan(0);
+  await userEvent.selectOptions(screen.getByLabelText('已保存模板'),'bull');
+  expect(screen.queryAllByText('测试股份')).toHaveLength(0);
+  await userEvent.click(screen.getByRole('button',{name:'运行全市场筛选'}));
+  expect(runScreen).toHaveBeenLastCalledWith(expect.objectContaining({tree:expect.objectContaining({children:[expect.objectContaining({metric:'pa_bull_within_250'})]})}), expect.any(Function));
+});
+
+it('数据日期默认最新，指定历史日期后可以切回最新',async()=>{
+  render(<ScreenerPage client={client()} onOpenChart={()=>{}}/>);
+  expect(screen.getByLabelText('数据日期模式')).toHaveValue('latest');
+  await userEvent.selectOptions(screen.getByLabelText('数据日期模式'),'history');
+  fireEvent.change(screen.getByLabelText('数据日期'),{target:{value:'2026-06-30'}});
+  expect(screen.getByLabelText('数据日期')).toHaveValue('2026-06-30');
+  await userEvent.selectOptions(screen.getByLabelText('数据日期模式'),'latest');
+  expect(screen.queryByLabelText('数据日期')).not.toBeInTheDocument();
+});
+
+it('标记新增、显示比较日期并通过服务端筛选新增',async()=>{
+  const compared={...result,new_comparison:{run_id:'older',as_of:'2026-09-18',finished_at:'2026-09-18T16:30:00',entered:['600001.SH'],count:1}};
+  const c=client();c.runScreen=async()=>compared;
+  c.screenResults=vi.fn(async()=>({...compared,filtered_count:1}));
+  render(<ScreenerPage client={c} onOpenChart={()=>{}}/>);
+  await screen.findByLabelText('指标');
+  await userEvent.click(screen.getByRole('button',{name:'运行全市场筛选'}));
+  expect(await screen.findByText('新增')).toBeInTheDocument();
+  expect(screen.getByText(/2026-09-18 16:30:00/)).toHaveTextContent('数据日期 2026-09-18');
+  await userEvent.click(screen.getByLabelText('仅看新增'));
+  await waitFor(()=>expect(c.screenResults).toHaveBeenLastCalledWith('run-1',200,0,undefined,undefined,true));
+  expect(screen.getByLabelText('仅看新增')).toBeChecked();
+});
+
+it('筛选运行中显示后台阶段和实际股票数量并禁用重复运行', async () => {
+  const fake: ScreenerClient = {...client(),runScreen: async (_payload, progress) => {
+    progress?.({progress:70,message:'逐股判断筛选条件',processed:50,total:500});
+    return new Promise(() => {});
+  }};
+  render(<ScreenerPage client={fake} onOpenChart={() => undefined} />);
+  await screen.findByLabelText('指标');
+  await userEvent.click(screen.getByRole('button',{name:'运行全市场筛选'}));
+  expect(screen.getByRole('status',{name:'条件选股进度'})).toHaveTextContent('50 / 500');
+  expect(screen.getByRole('progressbar',{name:'筛选进度'})).toHaveAttribute('value','70');
+  expect(screen.getByRole('button',{name:'运行全市场筛选'})).toBeDisabled();
 });

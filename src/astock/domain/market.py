@@ -70,6 +70,8 @@ class MarketSnapshot(BaseModel):
     amount_cny: float
     turnover_rate: float | None = None
     volume_ratio: float | None = None
+    pe_ratio: float | None = None
+    pb_ratio: float | None = None
     total_market_cap: float | None = None
     float_market_cap: float | None = None
     source: str

@@ -937,3 +937,33 @@ def test_nearest_zones_converts_automatic_roles_but_preserves_manual_choice(
     assert reappeared["00000000-0000-0000-0000-000000000001"] is True
     assert reappeared["00000000-0000-0000-0000-000000000002"] is False
     assert reappeared["00000000-0000-0000-0000-000000000003"] is False
+
+
+def test_fast_pivots_and_clusters_match_original_rules():
+    import numpy as np
+
+    from astock.features.zones import _clusters, _pivots
+    rng = np.random.default_rng(15)
+    for values in [rng.normal(10,2,120),np.ones(30),np.array([1.,np.nan,3.,2.,2.,1.,4.])]:
+        series = pd.Series(values)
+        for order in (1,2,4):
+            for low in (True,False):
+                expected = []
+                for index in range(order,len(series)-order):
+                    window = series.iloc[index-order:index+order+1]
+                    target = window.min() if low else window.max()
+                    if series.iloc[index] == target:
+                        expected.append(index)
+                assert _pivots(series,order,low)==expected
+                frame = pd.DataFrame({'low':series})
+                clusters=[]
+                for position in expected:
+                    price=float(frame.iloc[position]['low'])
+                    for cluster in clusters:
+                        center=float(np.mean([frame.iloc[item]['low'] for item in cluster]))
+                        if abs(price-center)<=.8:
+                            cluster.append(position)
+                            break
+                    else:
+                        clusters.append([position])
+                assert _clusters(frame,expected,'low',.8)==[c for c in clusters if len(c)>=2]

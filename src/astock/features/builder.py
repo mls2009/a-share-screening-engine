@@ -121,7 +121,47 @@ class FeatureBuilder:
             )
         return float(latest_base.close)
 
-    def build_symbol(self, symbol: str, as_of: date) -> None:
+    def build_incremental_symbol(self, symbol: str, as_of: date) -> None:
+        """Compare persisted inputs so normal updates write only changed periods."""
+        bars = [bar for bar in self.bar_store.read(symbol, Timeframe.DAY, Adjustment.QFQ)
+                if bar.is_final and bar.timestamp.date() <= as_of]
+        if not bars:
+            return
+        calendar = dict(self.connection.execute(
+            "select trade_date,is_open from trading_calendar where trade_date between ? and ?",
+            [bars[0].timestamp.date(), max(period_end(as_of, Timeframe.WEEK), period_end(as_of, Timeframe.MONTH))],
+        ).fetchall())
+        revision = self.bar_store.revision(symbol, Timeframe.DAY, bars[-1].timestamp.date())
+        dirty = []
+        unfinished = False
+        for timeframe in (Timeframe.DAY, Timeframe.WEEK, Timeframe.MONTH):
+            current = bars if timeframe == Timeframe.DAY else [
+                bar for bar in MarketDataService.derive(bars, timeframe, calendar) if bar.is_final]
+            if not current:
+                continue
+            stored = {row[0]: tuple(row[1:]) for row in self.connection.execute(
+                "select feature_date,open,high,low,close,volume,amount from market_features "
+                "where symbol=? and timeframe=? and feature_version='v1' and feature_date<=?",
+                [symbol, timeframe.value, as_of],
+            ).fetchall()}
+            for bar in current:
+                day = bar.timestamp.date()
+                values = (bar.open, bar.high, bar.low, bar.close, bar.volume_shares, bar.amount_cny)
+                if stored.get(day) != values:
+                    dirty.append(day)
+            batch = self.connection.execute(
+                "select source_revision,rule_version from zone_detection_batches "
+                "where symbol=? and timeframe=? and as_of_date=?",
+                [symbol, timeframe.value, current[-1].timestamp.date()],
+            ).fetchone()
+            unfinished |= batch != (revision, ZONE_RULE_VERSION)
+        if dirty:
+            self.build_symbol(symbol, as_of, changed_since=min(dirty))
+        elif unfinished:
+            # Prices may have been saved before an interrupted indicator/pattern build.
+            self.build_symbol(symbol, as_of)
+
+    def build_symbol(self, symbol: str, as_of: date, *, changed_since: date | None = None) -> None:
         bars = [
             bar
             for bar in self.bar_store.read(symbol, Timeframe.DAY, Adjustment.QFQ)
@@ -163,16 +203,19 @@ class FeatureBuilder:
                         if bar.is_final]
             frames[timeframe] = _bar_frame(complete)
         for timeframe, frame in frames.items():
+            cutoff = changed_since or date_index[0]
+            if changed_since is not None and timeframe != Timeframe.DAY:
+                cutoff = pd.Period(changed_since, freq="W-FRI" if timeframe == Timeframe.WEEK else "M").start_time.date()
             if timeframe != Timeframe.DAY:
                 self.connection.execute(
                     "delete from market_features where symbol = ? and timeframe = ? "
                     "and feature_version = 'v1' and feature_date between ? and ?",
-                    [symbol, timeframe.value, date_index[0], as_of],
+                    [symbol, timeframe.value, cutoff, as_of],
                 )
                 self.connection.execute(
                     "delete from pattern_events where symbol = ? and timeframe = ? "
                     "and event_date between ? and ?",
-                    [symbol, timeframe.value, date_index[0], as_of],
+                    [symbol, timeframe.value, cutoff, as_of],
                 )
             if frame.empty:
                 continue
@@ -191,12 +234,13 @@ class FeatureBuilder:
                     features, board, name, statuses
                 )
                 features = compute_burst_features(features, thresholds)
-            self.feature_store.upsert(symbol, timeframe, features)
+            pending = features[pd.to_datetime(features["timestamp"]).dt.date >= cutoff]
+            self.feature_store.upsert(symbol, timeframe, pending)
             persist_pattern_events(
                 self.connection,
                 symbol,
                 timeframe,
-                detect_patterns(frame),
+                detect_patterns(frame, start_date=cutoff),
             )
             zone_date = pd.Timestamp(frame.iloc[-1]["timestamp"]).date()
             replace_auto_zones(

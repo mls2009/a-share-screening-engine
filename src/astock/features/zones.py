@@ -61,13 +61,10 @@ class ManualZoneInput(BaseModel):
 
 
 def _pivots(values: pd.Series, order: int, low: bool) -> list[int]:
-    positions = []
-    for index in range(order, len(values) - order):
-        window = values.iloc[index - order : index + order + 1]
-        target = window.min() if low else window.max()
-        if values.iloc[index] == target:
-            positions.append(index)
-    return positions
+    window = values.rolling(order * 2 + 1, center=True, min_periods=1)
+    target = window.min() if low else window.max()
+    return [int(index) for index in np.flatnonzero(values.eq(target).to_numpy())
+            if order <= index < len(values) - order]
 
 
 def _clusters(
@@ -77,10 +74,11 @@ def _clusters(
     tolerance: float,
 ) -> list[list[int]]:
     clusters: list[list[int]] = []
+    prices = data[column].to_numpy()
     for position in positions:
-        price = float(data.iloc[position][column])
+        price = float(prices[position])
         for cluster in clusters:
-            center = float(np.mean([data.iloc[item][column] for item in cluster]))
+            center = float(np.mean(prices[cluster]))
             if abs(price - center) <= tolerance:
                 cluster.append(position)
                 break

@@ -1,7 +1,10 @@
+import { DataDateInput } from "../../components/DataDateInput";
 import { ArrowLeft, GitCompareArrows, Maximize2, Minimize2, RefreshCw, Search, Trash2 } from "lucide-react";
 import { type ComponentType, useEffect, useRef, useState } from "react";
 
+import { ChartNotes } from "../notes/ChartNotes";
 import { api } from "../../api";
+import { StockOverview } from "../stock/StockOverview";
 import type { Bar, BenchmarkComparison, ChartDataSyncRequest, ChartDataSyncResult, ChartIndicator, ChartIndicatorPoint, PriceZone, SymbolSearchResult, Timeframe } from "../../types";
 import { BenchmarkChart } from "./BenchmarkChart";
 import { DrawingToolbar } from "./DrawingToolbar";
@@ -9,10 +12,11 @@ import { zonePresentation } from "./chartOptions";
 import { type ChartWindow, drillWindow, drilldownTimeframes, filterWindowBars } from "./drilldown";
 import { type DrawingAnchor, type DrawingGeometry, type DrawingKind, buildManualZonePayload } from "./drawing";
 import { StockChart, type StockChartProps } from "./StockChart";
-import { sourceMarks } from "../watchlist/model";
+import { type ConditionMark, sourceMarks } from "../watchlist/model";
 import { TimeframeToolbar } from "./TimeframeToolbar";
 
 export interface ChartClient {
+  chartShapes?(symbol:string, asOf:string, signal?:AbortSignal):Promise<{marks:ConditionMark[];data_date:string|null}>;
   searchSymbols(query: string): Promise<SymbolSearchResult[]>;
   bars(symbol: string, timeframe: Timeframe, start: string, end: string): Promise<Bar[]>;
   indicators?(symbol: string, timeframe: Timeframe, start: string, end: string): Promise<ChartIndicatorPoint[]>;
@@ -24,7 +28,7 @@ export interface ChartClient {
 }
 
 const indicatorOptions: Array<{ value: ChartIndicator; label: string }> = [
-  { value: "ma", label: "MA 5/10/20/30" },
+  { value: "ma", label: "MA 5/10/20/30/120/250" },
   { value: "boll", label: "BOLL" },
   { value: "macd", label: "MACD" },
   { value: "kdj", label: "KDJ" },
@@ -49,7 +53,7 @@ const range = (timeframe: Timeframe) => {
   const end = new Date();
   const start = new Date(end);
   if (timeframe.endsWith("m")) start.setDate(start.getDate() - 60);
-  else start.setFullYear(start.getFullYear() - 3);
+  else start.setFullYear(start.getFullYear() - (timeframe === "1w" ? 5 : 3));
   return [date(start), date(end)] as const;
 };
 
@@ -60,8 +64,12 @@ export function ChartPage({
   ComparisonChart = BenchmarkChart,
   watchSource,
   focusMark,
+  historyWave,
+  showOverview = true,
 }: {
+  showOverview?: boolean;
   initialSymbol?: string;
+  historyWave?: { start: string; end: string; days: number };
   watchSource?: import("../watchlist/model").WatchSource;
   focusMark?: import("../watchlist/model").ConditionMark;
   client?: ChartClient;
@@ -76,9 +84,14 @@ export function ChartPage({
   const [bars, setBars] = useState<Bar[]>([]);
   const [indicators, setIndicators] = useState<ChartIndicatorPoint[]>([]);
   const [selectedIndicators, setSelectedIndicators] = useState<ChartIndicator[]>(["ma"]);
+  const [shapeKinds,setShapeKinds] = useState<string[]>([]);
+  const [shapeResult,setShapeResult] = useState<{key:string;marks:ConditionMark[]}>();
+  const [shapeBusy,setShapeBusy] = useState(false);
+  const [shapeError,setShapeError] = useState("");
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [zones, setZones] = useState<PriceZone[]>([]);
+  const noteCapture = useRef<(() => string) | null>(null);
   const [kind, setKind] = useState<DrawingKind | null>(null);
   const [geometry, setGeometry] = useState<DrawingGeometry>("horizontal");
   const [anchors, setAnchors] = useState<DrawingAnchor[]>([]);
@@ -93,12 +106,31 @@ export function ChartPage({
   const [reloadVersion, setReloadVersion] = useState(0);
   const deletingZoneIdsRef = useRef(new Set<string>());
   const [deletingZoneIds, setDeletingZoneIds] = useState(new Set<string>());
+  const [dataDate, setDataDate] = useState("");
   const activeWindow = drillStack.at(-1)?.window;
   const [defaultStart, defaultEnd] = range(timeframe);
-  const requestStart = activeWindow?.start ?? (watchSource ? new Date(new Date(watchSource.as_of).getTime() - 730 * 86400000).toISOString().slice(0, 10) : defaultStart);
-  const requestEnd = activeWindow?.end ?? (focusMark?.date ?? watchSource?.as_of ?? defaultEnd);
+  const baseRequestStart = activeWindow?.start ?? (historyWave ? new Date(new Date(historyWave.start).getTime() - 90 * 86400000).toISOString().slice(0, 10) : watchSource ? new Date(new Date(watchSource.as_of).getTime() - (timeframe === "1w" ? 1827 : 730) * 86400000).toISOString().slice(0, 10) : defaultStart);
+  const turtleReferences = watchSource && symbol === initialSymbol && timeframe === "1d"
+    ? sourceMarks(watchSource).flatMap(mark => mark.referenceStartDate ? [mark.referenceStartDate] : []) : [];
+  const requestStart = activeWindow ? baseRequestStart : [baseRequestStart, ...turtleReferences].sort()[0];
+  const requestEnd = activeWindow?.end ?? (dataDate || defaultEnd);
   const requestStartAt = activeWindow?.startAt;
   const requestEndAt = activeWindow?.endAt;
+
+  const shapesEnabled = shapeKinds.length > 0 && timeframe === "1d";
+  const shapeKey = `${symbol}:${requestEnd}:${reloadVersion}`;
+  useEffect(()=>{
+    if (!shapesEnabled || !client.chartShapes) {setShapeBusy(false);return;}
+    if (shapeResult?.key === shapeKey) return;
+    const controller = new AbortController();
+    let active=true;setShapeBusy(true);setShapeError("");
+    client.chartShapes(symbol,requestEnd,controller.signal)
+      .then(value=>{if(active)setShapeResult({key:shapeKey,marks:value.marks});})
+      .catch((cause:Error)=>{if(active)setShapeError(cause.message);})
+      .finally(()=>{if(active)setShapeBusy(false);});
+    return ()=>{active=false;controller.abort();};
+  },[client,shapesEnabled,shapeKey]);
+  const shapeMarks = shapesEnabled && shapeResult?.key===shapeKey ? shapeResult.marks.filter(mark=>shapeKinds.includes(mark.shape?.kind ?? "")) : [];
 
   useEffect(() => {
     if (!searchActive) return;
@@ -127,20 +159,21 @@ export function ChartPage({
   useEffect(() => {
     let current = true;
     setLoading(true); setError("");
-    Promise.all([
-      client.bars(symbol, timeframe, requestStart, requestEnd),
-      client.zones(symbol, timeframe, requestEnd),
-      client.indicators?.(symbol, timeframe, requestStart, requestEnd) ?? Promise.resolve([]),
-    ])
-      .then(([nextBars, nextZones, nextIndicators]) => {
-        if (current) {
-          setBars(activeWindow ? filterWindowBars(nextBars, activeWindow) : nextBars);
-          setZones(nextZones);
-          setIndicators(nextIndicators);
-        }
+    setBars([]);
+    setZones([]);
+    setIndicators([]);
+    client.bars(symbol, timeframe, requestStart, requestEnd)
+      .then((nextBars) => {
+        if (current) setBars(activeWindow ? filterWindowBars(nextBars, activeWindow) : nextBars);
       })
       .catch((cause: Error) => { if (current) setError(cause.message); })
       .finally(() => { if (current) setLoading(false); });
+    client.zones(symbol, timeframe, requestEnd)
+      .then((nextZones) => { if (current) setZones(nextZones); })
+      .catch((cause: Error) => { if (current) setError(`支撑阻力加载失败：${cause.message}`); });
+    (client.indicators?.(symbol, timeframe, requestStart, requestEnd) ?? Promise.resolve([]))
+      .then((nextIndicators) => { if (current) setIndicators(nextIndicators); })
+      .catch((cause: Error) => { if (current) setError(`技术指标加载失败：${cause.message}`); });
     return () => { current = false; };
   }, [client, reloadVersion, requestEnd, requestEndAt, requestStart, requestStartAt, symbol, timeframe]);
 
@@ -396,6 +429,7 @@ export function ChartPage({
           {drillStack.map((entry) => <span className="drill-crumb" key={`${entry.window.timeframe}-${entry.window.label}`}>/ <b>{entry.window.label}</b> / {timeframeLabel[entry.window.timeframe]}</span>)}
         </div>}
         {!benchmarkEnabled && <div className="indicator-toolbar">
+          <DataDateInput label="K线数据日期" value={dataDate} onChange={value=>{setDataDate(value);setDrillStack([]);}} />
           <span>技术指标</span>
           {selectedIndicators.map((indicator) => {
             const option = indicatorOptions.find((item) => item.value === indicator);
@@ -409,6 +443,13 @@ export function ChartPage({
               ))}
             </div>}
           </div>
+          <ChartNotes key={symbol} symbol={symbol} timeframe={timeframe} start={requestStart} end={requestEnd} capture={() => noteCapture.current?.()} disabled={loading || !bars.length} />
+        </div>}
+        {!benchmarkEnabled && <div className="indicator-toolbar" aria-label="形态识别">
+          <span>两年日线形态</span>
+          {[["ascending","上升三角形"],["descending","下降三角形"],["range","震荡区间"]].map(([kind,label])=><button key={kind} type="button" className="indicator-chip" style={{color: kind === "ascending" ? "#f3c969" : kind === "descending" ? "#b49aff" : "#6bc5ff", borderColor: shapeKinds.includes(kind) ? (kind === "ascending" ? "#f3c969" : kind === "descending" ? "#b49aff" : "#6bc5ff") : undefined}} aria-pressed={shapeKinds.includes(kind)} onClick={()=>{setTimeframe("1d");setDrillStack([]);setShapeKinds(current=>current.includes(kind)?current.filter(k=>k!==kind):[...current,kind]);}}>{shapeKinds.includes(kind)?"✓ ":""}{label}</button>)}
+          {shapeBusy ? <span role="status">正在识别当前股票…</span> : shapesEnabled && shapeResult?.key===shapeKey ? <span>识别到 {shapeMarks.length} 段 · 不要求突破</span> : <span>按需开启，仅计算当前股票</span>}
+          {shapeError&&<span role="alert">形态识别失败：{shapeError}</span>}
         </div>}
         {!benchmarkEnabled && <DrawingToolbar kind={kind} geometry={geometry} anchors={anchors.length} onKindChange={(next) => { setKind(next); setAnchors([]); }} onGeometryChange={(next) => { setGeometry(next); setAnchors([]); }} onCancel={() => { setKind(null); setAnchors([]); }} />}
         {error && <div className="error-banner" role="alert">{error}</div>}
@@ -430,7 +471,7 @@ export function ChartPage({
               <button type="button" disabled={syncing} onClick={() => void syncCurrentWindow()}><RefreshCw size={14} />{syncing ? "正在同步…" : "同步当前时段数据"}</button>
             </div>
           ) : (
-            <Chart bars={bars} zones={zones} indicators={indicators} selectedIndicators={selectedIndicators} marks={watchSource && symbol === initialSymbol ? sourceMarks(watchSource).filter((mark) => mark.timeframe === timeframe) : []} drawing={kind !== null} onAnchor={addAnchor} onBarSelect={selectBar} />
+            <Chart captureRef={noteCapture} viewKey={`${symbol}:${timeframe}:${requestStart}:${requestEnd}`} bars={bars} zones={zones} indicators={indicators} selectedIndicators={selectedIndicators} marks={[...(historyWave && symbol === initialSymbol && timeframe === "1d" ? [{ metric: "close", timeframe: "1d" as const, date: historyWave.end, startDate: historyWave.start, periods: historyWave.days + 1, label: "命中历史波段" }] : watchSource && symbol === initialSymbol ? sourceMarks(watchSource).filter((mark) => mark.timeframe === timeframe && !shapeMarks.some(shape=>JSON.stringify(shape.shape)===JSON.stringify(mark.shape))) : []), ...shapeMarks]} drawing={kind !== null} onAnchor={addAnchor} onBarSelect={selectBar} />
           )}
         </div>
         {selectedBar && <div className="drilldown-menu" role="dialog" aria-label="选择小周期">
@@ -452,6 +493,7 @@ export function ChartPage({
           {!zones.length && <div className="result-empty">当前窗口内尚未识别到有效支撑压力线。</div>}
         </div>
       </section>}
+      {client === api && (showOverview || symbol !== initialSymbol) && <StockOverview key={symbol} symbol={symbol} />}
     </main>
   );
 }

@@ -45,3 +45,9 @@ def test_database_uses_thread_local_connections_for_concurrent_transactions(
         list(pool.map(insert, range(400)))
 
     assert db.connection.execute("select count(*) from concurrent_rows").fetchone()[0] == 400
+
+
+def test_database_limits_query_parallel_memory(tmp_path):
+    db=Database(tmp_path/'bounded.duckdb')
+    assert db.connection.execute("select current_setting('threads'),current_setting('preserve_insertion_order')").fetchone()==(2,False)
+    db.connection.close()

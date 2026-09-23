@@ -1,0 +1,17 @@
+{
+  "kind": "group",
+  "logic": "and",
+  "children": [
+    {
+      "kind": "condition",
+      "metric": "body_low_retest",
+      "timeframe": "1d",
+      "operator": "eq",
+      "right": {
+        "kind": "constant",
+        "value": true,
+        "unit": "boolean"
+      }
+    }
+  ]
+}

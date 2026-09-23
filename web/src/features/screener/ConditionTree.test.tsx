@@ -8,6 +8,7 @@ import { createGroup } from "./treeModel";
 
 const directions = [{ value: "rise", label: "上涨幅度" }, { value: "fall", label: "下跌幅度" }];
 const catalog: MetricSpec[] = [
+  { key: "vacuum_reentry", label: "真空区跌出后重新进入（跌幅>25%）", unit: "boolean", timeframes: ["1d"], operators: ["eq", "ne"], group: "trend", choices: [{value:"true",label:"是"},{value:"false",label:"否"}] },
   { key: "return_5", label: "价格涨跌", unit: "percent", timeframes: ["1d"], operators: ["gt", "gte", "lte", "between", "not_between"], group: "price", family: "price_change", period: 5, directions },
   { key: "return_20", label: "价格涨跌", unit: "percent", timeframes: ["1d"], operators: ["gt", "gte", "lte", "between", "not_between"], group: "price", family: "price_change", period: 20, directions },
   { key: "low_20", label: "阶段最低价", unit: "price", timeframes: ["1d"], operators: ["lte"], group: "price", family: "period_low", period: 20 },
@@ -119,4 +120,13 @@ it("窗口条件允许选择每个周期的比较方式", async () => {
   render(<ConditionTree tree={tree} catalog={catalog.map((item) => item.key === "volume" ? { ...item, operators: ["gt", "at_least"] } : item)} onChange={onChange} />);
   await userEvent.selectOptions(screen.getByLabelText("窗口比较方式"), "lt");
   expect(onChange.mock.calls[0][0].children[0].comparison_operator).toBe("lt");
+});
+
+
+it("可以选择真空区重入条件并显示固定规则", async () => {
+  render(<Harness />);
+  await userEvent.selectOptions(screen.getByLabelText("指标分类"), "trend");
+  expect(screen.getByLabelText("指标")).toHaveValue("vacuum_reentry");
+  expect(screen.getByRole("option", {name: "是"})).toBeInTheDocument();
+  expect(screen.getByText(/20日高点起跌，3～5根跌幅>25%/)).toBeInTheDocument();
 });

@@ -41,10 +41,10 @@ describe("BacktestPage", () => {
   it("保留带入的非回测指标并提示，不静默替换入场条件", async () => {
     const client = {catalog:async()=>[...catalog,{key:"board",label:"板块",unit:"category",timeframes:["1d"],operators:["eq"],supported_modes:["close"],choices:[{value:"beijing",label:"北交所"}]}] as MetricSpec[],runBacktest:vi.fn()};
     render(<BacktestPage client={client} initialDraft={{symbol:"920001.BJ",tree:{kind:"condition",metric:"board",timeframe:"1d",operator:"eq",right:{kind:"constant",value:"beijing"}}}} />);
-    expect(await screen.findByText(/以下入场指标暂不支持回测：板块/)).toBeInTheDocument();
+    expect(await screen.findByText(/以下指标缺少可用的历史回测支持：板块/)).toBeInTheDocument();
     expect(screen.getByRole("button",{name:"运行策略回测"})).toBeDisabled();
   });
-  it("优先按 supported_modes 筛选回测指标", async () => {
+  it("展示完整条件目录，并在运行前提示历史支持限制", async () => {
     const client = {
       catalog: async () => [
         { ...catalog[0], timeframes: ["1d"], supported_modes: ["backtest"] },
@@ -55,7 +55,7 @@ describe("BacktestPage", () => {
     render(<BacktestPage client={client} />);
     const selects = await screen.findAllByRole("combobox", { name: "指标" });
     expect(selects[0]).toHaveTextContent("近 20 周期涨跌幅");
-    expect(selects[0]).not.toHaveTextContent("成交量");
+    expect(selects[0]).toHaveTextContent("成交量");
   });
 
   it("显示中文拒单原因与数据覆盖诊断", async () => {
@@ -129,7 +129,7 @@ describe("BacktestPage", () => {
     expect(screen.getByText("买入")).toBeInTheDocument();
   });
 
-  it("切换回测周期时同步入场和离场条件周期", async () => {
+  it("切换信号检查周期时保留各条件自己的周期", async () => {
     const client = {
       catalog: async () => catalog,
       runBacktest: vi.fn().mockResolvedValue(run),
@@ -145,7 +145,68 @@ describe("BacktestPage", () => {
 
     const payload = client.runBacktest.mock.calls[0][0];
     expect(payload.timeframe).toBe("5m");
-    expect(payload.entry_tree.children[0].timeframe).toBe("5m");
-    expect(payload.exit_tree.children[0].timeframe).toBe("5m");
+    expect(payload.entry_tree.children[0].timeframe).toBe("1d");
+    expect(payload.exit_tree.children[0].timeframe).toBe("1d");
   });
+});
+
+it("runs the latest watchlist group members independently and continues after failure", async () => {
+  const { api } = await import("../../api");
+  const groups = vi.spyOn(api, "watchGroups").mockResolvedValue([{ id: "group-1", name: "芯片观察" }]);
+  const stocks = vi.spyOn(api, "watchlist").mockResolvedValue([
+    { symbol: "600001.SH", name: "股票一", sources: [], groups: [{ id: "group-1", name: "芯片观察" }] },
+    { symbol: "600002.SH", name: "股票二", sources: [], groups: [{ id: "group-1", name: "芯片观察" }] },
+    { symbol: "600003.SH", name: "其他组股票", sources: [], groups: [] },
+  ]);
+  const runBacktest = vi.fn().mockRejectedValueOnce(new Error("历史数据不足")).mockResolvedValueOnce(run);
+  try {
+    render(<BacktestPage client={{ catalog: async () => catalog, runBacktest }} />);
+    await userEvent.selectOptions(screen.getByLabelText("回测股票来源"), "group");
+    await screen.findByRole("option", { name: "芯片观察 · 2 只" });
+    await userEvent.selectOptions(screen.getByLabelText("回测自选分组"), "group-1");
+    await userEvent.selectOptions(screen.getByLabelText("回测方式"), "individual");
+    await userEvent.click(screen.getByRole("button", { name: "运行策略回测" }));
+    expect(await screen.findByText("批量回测结束，共处理 2 只股票")).toBeInTheDocument();
+    expect(stocks).toHaveBeenCalledTimes(2);
+    expect(runBacktest).toHaveBeenNthCalledWith(1, expect.objectContaining({ symbols: ["600001.SH"] }));
+    expect(runBacktest).toHaveBeenNthCalledWith(2, expect.objectContaining({ symbols: ["600002.SH"] }));
+    expect(screen.getByText("历史数据不足")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看 600002.SH 报告" })).toBeInTheDocument();
+  } finally { groups.mockRestore(); stocks.mockRestore(); }
+});
+
+it("deduplicates a multi-stock portfolio into one shared-capital request", async () => {
+  const runBacktest = vi.fn().mockResolvedValue(run);
+  render(<BacktestPage client={{ catalog: async () => catalog, runBacktest }} />);
+  const input = screen.getByLabelText("回测证券代码");
+  await userEvent.clear(input);
+  await userEvent.type(input, "600001.SH,600002.SH,600001.SH");
+  await userEvent.click(screen.getByRole("button", { name: "运行策略回测" }));
+  expect(runBacktest).toHaveBeenCalledOnce();
+  expect(runBacktest).toHaveBeenCalledWith(expect.objectContaining({ symbols: ["600001.SH", "600002.SH"] }));
+});
+
+it("imports entry JSON with its timeframe and preserves it after malformed JSON", async () => {
+  const { api } = await import("../../api");
+  const validate = vi.spyOn(api, "validateScreen").mockResolvedValue({ valid: true, errors: [] });
+  const runBacktest = vi.fn().mockResolvedValue(run);
+  try {
+    render(<BacktestPage client={{ catalog: async () => catalog, runBacktest }} />);
+    await screen.findAllByLabelText("指标");
+    await userEvent.click(screen.getByRole("button", { name: "导入入场 JSON" }));
+    const tree = { kind: "condition", metric: "return_20", timeframe: "1w", operator: "gte", right: { kind: "constant", value: 45, unit: "percent" } };
+    await userEvent.click(screen.getByLabelText("入场条件 JSON"));
+    await userEvent.paste(JSON.stringify(tree));
+    await userEvent.click(screen.getByRole("button", { name: "应用入场 JSON" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "导入入场 JSON" }));
+    await userEvent.clear(screen.getByLabelText("入场条件 JSON"));
+    await userEvent.click(screen.getByLabelText("入场条件 JSON"));
+    await userEvent.paste("{bad");
+    await userEvent.click(screen.getByRole("button", { name: "应用入场 JSON" }));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    await userEvent.click(screen.getByRole("button", { name: "运行策略回测" }));
+    expect(runBacktest).toHaveBeenCalledWith(expect.objectContaining({ timeframe: "1d", entry_tree: expect.objectContaining({ children: [tree] }) }));
+  } finally { validate.mockRestore(); }
 });

@@ -1,0 +1,39 @@
+{
+  "kind": "group",
+  "logic": "or",
+  "children": [
+    {
+      "kind": "condition",
+      "metric": "shape_ascending_within_2y",
+      "timeframe": "1d",
+      "operator": "eq",
+      "right": {
+        "kind": "constant",
+        "value": true,
+        "unit": "boolean"
+      }
+    },
+    {
+      "kind": "condition",
+      "metric": "shape_descending_within_2y",
+      "timeframe": "1d",
+      "operator": "eq",
+      "right": {
+        "kind": "constant",
+        "value": true,
+        "unit": "boolean"
+      }
+    },
+    {
+      "kind": "condition",
+      "metric": "shape_range_within_2y",
+      "timeframe": "1d",
+      "operator": "eq",
+      "right": {
+        "kind": "constant",
+        "value": true,
+        "unit": "boolean"
+      }
+    }
+  ]
+}

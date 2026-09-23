@@ -17,10 +17,11 @@ export function formatValue(value: unknown, spec?: MetricSpec): string {
   return spec?.choices?.find((choice) => choice.value === String(value))?.label ?? String(value);
 }
 export function describe(node: UiNode | SourceNode, catalog: MetricSpec[]): string {
+  if ("label" in node && node.label) return node.label;
   if ("disabled" in node && node.disabled) return "";
   if (node.kind === "group" && "children" in node) {
     const children = node.children?.map((child) => describe(child, catalog)).filter(Boolean) ?? [];
-    return node.logic === "not" ? `不满足（${children.join("")}）` : `（${children.join(node.logic === "or" ? "；或者 " : "；并且 ")}）`;
+    return node.logic === "not" ? `不满足（${children.join("")}）` : node.logic === "at_least" ? `同日最少满足 ${"minimumMatches" in node ? node.minimumMatches ?? 1 : 1} 个策略（${children.join("；")}）` : `（${children.join(node.logic === "or" ? "；或者 " : "；并且 ")}）`;
   }
   const item = node as SourceNode & { direction?: string; selectedValues?: string[]; comparison_operator?: string; occurrences?: number };
   const spec = catalog.find((entry) => entry.key === item.metric);
@@ -45,6 +46,20 @@ export function boundaryText(node: SourceNode, evaluation: Evaluation): string {
   return `${delta >= 0 ? "距不符合边界" : "尚差"} ${Math.abs(delta).toFixed(4)}${evaluation.unit === "percent" ? "个百分点" : units[evaluation.unit ?? ""] ?? ""}`;
 }
 export function metricHelp(metric: MetricSpec): string {
+  if (metric.key === "vacuum_reentry_ma120_within_250") return "按日线成交量定义缩量急跌区间，无需分钟数据。急跌段日均成交量须≤前20日日均量的0.8倍。最近250个交易日（含观察日）至少一天同时满足：跌幅>25%的缩量急跌区间跌出后重新进入，且该日收盘价>该日MA120。不要求今天仍满足；历史不足但已找到命中时可入选，否则显示数据不足。";
+  if (metric.key.startsWith("vacuum_")) return "日线缩量急跌区间；急跌段日均成交量/此前20日日均量≤0.8，缺失不判定。日线：20日高点起跌，3～5根跌幅>25%、下跌效率≥80%、相邻收盘每日跌幅≥2%，无连续3根振幅≤3%的平台；急跌首次放缓后的收盘确认终点（缓跌不计入），满5根则固定区间。之后收盘远离下沿至少5%，连续5日收盘低于下沿，且远离后间隔3～20日才允许从下方收盘重新进入、且低于上沿时触发一次。MA120需另加条件。多个区间优先展示最新命中区间；仅支持收盘和历史回测。";
+  if (metric.key.startsWith("pa_")) {
+    if (metric.key.endsWith("within_250")) return "扫描截至观察日最近250个交易日：同一天同时满足Pinbar、区间边界、局部极值与四项至少两项。命中过一次即可入选，同一股票所有命中日期及当时关键位都会标记。每次只使用当时已知历史，不要求今天仍符合。";
+    if (metric.key.endsWith("pinbar")) return "主影线长度严格超过整根振幅的2/3；不限制副影线比例，不限制阴阳线。仅识别已收盘日线。";
+    if (metric.key.endsWith("local_extreme")) return "看涨：前3根收盘依次降低，当根最低价低于这3根最低价；看跌按相反方向判断。";
+    if (metric.key === "pa_prominent") return "当前最高价−最低价，至少为前20根同类振幅中位数的1.5倍；20根和1.5倍是对书中‘明显’的量化参数。";
+    if (metric.key === "pa_left_eye") return "本根实体全部位于前一根高低价范围内，且本根振幅更大；两个要求一起满足。";
+    if (metric.key.endsWith("trend")) return "只使用此前已结束周线；拐点左右各2周确认，最近两个波峰与两个波谷均抬高（看涨）或降低（看跌）。";
+    return "试验版：此前250根日线低价2%与高价98%分位估计大区间，只选靠近底部/顶部20%的已确认周线转折，每侧一个区域；中部位置及中部支撑压力转换不参与。转折仍须左右2周确认、反向离开≥周ATR14两倍。图上普通参考线不变。";
+  }
+  if (metric.key === "pe_ratio") return "腾讯公布的市盈率原值，未明确区分静态/动态/TTM。单位为倍，负值保留，缺失不按零计算；请选择实时行情模式。";
+  if (metric.key === "pb_ratio") return "最新市净率，单位为倍；请选择实时行情模式。";
+  if (["total_market_cap", "float_market_cap"].includes(metric.key)) return "当前行情快照中的市值，筛选输入单位为元（1 亿元 = 100000000 元）；请选择实时行情模式。";
   const key = metric.key;
   if (key === "em_industry" || key === "em_concept") return "名称及成分股完全沿用东方财富，按当前同步快照判断。多选“属于”表示任一命中；要求同时属于多个板块时，在AND组添加多条条件。历史日期不代表历史归属。";
   if (key.includes("slope_abs")) return "近5根均线值的回归斜率绝对值 ÷ 同期均值 ×100，每周期百分比；例如0.03代表0.03%/周期。";

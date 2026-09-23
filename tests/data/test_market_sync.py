@@ -78,6 +78,7 @@ def test_full_market_sync_continues_after_one_symbol_fails(tmp_path: Path) -> No
 
     summary = service.start(end=date(2026, 8, 20), years=3)
 
+    assert service.updates.revision == 1
     assert summary.total == 2
     assert summary.succeeded == 1
     assert summary.failed == 1
@@ -86,7 +87,7 @@ def test_full_market_sync_continues_after_one_symbol_fails(tmp_path: Path) -> No
         (date(2023, 8, 20), date(2026, 8, 20))
     ]
     assert jobs.failed_symbols(summary.job_id) == ["000001.SZ"]
-    assert service.latest_completed_end_date() == date(2026, 8, 20)
+    assert service.latest_completed_end_date() is None
 
 
 def test_retry_failed_only_requests_previously_failed_symbols(tmp_path: Path) -> None:
@@ -96,6 +97,7 @@ def test_retry_failed_only_requests_previously_failed_symbols(tmp_path: Path) ->
 
     retried = service.retry_failed(first.job_id)
 
+    assert service.updates.revision == 2
     assert retried.status == "completed"
     assert retried.succeeded == 2
     assert retried.failed == 0
@@ -145,3 +147,55 @@ def test_resume_requests_pending_symbols_but_not_already_succeeded_symbols(
 
     assert summary.status == "completed"
     assert [call[0] for call in market_data.history_calls] == ["000001.SZ"]
+
+
+def test_scheduled_retry_resumes_same_job(tmp_path: Path) -> None:
+    service, market_data, _jobs = _service(tmp_path)
+    first = service.start(end=date(2026, 8, 20))
+    count = len(market_data.history_calls)
+    second = service.start(end=date(2026, 8, 20))
+    assert second.job_id == first.job_id
+    assert second.status == 'completed'
+    assert [call[0] for call in market_data.history_calls[count:]] == ['000001.SZ']
+    assert service.latest_completed_end_date() == date(2026, 8, 20)
+
+
+def test_stop_preserves_unfinished_job_for_resume(tmp_path):
+    service, market_data, jobs = _service(tmp_path)
+    original = market_data.history
+    def history(*args):
+        service.stop()
+        return original(*args)
+    market_data.history = history
+    summary = service.start(date(2026, 8, 20))
+    assert len(market_data.history_calls) == 1
+    assert summary.status == "running"
+    assert jobs.get(summary.job_id).finished_at is None
+
+
+def test_market_sync_uses_incremental_feature_builder(tmp_path):
+    service, market_data, jobs = _service(tmp_path)
+    market_data.fail_once.clear()
+    class Builder:
+        calls = []
+        def build_symbol(self, *args):
+            raise AssertionError('full rebuild must not be used')
+        def build_incremental_symbol(self, symbol, as_of):
+            self.calls.append((symbol, as_of))
+    builder = Builder()
+    service.feature_builder = builder
+    summary = service.start(date(2026, 8, 20))
+    assert summary.succeeded == 2
+    assert len(builder.calls) == 2
+
+
+def test_primary_sync_refuses_low_disk_before_any_provider_or_write(tmp_path, monkeypatch):
+    import shutil
+    import pytest
+    from types import SimpleNamespace
+    service, market, jobs = _service(tmp_path)
+    monkeypatch.setattr(shutil, 'disk_usage', lambda _: SimpleNamespace(free=2*1024**3))
+    with pytest.raises(RuntimeError, match='空间'):
+        service.start(end=date(2026,8,20))
+    assert market.universe_calls==[] and market.history_calls==[]
+    assert jobs.connection.execute('select count(*) from data_sync_jobs').fetchone()[0]==0

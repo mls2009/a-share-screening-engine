@@ -1,0 +1,17 @@
+{
+  "kind": "group",
+  "logic": "and",
+  "children": [
+    {
+      "kind": "condition",
+      "metric": "pw_bull_within_156",
+      "timeframe": "1w",
+      "operator": "eq",
+      "right": {
+        "kind": "constant",
+        "value": true,
+        "unit": "boolean"
+      }
+    }
+  ]
+}

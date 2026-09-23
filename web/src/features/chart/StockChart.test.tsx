@@ -14,6 +14,7 @@ const echartsMock = vi.hoisted(() => {
   };
   const chart = {
     setOption: vi.fn(),
+    getOption: vi.fn(() => ({ dataZoom: [{ start: 0, end: 100 }] })),
     resize: vi.fn(),
     dispose: vi.fn(),
     convertFromPixel: vi.fn(),
@@ -40,6 +41,7 @@ const bars: Bar[] = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  echartsMock.chart.getOption.mockReturnValue({ dataZoom: [{ start: 0, end: 100 }] });
   echartsMock.chartHandlers.clear();
   echartsMock.zrHandlers.clear();
 });
@@ -159,4 +161,28 @@ it("手动画线时蜡烛点击不触发下钻并继续选择锚点", () => {
 
   expect(onBarSelect).not.toHaveBeenCalled();
   expect(onAnchor).toHaveBeenCalledWith({ date: "2026-08-19", price: 10.25 });
+});
+
+it("异步指标、标记和绘图状态更新保留缩放拖动位置，不重建实例", () => {
+  const { rerender, unmount } = render(<StockChart bars={bars} zones={[]} />);
+  echartsMock.chart.getOption.mockReturnValue({dataZoom: [{start: 25, end: 65}]});
+  rerender(<StockChart bars={bars} zones={[]} indicators={[]} selectedIndicators={["ma", "macd"]} marks={[]} drawing />);
+  const option = echartsMock.chart.setOption.mock.calls.filter(([value]) => value.series).at(-1)?.[0];
+  expect(option.dataZoom).toEqual(expect.arrayContaining([
+    expect.objectContaining({start: 25, end: 65}),
+  ]));
+  expect(option.dataZoom.every((zoom: {start:number;end:number}) => zoom.start === 25 && zoom.end === 65)).toBe(true);
+  expect(echartsMock.init).toHaveBeenCalledTimes(1);
+  expect(echartsMock.chart.dispose).not.toHaveBeenCalled();
+  unmount();
+  expect(echartsMock.chart.dispose).toHaveBeenCalledTimes(1);
+});
+
+
+it("切换股票或周期时不继承旧图视角", () => {
+  const {rerender} = render(<StockChart viewKey="600001.SH:1d" bars={bars} zones={[]} />);
+  echartsMock.chart.getOption.mockReturnValue({dataZoom: [{start: 25, end: 65}]});
+  rerender(<StockChart viewKey="600001.SH:1w" bars={bars} zones={[]} />);
+  const option = echartsMock.chart.setOption.mock.calls.filter(([value]) => value.series).at(-1)?.[0];
+  expect(option.dataZoom[0]).toMatchObject({start: 0, end: 100});
 });

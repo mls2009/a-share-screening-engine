@@ -118,6 +118,20 @@ class MarketDataService:
         bars = self.bar_store.read_range(symbol, base, adjustment, start, end)
         return self.derive(bars, timeframe)
 
+    def sync_watchlist_status(self, end: date) -> None:
+        if self.reference_provider is None:
+            return
+        symbols = self.database.connection.execute("select symbol from watchlist").fetchall()
+        for (symbol,) in symbols:
+            rows = self.reference_provider.security_status(symbol, end - timedelta(days=7), end)
+            if rows:
+                self.database.connection.executemany(
+                    "insert or replace into security_status values (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [[row[key] for key in ("symbol", "trade_date", "board", "is_st",
+                        "is_suspended", "previous_close", "limit_up", "limit_down")]
+                     for row in rows],
+                )
+
     def sync_universe(self, start: date, end: date) -> list[Security]:
         if self.reference_provider is None:
             raise RuntimeError("reference provider is not configured")

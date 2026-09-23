@@ -136,3 +136,21 @@ def test_live_screen_uses_prior_days_for_volume_average_even_after_close_sync(tm
     service = ScreeningService(database, MarketFeatureStore(database), FakeSnapshots())
     result = service.run(condition, as_of=date(2026, 8, 20), mode="live")
     assert result.match_count == 1
+
+
+@pytest.mark.parametrize('metric,unit,threshold', [('pe_ratio','ratio',20), ('pb_ratio','ratio',3), ('total_market_cap','amount',2000000000), ('float_market_cap','amount',1000000000)])
+def test_current_valuations_filter_snapshot_and_missing_is_unknown(tmp_path, metric, unit, threshold):
+    database = Database(tmp_path / 'valuations.duckdb')
+    database.migrate()
+    database.connection.executemany("insert into symbols(symbol,name,exchange,is_listed) values (?,?,'SH',true)", [['600001.SH','有估值'], ['600002.SH','无估值']])
+    class Valuations:
+        def snapshot_many(self, symbols):
+            return SnapshotBatchResult(tuple(MarketSnapshot(symbol=symbol, timestamp='2026-08-20T15:00:00+08:00', price=12, volume_shares=100, amount_cny=1200, source='tencent', **({metric: threshold - 1} if symbol == '600001.SH' else {})) for symbol in symbols),len(symbols),0)
+    service = ScreeningService(database, MarketFeatureStore(database), Valuations())
+    tree = ConditionNode.model_validate({'metric':metric,'timeframe':'1d','operator':'lt','right':{'kind':'constant','value':threshold,'unit':unit}})
+    result = service.run(tree, as_of=date(2026,8,20), mode='live')
+    assert [match.symbol for match in result.matches] == ['600001.SH']
+    assert result.diagnostics['conditions']['root']['unknown'] == 1
+    from astock.screening.service import ScreenDefinitionError
+    with pytest.raises(ScreenDefinitionError):
+        service.run(tree, as_of=date(2026,8,20), mode='close')

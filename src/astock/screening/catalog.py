@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 
 from astock.domain.market import Timeframe
+from astock.features.price_action import PA_LABELS
+from astock.features.chart_shapes import SHAPE_LABELS
 from astock.screening.models import Operator, Unit
 
 NUMERIC_OPERATORS = frozenset(
@@ -46,7 +48,7 @@ class MetricSpec:
     choices: tuple[ChoiceSpec, ...] = ()
     multiple: bool = False
     visible: bool = True
-    supported_modes: frozenset[str] = frozenset({"close"})
+    supported_modes: frozenset[str] = frozenset({"close", "backtest"})
 
 
 def _metric(
@@ -113,6 +115,27 @@ PATTERN_CHOICES = (
 
 
 METRICS = [
+    *[MetricSpec(key, label, Unit.BOOLEAN, timeframes=frozenset({Timeframe.WEEK if key.startswith("pw_") else Timeframe.DAY}),
+                 operators=EQUALITY_OPERATORS, group="candlestick", family=key,
+                 choices=(ChoiceSpec("true", "是"), ChoiceSpec("false", "否")),
+                 supported_modes=frozenset({"close", "backtest"})) for key, label in (PA_LABELS | SHAPE_LABELS).items()],
+    MetricSpec("vacuum_reentry_ma120_within_250", "近250交易日内缩量急跌区间重入且当日站上MA120", Unit.BOOLEAN,
+               timeframes=frozenset({Timeframe.DAY}), operators=EQUALITY_OPERATORS, group="trend",
+               choices=(ChoiceSpec("true", "是"), ChoiceSpec("false", "否"))),
+    MetricSpec("vacuum_reentry", "缩量急跌区间跌出后重新进入（跌幅>25%）", Unit.BOOLEAN,
+               timeframes=frozenset({Timeframe.DAY}), operators=EQUALITY_OPERATORS, group="trend",
+               choices=(ChoiceSpec("true", "是"), ChoiceSpec("false", "否"))),
+    *[MetricSpec(key, label, unit, timeframes=frozenset({Timeframe.DAY}), group="trend")
+      for key, label, unit in (
+          ("vacuum_volume_ratio", "急跌段日均成交量/前20日日均量", Unit.RATIO),
+          ("vacuum_lower", "缩量急跌区间下沿（跌幅>25%）", Unit.PRICE),
+          ("vacuum_upper", "缩量急跌区间上沿（跌幅>25%）", Unit.PRICE),
+          ("vacuum_drop", "缩量急跌区间形成跌幅", Unit.PERCENT),
+          ("vacuum_days", "缩量急跌区间下跌天数", Unit.DAYS),
+          ("vacuum_efficiency", "缩量急跌区间下跌效率", Unit.PERCENT),
+          ("vacuum_break_age", "缩量急跌区间跌出后交易日数", Unit.DAYS),
+      )],
+
     *[
         _metric(key, label, Unit.PRICE, group="price", family=key)
         for key, label in (
@@ -162,6 +185,8 @@ METRICS = [
         for window in (1, 5, 20)
     ],
     MetricSpec("turnover_rate", "换手率", Unit.PERCENT, group="activity", family="turnover_rate", supported_modes=frozenset({"live"})),
+    MetricSpec("pe_ratio", "市盈率（腾讯）", Unit.RATIO, timeframes=frozenset({Timeframe.DAY}), operators=NUMERIC_OPERATORS - {Operator.CONTINUOUS, Operator.AT_LEAST, Operator.CROSSES_ABOVE, Operator.CROSSES_BELOW}, group="attributes", supported_modes=frozenset({"live"})),
+    MetricSpec("pb_ratio", "市净率", Unit.RATIO, timeframes=frozenset({Timeframe.DAY}), operators=NUMERIC_OPERATORS - {Operator.CONTINUOUS, Operator.AT_LEAST, Operator.CROSSES_ABOVE, Operator.CROSSES_BELOW}, group="attributes", supported_modes=frozenset({"live"})),
     MetricSpec("total_market_cap", "总市值", Unit.AMOUNT, group="attributes", family="total_market_cap", supported_modes=frozenset({"live"})),
     MetricSpec("float_market_cap", "流通市值", Unit.AMOUNT, group="attributes", family="float_market_cap", supported_modes=frozenset({"live"})),
     *[
@@ -221,7 +246,7 @@ METRICS = [
         timeframes=frozenset({Timeframe.DAY}),
         group="price",
         family="burst_return",
-        supported_modes=frozenset({"close"}),
+        supported_modes=frozenset({"close", "backtest"}),
     ),
     *[
         _metric(f"max_drawdown_{window}", "最大回撤", Unit.PERCENT, group="trend", family="max_drawdown", period=window)
@@ -242,7 +267,7 @@ METRICS = [
         timeframes=frozenset({Timeframe.DAY}),
         group="status",
         family="burst_limit_up",
-        supported_modes=frozenset({"close"}),
+        supported_modes=frozenset({"close", "backtest"}),
     ),
     MetricSpec(
         "limit_up_burst_5_count_60",
@@ -251,7 +276,7 @@ METRICS = [
         timeframes=frozenset({Timeframe.DAY}),
         group="status",
         family="burst_limit_up_episodes",
-        supported_modes=frozenset({"close"}),
+        supported_modes=frozenset({"close", "backtest"}),
     ),
     MetricSpec("board", "所属板块", Unit.CATEGORY, operators=CATEGORY_OPERATORS, group="attributes", family="board", choices=BOARD_CHOICES, multiple=True),
     MetricSpec("em_industry", "东方财富行业", Unit.CATEGORY, timeframes=frozenset({Timeframe.DAY}), operators=MEMBERSHIP_OPERATORS, group="attributes", family="em_industry", multiple=True, supported_modes=frozenset({"close", "live"})),

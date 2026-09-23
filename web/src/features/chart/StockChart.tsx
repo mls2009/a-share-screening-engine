@@ -14,6 +14,7 @@ import { type CSSProperties, useEffect, useRef } from "react";
 
 import type { Bar, ChartIndicator, ChartIndicatorPoint, PriceZone } from "../../types";
 import { buildChartOption } from "./chartOptions";
+import { attachPriceScale } from "./priceScale";
 import type { DrawingAnchor } from "./drawing";
 
 echarts.use([
@@ -31,7 +32,9 @@ echarts.use([
 ]);
 
 export interface StockChartProps {
+  captureRef?: { current: (() => string) | null };
   bars: Bar[];
+  viewKey?: string;
   zones: PriceZone[];
   indicators?: ChartIndicatorPoint[];
   selectedIndicators?: ChartIndicator[];
@@ -64,8 +67,11 @@ function linePointerParams(params: unknown): ChartLinePointerParams | undefined 
   return candidate;
 }
 
-export function StockChart({ bars, zones, indicators = [], selectedIndicators, marks = [], drawing = false, onAnchor, onBarSelect }: StockChartProps) {
+export function StockChart({ captureRef, bars, viewKey, zones, indicators = [], selectedIndicators, marks = [], drawing = false, onAnchor, onBarSelect }: StockChartProps) {
   const element = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<echarts.ECharts | null>(null);
+  const previousView = useRef<string | null>(null);
+  const currentView = viewKey ?? `${bars[0]?.symbol}:${bars[0]?.timestamp}:${bars.at(-1)?.timestamp}:${bars.length}`;
   const anchorCallback = useRef(onAnchor);
   const barSelectCallback = useRef(onBarSelect);
   anchorCallback.current = onAnchor;
@@ -73,8 +79,19 @@ export function StockChart({ bars, zones, indicators = [], selectedIndicators, m
 
   useEffect(() => {
     if (!element.current) return;
-    const chart = echarts.init(element.current, undefined, { renderer: "canvas" });
-    chart.setOption(buildChartOption(bars, zones, indicators, selectedIndicators, marks), true);
+    const chart = chartRef.current ?? echarts.init(element.current, undefined, { renderer: "canvas" });
+    chartRef.current = chart;
+    if (captureRef) captureRef.current = () => chart.getDataURL({type: "png", pixelRatio: 1, backgroundColor: "#0b0d0f"});
+    const option = buildChartOption(bars, zones, indicators, selectedIndicators, marks);
+    if (previousView.current === currentView) {
+      const zoom = (chart.getOption()?.dataZoom as Array<{ start?: number; end?: number }> | undefined)?.[0];
+      if (zoom && Number.isFinite(zoom.start) && Number.isFinite(zoom.end) && Array.isArray(option.dataZoom)) {
+        option.dataZoom = option.dataZoom.map(item => ({ ...item, start: zoom.start, end: zoom.end }));
+      }
+    }
+    previousView.current = currentView;
+    chart.setOption(option, true);
+    const detachPriceScale = attachPriceScale(chart, bars);
     const resize = () => chart.resize();
     const resizeObserver = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(resize);
     resizeObserver?.observe(element.current);
@@ -135,14 +152,21 @@ export function StockChart({ bars, zones, indicators = [], selectedIndicators, m
       chart.off("mouseout", hideLineTooltip);
       resizeObserver?.disconnect();
       window.removeEventListener("resize", resize);
-      chart.dispose();
+      detachPriceScale();
     };
-  }, [bars, drawing, indicators, selectedIndicators, zones, marks]);
+  }, [bars, currentView, drawing, indicators, selectedIndicators, zones, marks]);
+
+  useEffect(() => () => {
+    if (captureRef) captureRef.current = null;
+    chartRef.current?.dispose();
+    chartRef.current = null;
+    previousView.current = null;
+  }, []);
 
   const subPaneCount = (selectedIndicators?.filter((item) => ["macd", "kdj", "rsi", "obv", "atr"].includes(item)).length ?? 0) + new Set(marks.filter((mark) => !/^(ma_\d+$|open$|close$|high$|low$|pattern_|volume$)/.test(mark.metric)).map((mark) => mark.metric)).size;
   const chartStyle = {
     "--chart-height": `${560 + subPaneCount * 120}px`,
     "--chart-mobile-height": `${440 + subPaneCount * 110}px`,
   } as CSSProperties;
-  return <div ref={element} style={chartStyle} className={`stock-chart ${drawing ? "drawing" : ""}`} role="img" aria-label="K 线与成交量图" />;
+  return <><div className="limit-color-legend"><span><i style={{ background: "#ffca45" }} />收盘涨停</span><span><i style={{ background: "#a78bfa" }} />收盘跌停</span><small>日线按未复权收盘价与当日涨跌停价判断；缺少数据不着色，盘中触板不算收盘封板。</small></div><div ref={element} style={chartStyle} className={`stock-chart ${drawing ? "drawing" : ""}`} role="img" aria-label="K 线与成交量图" /></>;
 }

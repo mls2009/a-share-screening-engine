@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { api } from "../../api";
+import { StockOverview } from "../stock/StockOverview";
 import type { MetricSpec, ScreenMatch } from "../../types";
 import type { ConditionMark, SourceNode } from "../watchlist/model";
 import type { StockDetail } from "./workbenchTypes";
@@ -36,6 +37,9 @@ export function StockDetailPanel({ runId, match, catalog, onClose, onStep, onOpe
   }}>
     <header className="detail-heading"><div><h2>{String(match.features.name ?? match.symbol)}</h2><small>{match.symbol} · 入选依据</small></div><button onClick={onClose} aria-label="关闭详情">×</button></header>
     <div className="detail-actions"><button onClick={() => onStep(-1)}>↑ 上一只</button><button onClick={() => onStep(1)}>↓ 下一只</button><button onClick={() => onAddWatchlist(match.symbol)}>加入自选</button><button onClick={() => onOpenChart(match.symbol)}>完整K线</button></div>
+    {detail ? <Suspense fallback={<p>正在加载标注K线…</p>}><ChartPage showOverview={false} key={`${match.symbol}:${focus?.timeframe}:${focus?.date}:${path}`} initialSymbol={match.symbol} focusMark={focus} watchSource={{ ...detail.source, marks: (detail.source.marks ?? []).filter((mark) => !path || mark.path === path).map((mark) => ({...mark, metricLabel:metricLabel(mark.metric,catalog)})) }} /></Suspense> : <p>正在加载K线研究与入选依据…</p>}
+    <StockOverview key={match.symbol} symbol={match.symbol} />
+    <h3>入选时行情</h3>
     <dl className="detail-quotes">{["board", "close", "return_1", "volume", "turnover_rate", "volume_ratio_20", "amount"].map((key) => <div key={key}><dt>{metricLabel(key, catalog)}</dt><dd>{formatValue(match.features[key], catalog.find((metric) => metric.key === key))}</dd></div>)}</dl>
     <p>行情时间：{String(match.features.timestamp ?? match.features.feature_date ?? detail?.source.as_of ?? "未知")} · {detail?.source.mode === "live" ? "入选时盘中快照" : "入选时收盘数据"}</p>
     <section className="sector-tags"><h3>所属行业与概念 · 东方财富</h3>{["em_industry","em_concept"].map(key=><p key={key}><strong>{key==="em_industry"?"行业":"概念"}：</strong>{Array.isArray(match.features[key])?(match.features[key] as string[]).map(name=><span key={name}>{name}</span>):"尚未获取，请更新板块后重新筛选"}</p>)}<small>成分名单快照：{String(match.features.sector_updated_at??"未获取")}；不是历史归属。最近20日的行业/概念条件不作历史重建。</small></section>
@@ -64,7 +68,6 @@ export function StockDetailPanel({ runId, match, catalog, onClose, onStep, onOpe
       })}</div><small>绿：符合 · 红：不符合 · 灰：数据不足；历史表现按当日收盘重新判断。</small>
       <div className="detail-actions"><button disabled={checking} onClick={() => void checkLatest()}>{checking ? "检查中…" : "检查最新收盘状态"}</button><button onClick={() => onBacktest?.(match.symbol, detail.source.tree)}>带入回测</button><button onClick={() => onMonitor?.(match.symbol, Number(match.features.close ?? 0))}>设置点位提醒</button></div>
       {latest && <section aria-label="最新状态"><p>截至 {String(latest.features.feature_date ?? latest.checked_at)} 最新可用收盘：{latest.source.explanation.result === "true" ? "仍符合全部条件" : latest.source.explanation.result === "false" ? "部分条件不再符合" : "数据不足"}；未覆盖入选时的信息。</p>{entries.map(({node, path:itemPath}) => { const check = evaluationAt(latest.source.explanation,itemPath); return check ? <p key={itemPath}>{describe(node,catalog)}：{check.result === "true" ? "符合" : check.result === "false" ? "不符合" : "数据不足"}，实际 {formatValue(check.actual,catalog.find(item=>item.key===node.metric))}</p> : null; })}</section>}
-      <Suspense fallback={<p>正在加载标注K线…</p>}><ChartPage key={`${match.symbol}:${focus?.timeframe}:${focus?.date}:${path}`} initialSymbol={match.symbol} focusMark={focus} watchSource={{ ...detail.source, marks: (detail.source.marks ?? []).filter((mark) => !path || mark.path === path).map((mark) => ({...mark, metricLabel:metricLabel(mark.metric,catalog)})) }} /></Suspense>
     </>}
   </aside>;
 }

@@ -373,3 +373,11 @@ def test_beijing_ipo_has_no_limit_only_on_first_trading_day() -> None:
     assert rows[0]["limit_up"] is None
     assert rows[1]["limit_up"] == 13.0
     assert rows[1]["limit_down"] == 7.0
+
+
+def test_chinext_risk_warning_keeps_board_limit():
+    fake = FakeBaoStock()
+    fake.history_rows = [["2026-08-20", "sz.300001", "10", "1", "1"]]
+    rows = BaoStockProvider(fake).security_status("300001.SZ", date(2026,8,20), date(2026,8,20))
+    assert rows[0]['limit_up'] == 12
+    assert rows[0]['limit_down'] == 8

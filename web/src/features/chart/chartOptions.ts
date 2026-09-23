@@ -2,6 +2,7 @@ import type { EChartsOption, LineSeriesOption } from "echarts";
 
 import type { Bar, ChartIndicator, ChartIndicatorPoint, PriceZone } from "../../types";
 import type { ConditionMark } from "../watchlist/model";
+import { STRATEGY_COLORS } from "../sequoia/chartMarks";
 
 export const DEFAULT_CHART_INDICATORS: ChartIndicator[] = ["ma"];
 
@@ -78,6 +79,28 @@ function tooltipDataIndex(params: unknown): number | undefined {
     : undefined;
 }
 
+export function candleTooltip(bars: Bar[], params: unknown): string {
+  const entries = Array.isArray(params) ? params : [params];
+  const index = entries.map(tooltipDataIndex).find(value => value !== undefined);
+  if (index === undefined || !bars[index]) return "";
+  const bar = bars[index];
+  const previous = bars[index - 1]?.close;
+  const percent = (base: number | undefined, price = bar.close) => base && base > 0 ? (price / base - 1) * 100 : null;
+  const change = percent(previous);
+  const signed = (value: number | null) => value === null ? "暂无（缺少上一根）" : `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+  const color = change === null || change === 0 ? "#dfe3e1" : change > 0 ? "#ff7a85" : "#50d5a0";
+  const escape = (text: string) => text.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]!));
+  const indicators = entries.flatMap(entry => {
+    if (!entry || typeof entry !== "object" || !["line", "bar"].includes(entry.seriesType) || typeof entry.value !== "number" || !Number.isFinite(entry.value)) return [];
+    const indicatorColor = typeof entry.color === "string" && /^#[0-9a-f]{3,8}$/i.test(entry.color) ? entry.color : "#dfe3e1";
+    return [`<span style="color:${indicatorColor}">${escape(String(entry.seriesName ?? "指标"))}：${entry.value.toFixed(2)}</span>`];
+  });
+  return `${bar.timestamp.slice(0, 19).replace("T", " ")}${bar.limit_state === "up" ? " · 收盘涨停" : bar.limit_state === "down" ? " · 收盘跌停" : ""}<br/>`
+    + `开 ${bar.open.toFixed(2)}（${signed(percent(previous, bar.open))}）　收 ${bar.close.toFixed(2)}（${signed(change)}）<br/>高 ${bar.high.toFixed(2)}（${signed(percent(previous, bar.high))}）　低 ${bar.low.toFixed(2)}（${signed(percent(previous, bar.low))}）<br/>`
+    + `<span style="color:${color}">涨跌幅（相对上一根收盘）：${signed(change)}</span><br/>`
+    + `开收变化：${signed(percent(bar.open))}<br/>成交量：${bar.volume_shares.toLocaleString("zh-CN")} 股<br/>成交额：${bar.amount_cny.toLocaleString("zh-CN")} 元` + (indicators.length ? `<br/>${indicators.join("<br/>")}` : "");
+}
+
 function trendTooltip(
   label: string,
   bars: Bar[],
@@ -102,6 +125,7 @@ function zoneSeries(zone: PriceZone, bars: Bar[]): LineSeriesOption {
     symbol: "none",
     silent: zone.source === "manual",
     lineStyle: { color: style.color, type: style.lineType, width, opacity: 1 },
+    itemStyle: { color: style.color },
     emphasis: { disabled: true },
     z: zone.source === "manual" ? 8 : 5,
   };
@@ -158,6 +182,7 @@ function zoneSeries(zone: PriceZone, bars: Bar[]): LineSeriesOption {
         fontSize: 10,
       },
       lineStyle: { color: style.color, type: style.lineType, width, opacity: 1 },
+    itemStyle: { color: style.color },
       data: [{ yAxis: zone.center_price }],
     },
   };
@@ -177,6 +202,7 @@ function line(name: string, data: Array<number | null>, axis: number, color: str
     symbol: "none" as const,
     connectNulls: true,
     lineStyle: { color, width: 1.4 },
+    itemStyle: { color },
     emphasis: { disabled: true },
   };
 }
@@ -189,10 +215,17 @@ export function buildChartOption(
   marks: ConditionMark[] = [],
 ): EChartsOption {
   const dates = bars.map((bar) => bar.timestamp);
-  const candleData = bars.map((bar) => [bar.open, bar.close, bar.low, bar.high]);
+  const pinbarDates = new Set(marks.filter(mark => (mark.label.startsWith("裸K") && mark.label.includes("Pinbar")) || mark.label.startsWith("海龟突破 · 首次满足") || Boolean(mark.strategyId && mark.label.includes(" · 命中 "))).map(mark => mark.referenceStartDate ?? mark.date));
+  const firstSignal = bars.findIndex(bar => pinbarDates.has(bar.timestamp.slice(0, 10)));
+  const initialStart = firstSignal >= 0 ? Math.min(Math.max(0, bars.length - 120), Math.max(0, firstSignal - 10)) : Math.max(0, bars.length - 120);
+  const candleData = bars.map((bar) => {
+    const color = bar.limit_state === "up" ? "#ffca45" : bar.limit_state === "down" ? "#a78bfa" : undefined;
+    const value = [bar.open, bar.close, bar.low, bar.high];
+    return color ? { value, itemStyle: { color, color0: color, borderColor: color, borderColor0: color } } : value;
+  });
   const volumeData = bars.map((bar) => ({
     value: bar.volume_shares,
-    itemStyle: { color: bar.close >= bar.open ? "#2ecf79a8" : "#ff5a67a8" },
+    itemStyle: { color: bar.limit_state === "up" ? "#ffca45" : bar.limit_state === "down" ? "#a78bfa" : bar.close >= bar.open ? "#2ecf79a8" : "#ff5a67a8" },
   }));
   const subIndicators = selected.filter((item) => ["macd", "kdj", "rsi", "obv", "atr"].includes(item));
   const paneCount = 2 + subIndicators.length;
@@ -202,10 +235,10 @@ export function buildChartOption(
   const paneHeight = unit;
   const paneTop = (index: number) => 5 + mainHeight + 2 + (index - 1) * (paneHeight + 2);
   const grids = [
-    { left: 58, right: 22, top: "5%", height: `${mainHeight}%` },
-    { left: 58, right: 22, top: `${paneTop(1)}%`, height: `${paneHeight}%` },
+    { left: 58, right: 88, outerBoundsMode: "none" as const, top: "5%", height: `${mainHeight}%` },
+    { left: 58, right: 88, outerBoundsMode: "none" as const, top: `${paneTop(1)}%`, height: `${paneHeight}%` },
     ...subIndicators.map((_, index) => ({
-      left: 58, right: 22, top: `${paneTop(index + 2)}%`, height: `${paneHeight}%`,
+      left: 58, right: 88, outerBoundsMode: "none" as const, top: `${paneTop(index + 2)}%`, height: `${paneHeight}%`,
     })),
   ];
   const axes = grids.map((_, index) => ({
@@ -239,6 +272,8 @@ export function buildChartOption(
       line("MA10", values(indicators, "ma_10"), 0, "#6bc5ff"),
       line("MA20", values(indicators, "ma_20"), 0, "#d897ff"),
       line("MA30", values(indicators, "ma_30"), 0, "#ffab70"),
+      line("MA120", values(indicators, "ma_120"), 0, "#64d8cb"),
+      line("MA250", values(indicators, "ma_250"), 0, "#e6e9ef"),
     );
   }
   if (selected.includes("boll")) {
@@ -273,22 +308,63 @@ export function buildChartOption(
     if (indicator === "atr") chartSeries.push(line("ATR14", values(indicators, "atr_14"), axis, "#ffab70"));
   });
   const indicatorRows = new Map(indicators.map((row) => [row.timestamp, row as unknown as Record<string, unknown>]));
+  const strategySignals = new Map<string, { name: string; color: string; offset: number; points: Array<{ name: string; coord: [string, number] }> }>();
   for (const mark of marks) {
     let endIndex = bars.length - 1;
     while (endIndex >= 0 && bars[endIndex].timestamp.slice(0, 10) > mark.date) endIndex--;
     if (endIndex < 0) continue;
     const firstIndex = mark.startDate ? bars.findIndex((bar) => bar.timestamp.slice(0, 10) >= mark.startDate!) : Math.max(0, endIndex - mark.periods + 1);
     if (firstIndex < 0 || firstIndex > endIndex || bars[endIndex].timestamp.slice(0, 10) !== mark.date) continue;
+    if (mark.shape) {
+      const shape = mark.shape;
+      const color = shape.kind === "ascending" ? "#f3c969" : shape.kind === "descending" ? "#b49aff" : "#6bc5ff";
+      chartSeries.push({name: mark.label, type:"line", data:[], z:15,
+        markLine: {symbol:["none","none"], lineStyle:{color,width:2,type:"solid"},
+          label:{show:true,formatter:mark.label.split(" · ")[0],color,backgroundColor:"#111517",padding:3},
+          tooltip:{formatter:mark.label},
+          data:[[{coord:[dates[firstIndex],shape.upper_start]},{coord:[dates[endIndex],shape.upper_end]}],
+                [{coord:[dates[firstIndex],shape.lower_start]},{coord:[dates[endIndex],shape.lower_end]}]]},
+        markPoint:{symbol:"circle",symbolSize:6,itemStyle:{color},label:{show:false},tooltip:{formatter:mark.label},
+          data:[...shape.high_points,...shape.low_points].filter(p=>bars.some(b=>b.timestamp.slice(0,10)===p.date))
+            .map(p=>({coord:[dates[bars.findIndex(b=>b.timestamp.slice(0,10)===p.date)],p.price]}))}
+      });
+      continue;
+    }
+    const markColor = mark.strategyId ? STRATEGY_COLORS[mark.strategyId] ?? "#f3c969" : "#f3c969";
+    if (mark.strategyId && (mark.label.includes(" · 命中 ") || mark.label.startsWith("海龟突破 · 首次满足"))) {
+      const bearish = mark.strategyId === "shakeout" || mark.strategyId === "trend_drop";
+      const offset = Object.keys(STRATEGY_COLORS).indexOf(mark.strategyId);
+      const signal = strategySignals.get(mark.strategyId) ?? { name: `${mark.strategyName ?? mark.label.split(" · ")[0]}信号`, color: markColor,
+        offset: (bearish ? -1 : 1) * (12 + Math.max(0, offset) * 8), points: [] };
+      signal.points.push({ name: mark.label, coord: [dates[endIndex], bearish ? bars[endIndex].high : bars[endIndex].low] });
+      strategySignals.set(mark.strategyId, signal);
+      continue;
+    }
     const metric = mark.metric;
     const isCandle = ["open", "high", "low", "close", "pattern_type", "pattern_strength", "is_limit_up"].includes(metric);
     if (isCandle) {
       const section = bars.slice(firstIndex, endIndex + 1);
+      const pinbar = mark.label.includes("Pinbar") && mark.label.startsWith("裸K");
+      const turtle = mark.label.startsWith("海龟突破 · 首次满足");
+      if (pinbar || turtle || mark.label.startsWith("实体低点回访：")) {
+        const bullish = !pinbar || mark.label.includes("看涨");
+        chartSeries.push({ name: turtle ? "海龟突破信号" : "裸K信号", type: "line", data: [], z: 20,
+          markPoint: { symbol: "triangle", symbolRotate: bullish ? 0 : 180, symbolSize: 14,
+            symbolOffset: [0, bullish ? 12 : -12],
+            itemStyle: { color: markColor },
+            label: { show: true, formatter: "{b}", position: bullish ? "bottom" : "top",
+              color: markColor, backgroundColor: "#111517", padding: [4, 6], borderRadius: 3 },
+            tooltip: { formatter: mark.label },
+            data: [{ name: turtle ? "海龟突破" : !pinbar ? "实体低点回访" : `${mark.label.includes("双K合成") ? "双K·" : ""}${bullish ? "看涨Pinbar" : "看跌Pinbar"}`, coord: [dates[endIndex], bullish ? bars[endIndex].low : bars[endIndex].high] }],
+          },
+        });
+      }
       chartSeries.push({ name: mark.label, type: "line", data: [], markArea: {
-        silent: false, itemStyle: { color: "#f3c96918", borderColor: "#f3c969", borderWidth: 2 },
+        silent: false, itemStyle: { color: `${markColor}18`, borderColor: markColor, borderWidth: 2 },
         label: { show: false },
         tooltip: { formatter: mark.label },
-        data: [[{ name: mark.label, xAxis: firstIndex - 0.45, yAxis: Math.min(...section.map((bar) => bar.low)) * 0.995 },
-          { xAxis: endIndex + 0.45, yAxis: Math.max(...section.map((bar) => bar.high)) * 1.005 }]],
+        data: [[{ name: mark.label, xAxis: firstIndex - 0.45, yAxis: mark.priceLow ?? Math.min(...section.map((bar) => bar.low)) * 0.995 },
+          { xAxis: endIndex + 0.45, yAxis: mark.priceHigh ?? Math.max(...section.map((bar) => bar.high)) * 1.005 }]],
       } });
       continue;
     }
@@ -300,21 +376,27 @@ export function buildChartOption(
     const priceMetric = /^ma_\d+$/.test(metric) || /^(boll_|high_|low_)/.test(metric);
     const volumeMetric = metric === "volume" || /^volume_ma_/.test(metric);
     let axis = priceMetric ? 0 : volumeMetric ? 1 : grids.length;
-    const knownNames: Record<string, string> = { ma_5: "MA5", ma_10: "MA10", ma_20: "MA20", ma_30: "MA30", macd: "DIF", macd_signal: "DEA", macd_hist: "MACD柱", kdj_k: "K", kdj_d: "D", kdj_j: "J", rsi_14: "RSI14", obv: "OBV", atr_14: "ATR14", volume: "成交量" };
+    const knownNames: Record<string, string> = { ma_5: "MA5", ma_10: "MA10", ma_20: "MA20", ma_30: "MA30", ma_120: "MA120", ma_250: "MA250", macd: "DIF", macd_signal: "DEA", macd_hist: "MACD柱", kdj_k: "K", kdj_d: "D", kdj_j: "J", rsi_14: "RSI14", obv: "OBV", atr_14: "ATR14", volume: "成交量" };
     const existing = chartSeries.find((series) => series.name === (knownNames[metric] ?? metric));
     if (existing) axis = Number(existing.xAxisIndex ?? 0);
     if (axis === grids.length) {
-      grids.push({ left: 58, right: 22, top: "0%", height: "10%" });
+      grids.push({ left: 58, right: 88, outerBoundsMode: "none" as const, top: "0%", height: "10%" });
       axes.push({ ...axes[1], gridIndex: axis });
       yAxes.push({ ...yAxes[1], gridIndex: axis });
     }
     const points = values.flatMap((value, index) => index >= firstIndex && index <= endIndex && value !== null
       ? [{ name: mark.label, coord: [dates[index], value] }] : []);
     chartSeries.push({ name: knownNames[metric] ?? mark.metricLabel ?? metric, type: "line", xAxisIndex: axis, yAxisIndex: axis,
-      data: values, showSymbol: false, lineStyle: { color: "#f3c969", width: 1, opacity: existing ? 0 : 1 },
-      markPoint: { symbol: "circle", symbolSize: 10, itemStyle: { color: "#f3c969", borderColor: "#fff", borderWidth: 1 },
+      data: values, showSymbol: false, itemStyle: { color: markColor }, lineStyle: { color: markColor, width: 1, opacity: existing ? 0 : 1 },
+      markPoint: { symbol: "circle", symbolSize: 10, itemStyle: { color: markColor, borderColor: "#fff", borderWidth: 1 },
         label: { show: false }, tooltip: { formatter: mark.label }, data: points } });
   }
+  for (const signal of strategySignals.values()) chartSeries.push({ name: signal.name, type: "line", data: [], z: 20,
+    markPoint: { symbol: "diamond", symbolSize: 13, symbolOffset: [0, signal.offset],
+      itemStyle: { color: signal.color, borderColor: "#111517", borderWidth: 1 },
+      label: { show: false }, tooltip: { formatter: (params: { data?: { name?: string } }) => params.data?.name ?? signal.name },
+      data: signal.points },
+  });
   if (grids.length > paneCount) {
     const available = 86 / (grids.length + 1.4);
     grids.forEach((grid, index) => {
@@ -326,12 +408,12 @@ export function buildChartOption(
     animation: false,
     backgroundColor: "transparent",
     axisPointer: { link: [{ xAxisIndex: "all" }], label: { backgroundColor: "#30383c" } },
-    tooltip: { trigger: "axis", axisPointer: { type: "cross" }, backgroundColor: "#111517", borderColor: "#394247", textStyle: { color: "#dfe3e1", fontSize: 11 } },
+    tooltip: { trigger: "axis", formatter: (params: unknown) => candleTooltip(bars, params), axisPointer: { type: "cross" }, backgroundColor: "#111517", borderColor: "#394247", textStyle: { color: "#dfe3e1", fontSize: 11 } },
     grid: grids,
     xAxis: axes,
     yAxis: yAxes,
     dataZoom: [
-      { type: "inside", xAxisIndex: Array.from({ length: grids.length }, (_, index) => index), start: Math.max(0, 100 - 12000 / Math.max(bars.length, 1)), end: 100 },
+      { type: "inside", xAxisIndex: Array.from({ length: grids.length }, (_, index) => index), start: initialStart / Math.max(bars.length, 1) * 100, end: 100 },
       { type: "slider", xAxisIndex: Array.from({ length: grids.length }, (_, index) => index), bottom: 4, height: 16, borderColor: "#30383c", backgroundColor: "#111517", fillerColor: "#313a3e80", handleStyle: { color: "#c8ff42" }, textStyle: { color: "#677277" } },
     ],
     series: [

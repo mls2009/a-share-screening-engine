@@ -1,9 +1,11 @@
 """Freeze chart evidence from the successful leaves of a saved screening run."""
 import re
+from astock.features.chart_shapes import SHAPE_LABELS
 
 from astock.domain.market import Timeframe
 from astock.screening.evaluator import TruthValue, evaluate_tree
 from astock.screening.models import ConditionNode
+from astock.features.price_action import PA_LABELS
 
 
 def entry_histories(histories: dict, mode: str, as_of, snapshot: dict) -> dict:
@@ -43,6 +45,27 @@ def condition_marks(tree: dict, explanation: dict, histories: dict) -> list[dict
         label = f"实际 {result.get('actual')}，期望 {result.get('expected')}"
         if not rows:
             return
+        if metric == "vacuum_reentry_ma120_within_250":
+            for hit in rows[0].get("vacuum_year_hits", []):
+                zone = hit["zone"]
+                marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
+                              "date": zone["end"], "startDate": zone["start"], "periods": 1,
+                              "priceLow": zone["lower"], "priceHigh": zone["upper"],
+                              "label": f"缩量急跌区间 {zone['lower']:.2f}～{zone['upper']:.2f}；{zone['confirmed']}确认；量比{zone.get('volume_ratio', 0):.2f}"})
+                marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
+                              "date": hit["date"], "periods": 1,
+                              "label": f"缩量急跌区间重入；收盘{hit['close']:.2f} > 当日MA120 {hit['ma120']:.2f}"})
+            return
+        if metric.startswith("vacuum_"):
+            zone = rows[0].get("vacuum_zone")
+            if zone:
+                marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
+                              "date": zone["end"], "startDate": zone["start"], "periods": rows[0].get("vacuum_days", 1),
+                              "priceLow": zone["lower"], "priceHigh": zone["upper"],
+                              "label": f"缩量急跌区间 {zone['lower']:.2f}～{zone['upper']:.2f}；{zone['confirmed']}确认；量比{zone.get('volume_ratio', 0):.2f}"})
+                if rows[0].get("vacuum_reentry"):
+                    add("close", timeframe, rows, 0, 0, "跌出缩量急跌区间后重新进入")
+            return
         if metric in {"limit_up_count_5_max_60", "limit_up_burst_5_count_60"}:
             for index in range(min(56, len(rows) - 4)):
                 count = sum(bool(row.get("is_limit_up")) for row in rows[index:index + 5])
@@ -69,6 +92,57 @@ def condition_marks(tree: dict, explanation: dict, histories: dict) -> list[dict
                         other = histories.get(Timeframe(right["timeframe"]), [])
                         other = [row for row in other if row["feature_date"] <= rows[index]["feature_date"]]
                         add(right["metric"], right["timeframe"], other, 0, 0, label)
+            return
+        if metric in SHAPE_LABELS:
+            kind = metric.split('_')[1]
+            names = {'ascending':'上升三角形','descending':'下降三角形','range':'震荡区间'}
+            for hit in rows[0].get('chart_shape_hits', []):
+                if hit['kind'] != kind:
+                    continue
+                marks.append(dict(metric='close',timeframe=timeframe,path=active_path,
+                                  date=hit['end_date'],startDate=hit['start_date'],periods=hit['bars'],
+                                  label=f"{names[kind]} · {hit['start_date']}～{hit['end_date']} · {hit['bars']}根；{hit['confirmed_date']}确认（不要求突破）",
+                                  shape=hit))
+            return
+        if metric == "body_low_retest":
+            stamp = str(rows[0]["feature_date"])
+            for level in rows[0].get("body_low_retest_levels", []):
+                label = f"两年实体{'最低' if level['rank']==1 else '次低'}点 {level['price']:.3f}；{level['date']}，{level['confirmed_date']}确认；±5%回访区域"
+                marks.append(dict(metric="close",timeframe=timeframe,path=active_path,date=stamp,
+                                  startDate=level['date'],periods=1,priceLow=level['lower'],
+                                  priceHigh=level['upper'],label=label))
+            if rows[0].get("body_low_retest_hits"):
+                ranks = "、".join('最低点' if x['rank']==1 else '次低点' for x in rows[0]['body_low_retest_hits'])
+                marks.append(dict(metric="close",timeframe=timeframe,path=active_path,date=stamp,
+                                  startDate=stamp,periods=1,label=f"实体低点回访：{ranks}±5%（含影线）"))
+            return
+        if metric in {"pa_bull_within_250", "pa_bear_within_250", "pw_bull_within_156"}:
+            direction = "bear" if metric == "pa_bear_within_250" else "bull"
+            prefix = "pw" if metric.startswith("pw_") else "pa"
+            for hit in rows[0].get(f"{prefix}_{direction}_year_hits", []):
+                details = "、".join(PA_LABELS[key].split("：",1)[-1] for key,value in hit["details"].items() if value)
+                if prefix == "pw":
+                    details = details.replace("此前已结束周线", "此前已结束月线")
+                marks.append({"metric":"close", "timeframe":timeframe, "path":active_path,
+                              "date":hit["date"], "startDate":hit.get("start_date", hit["date"]), "periods":hit.get("bars", 1),
+                              "label":f"裸K：{'双K合成·' if hit.get('bars', 1) == 2 else ''}{'看涨' if direction == 'bull' else '看跌'}Pinbar · {hit['date']}；{details}"})
+                zone = hit.get("zone")
+                if zone:
+                    marks.append({"metric":"close", "timeframe":timeframe, "path":active_path,
+                                  "date":hit["date"], "startDate":zone.get("anchor_date",hit["date"]), "periods":1,
+                                  "priceLow":zone["lower"], "priceHigh":zone["upper"],
+                                  "label":f"{hit['date']}信号对应的{'260周历史月线' if prefix == 'pw' else '一年区间'}{'底部支撑' if direction == 'bull' else '顶部压力'}"})
+            return
+        if metric in PA_LABELS:
+            add("close", timeframe, rows, 0, 1 if metric.startswith("pa2_") else 0, f"{PA_LABELS[metric]}：{result.get('actual')}")
+            direction = "bull" if "_bull_" in metric else "bear"
+            prefix = "pa2" if metric.startswith("pa2_") else "pa"
+            zone = rows[0].get(f"{prefix}_{direction}_zone") if metric.endswith(("key_level", "false_break")) else None
+            if zone:
+                marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
+                              "date": str(rows[0]["feature_date"]), "startDate": zone.get("anchor_date", str(rows[0]["feature_date"])), "periods": 1,
+                              "priceLow": zone["lower"], "priceHigh": zone["upper"],
+                              "label": f"一年大区间边界；{zone.get('anchor_date', '')}转折，{zone.get('confirmed_date', '')}确认；信号前已确认{'支撑' if direction == 'bull' else '压力'}带"})
             return
         change = re.fullmatch(r"return_(\d+)", metric)
         if change:

@@ -362,3 +362,13 @@ create table if not exists screen_schedules (
   last_run_id uuid,
   last_error varchar
 );
+
+create table if not exists watchlist_groups (
+  group_id uuid primary key,
+  name varchar not null unique
+);
+create table if not exists watchlist_group_members (
+  group_id uuid not null,
+  symbol varchar not null,
+  primary key(group_id, symbol)
+);

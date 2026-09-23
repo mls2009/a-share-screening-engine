@@ -9,6 +9,9 @@ from astock.data.sectors import SECTOR_KEYS, SectorStore
 from astock.data.snapshots import overlay_snapshot
 from astock.domain.market import Timeframe
 from astock.features.store import MarketFeatureStore
+from astock.features.vacuum import VACUUM_METRICS
+from astock.features.price_action import PA_METRICS
+from astock.features.chart_shapes import SHAPE_LABELS
 from astock.screening.catalog import DEFAULT_CATALOG
 from astock.screening.evaluator import Evaluation, TruthValue, evaluate_tree
 from astock.screening.models import ConditionNode, GroupNode, MetricOperand, Node, Operator
@@ -123,6 +126,7 @@ class ScreeningService:
         offset: int = 0,
         sort_by: str | None = None,
         sort_direction: Literal["asc", "desc"] | None = None,
+        symbols: list[str] | None = None,
     ) -> list[dict]:
         metric_sort = None
         if sort_by and ":" in sort_by:
@@ -142,9 +146,10 @@ class ScreeningService:
             f"""
             select symbol, match_rank, feature_snapshot, explanation
             from screen_matches where run_id = ?
+              {"and symbol in (select unnest(?::varchar[]))" if symbols is not None else ""}
             order by {order_by} {direction} nulls last, match_rank asc limit ? offset ?
             """,
-            [run_id, limit, offset],
+            [run_id, *([symbols] if symbols is not None else []), limit, offset],
         )
         return [
             {
@@ -168,7 +173,10 @@ class ScreeningService:
         scope_metadata: dict | None = None,
         extra_timeframes: list[Timeframe] | None = None,
         extra_columns: list[str] | None = None,
+        progress=None,
     ) -> ScreenRunResult:
+        report = progress or (lambda *args: None)
+        report(2, "校验筛选条件")
         issues = self.validate(tree)
         if issues:
             raise ScreenDefinitionError(issues)
@@ -196,6 +204,20 @@ class ScreeningService:
                 f"{uncertain} 只股票缺少上市或退市日期；兼容当前在市记录，退市日期未知者保守排除。"
             )
         timeframes, history_limit, metrics = _requirements(tree)
+        if mode == "live" and metrics & VACUUM_METRICS:
+            raise ScreenDefinitionError([ScreenValidationIssue(
+                "requires_close_mode", "真空区条件需使用收盘模式，不能用未收盘行情确认重新进入", "root",
+            )])
+        if mode == "live" and metrics & (PA_METRICS | SHAPE_LABELS.keys()):
+            raise ScreenDefinitionError([ScreenValidationIssue(
+                "requires_close_mode", "裸K形态需使用收盘模式，以已完成日线确认", "root",
+            )])
+        current_only = [DEFAULT_CATALOG.get(key) for key in metrics
+                        if DEFAULT_CATALOG.get(key).supported_modes == frozenset({"live"})]
+        if mode != "live" and current_only:
+            raise ScreenDefinitionError([ScreenValidationIssue(
+                "requires_live_mode", "、".join(spec.label for spec in current_only) + "需要选择实时行情模式；当前估值不能替代历史数据", "root",
+            )])
         sector_values = SectorStore(self.database).values()
         if metrics & SECTOR_KEYS.keys():
             diagnostics["warnings"].append("东方财富行业/概念按当前成分名单筛选，不代表数据日期当时的归属；历史回测不支持此类条件。")
@@ -221,6 +243,7 @@ class ScreeningService:
             timeframes.add(rank.timeframe)
         timeframes.add(Timeframe.DAY)
         snapshots = {snapshot.symbol: snapshot for snapshot in batch.snapshots}
+        report(10, "读取历史行情并计算所需指标", 0, len(symbols))
         enrich = bool(metrics & ENRICHED_METRICS)
         histories = {
             timeframe: self.feature_store.read_histories(
@@ -229,6 +252,10 @@ class ScreeningService:
                 as_of - timedelta(days=1) if mode == "live" else as_of,
                 history_limit,
                 enrich=enrich,
+                include_vacuum=bool(metrics & VACUUM_METRICS),
+                include_price_action=bool(metrics & PA_METRICS),
+                include_shapes=bool(metrics & SHAPE_LABELS.keys()),
+                progress=lambda message, done, total: report(10 + int(50*done/max(1,total)), message, done, total),
             )
             for timeframe in timeframes
         }
@@ -258,6 +285,10 @@ class ScreeningService:
             ).fetchone()[0]
             histories[right_timeframe] = self.feature_store.read_histories(
                 symbols, right_timeframe, end, max(history_limit, count), enrich=enrich,
+                include_vacuum=bool(metrics & VACUUM_METRICS),
+                include_price_action=bool(metrics & PA_METRICS),
+                include_shapes=bool(metrics & SHAPE_LABELS.keys()),
+                progress=lambda message, done, total: report(10 + int(50*done/max(1,total)), message, done, total),
             )
         identities = {row[0]: {"name": row[1], "board": row[2]} for row in securities if row[0] in symbols}
 
@@ -276,7 +307,10 @@ class ScreeningService:
                 counts["reasons"][evaluation.reason] = counts["reasons"].get(evaluation.reason, 0) + 1
 
         candidates = []
-        for symbol in symbols:
+        report(65, "逐股判断筛选条件", 0, len(symbols))
+        for index, symbol in enumerate(symbols):
+            if index % 50 == 0:
+                report(65 + int(30 * index / max(1, len(symbols))), "逐股判断筛选条件", index, len(symbols))
             history = {
                 timeframe: histories[timeframe].get(symbol, [])
                 for timeframe in timeframes
@@ -315,6 +349,7 @@ class ScreeningService:
                 rank_value = rank_rows[0].get(rank.metric) if rank_rows else None
             candidates.append((symbol, snapshot, explanation, rank_value))
 
+        report(95, "整理筛选结果", len(symbols), len(symbols))
         if rank is not None:
             missing = float("-inf") if rank.direction == "desc" else float("inf")
             candidates.sort(
@@ -325,6 +360,7 @@ class ScreeningService:
             ScreenMatch(symbol, index + 1, snapshot, explanation)
             for index, (symbol, snapshot, explanation, _) in enumerate(candidates)
         ]
+        report(98, "保存结果与入选依据", len(symbols), len(symbols))
         run_id = self._persist_run(tree, as_of, symbols, matches, mode, batch, diagnostics)
         return ScreenRunResult(
             run_id=run_id,

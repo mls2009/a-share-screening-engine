@@ -1,32 +1,44 @@
+from astock.screening.comparison import previous_run_comparison
+from astock.features.chart_shapes import uses_shapes
+import asyncio
 import json
-from datetime import date, datetime
+import logging
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
 import pandas as pd
-from fastapi import FastAPI, Query, Response
+from fastapi import BackgroundTasks, FastAPI, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from astock.api.dependencies import ApiContext
+from astock.api.notes import register_notes
 from astock.api.workbench import register_workbench
+from astock.sequoia.api import register_sequoia
 from astock.backtest.models import BacktestRequest
 from astock.backtest.service import BacktestDataError, BacktestService
 from astock.config import Settings
 from astock.data.daily_update import DailyMarketUpdateScheduler
+from astock.data.backup_daily import BackupDailySync, ResilientDailySync
+from astock.data.limit_colors import annotate_limits
 from astock.data.market_sync import MarketSyncService
 from astock.data.providers.akshare import AkShareProvider
+from astock.data.providers.baostock import BAOSTOCK_SESSION_LOCK
 from astock.data.providers.routing import build_default_market_providers
 from astock.data.providers.tencent import TencentQuoteProvider
 from astock.data.sectors import SectorStore
 from astock.data.service import MarketDataService
+from astock.data.updates import MarketUpdates
 from astock.domain.market import Adjustment, Timeframe
 from astock.features.benchmark import BenchmarkDataError, BenchmarkService
 from astock.features.builder import FeatureBuilder, chart_base_timeframe
 from astock.features.store import MarketFeatureStore
+from astock.features.vacuum import uses_vacuum
+from astock.features.price_action import uses_price_action
 from astock.features.technical import compute_technical_features
 from astock.features.zones import (
     ManualZoneInput,
@@ -58,6 +70,8 @@ class ScreenRunRequest(BaseModel):
     limit: int = Field(default=100, ge=1, le=1000)
     offset: int = Field(default=0, ge=0)
     scope: Literal["market", "watchlist", "run", "board"] = "market"
+    watch_group_id: UUID | None = None
+    watch_ungrouped: bool = False
     source_run_id: UUID | None = None
     boards: list[str] = Field(default_factory=list)
     instrument_type: Literal["all", "stock", "etf"] = "all"
@@ -84,6 +98,7 @@ class ScreenTemplateRequest(BaseModel):
 class WatchlistRequest(BaseModel):
     symbol: str
     run_id: UUID | None = None
+    group_id: UUID | None = None
 
 
 def _screen_template(row: tuple) -> dict:
@@ -148,6 +163,7 @@ def _run_response(result: object) -> dict:
 def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="AStock Internal API", version="0.1.0")
     app.state.context = context
+    register_notes(app, context.database)
     monitoring = context.monitoring or MonitoringService(
         context.database,
         MonitoringRepository(context.database),
@@ -187,13 +203,104 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
                 metric["choices"] = sector_store.choices(metric["key"])
         return result
 
+    updates = getattr(context.market_sync, "updates", None) or MarketUpdates()
+
+    @app.get("/api/market-updates/status")
+    def market_update_status():
+        con = context.database.connection
+        latest = con.execute("""select max(feature_date) from market_features
+            where timeframe = '1d' and feature_version = 'v1'""").fetchone()[0]
+        row = con.execute("""select job_id, end_date, status, total, succeeded, failed,
+            current_symbol, started_at, finished_at from data_sync_jobs
+            order by started_at desc limit 1""").fetchone()
+        job = dict(zip(("job_id", "end_date", "status", "total", "succeeded", "failed",
+                        "current_symbol", "started_at", "finished_at"), row)) if row else None
+        coverage_start = (latest or datetime.now(SHANGHAI).date()) - timedelta(days=7)
+        total_stocks = con.execute("select count(*) from symbols where instrument_type='stock' and is_listed").fetchone()[0]
+        coverage = con.execute("""select latest_date,count(*) from (
+            select f.symbol,max(f.feature_date) as latest_date from market_features f
+            join symbols s on s.symbol=f.symbol and s.instrument_type='stock' and s.is_listed
+            where f.timeframe='1d' and f.feature_version='v1'
+              and f.feature_date between ? and ?
+            group by f.symbol)
+            group by latest_date order by latest_date desc""",
+            [coverage_start, latest or datetime.now(SHANGHAI).date()],
+        ).fetchall()
+        older_stocks = total_stocks - sum(count for _, count in coverage)
+        if older_stocks:
+            coverage.append((None, older_stocks))
+        failures = []
+        if row:
+            failures = [{"symbol": symbol, "error": error} for symbol, error in con.execute(
+                "select symbol,error from sync_job_symbols where job_id=? and status='failed' order by updated_at desc limit 12",
+                [row[0]]).fetchall()]
+        return {"scheduler_running": data_update_scheduler.running,
+                "scheduled_at": data_update_scheduler.run_at.strftime("%H:%M"),
+                "timezone": "Asia/Shanghai", "latest_daily_date": latest,
+                "source": getattr(context.market_sync, "active_source", "baostock"),
+                "last_attempt": data_update_scheduler.last_attempt,
+                "last_error": data_update_scheduler.last_error,
+                "target_date": data_update_scheduler.target_date,
+                "next_attempt": data_update_scheduler.next_attempt,
+                "latest_completed_end_date": context.market_sync.latest_completed_end_date(),
+                "daily_coverage": [{"date": day, "stocks": count} for day, count in coverage],
+                "coverage_window_start": coverage_start,
+                "failure_examples": failures, "latest_job": job}
+
+    @app.get("/api/market-updates")
+    async def market_updates(request: Request):
+        async def events():
+            revision = updates.revision
+            # Also refresh on reconnection: a batch may have finished while offline.
+            yield f"event: ready\ndata: {revision}\n\n"
+            while not await request.is_disconnected():
+                current = await asyncio.to_thread(updates.wait, revision)
+                if current != revision:
+                    revision = current
+                    yield f"event: market-updated\ndata: {revision}\n\n"
+                else:
+                    yield ": keepalive\n\n"
+        return StreamingResponse(events(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
     @app.get("/api/watchlist")
     def list_watchlist():
-        rows = context.database.connection.execute(
-            "select symbol, name, sources, added_at from watchlist order by added_at desc"
-        ).fetchall()
+        con = context.database.connection
+        rows = con.execute("select symbol, name, sources, added_at from watchlist order by added_at desc").fetchall()
+        groups = {}
+        for symbol, identifier, name in con.execute("""select m.symbol, g.group_id, g.name
+                from watchlist_group_members m join watchlist_groups g using(group_id) order by g.name""").fetchall():
+            groups.setdefault(symbol, []).append({"id": str(identifier), "name": name})
+        quotes = {row[0]: {"date": row[1], "close": row[2], "change_percent": row[3]} for row in con.execute(
+            """select symbol, feature_date, close, return_1 from market_features
+            where timeframe = '1d' and feature_version = 'v1' and symbol in (select symbol from watchlist) and feature_date <= ?
+            qualify row_number() over(partition by symbol order by feature_date desc, feature_version desc) = 1""",
+            [datetime.now(SHANGHAI).date()],
+        ).fetchall()}
+        statuses = {row[0]: {"date": row[1], "is_suspended": row[2]} for row in con.execute(
+            """select symbol, trade_date, is_suspended from security_status
+            where symbol in (select symbol from watchlist) and trade_date <= ?
+            qualify row_number() over(partition by symbol order by trade_date desc) = 1""",
+            [datetime.now(SHANGHAI).date()],
+        ).fetchall()}
+        current_quotes = {}
+        provider = context.screening.snapshot_provider
+        if rows and provider is not None:
+            try:
+                batch = provider.snapshot_many([row[0] for row in rows])
+                current_quotes = {quote.symbol: {
+                    "date": quote.timestamp.date(), "timestamp": quote.timestamp,
+                    "close": quote.price,
+                    "change_percent": (quote.price / quote.previous_close - 1) * 100
+                        if quote.previous_close and quote.previous_close > 0 else None,
+                    "source": quote.source,
+                } for quote in batch.snapshots}
+            except Exception:
+                logging.getLogger(__name__).exception("watchlist quote refresh failed")
         return jsonable_encoder([
-            {"symbol": row[0], "name": row[1], "sources": json.loads(row[2]), "added_at": row[3]}
+            {"symbol": row[0], "name": row[1], "sources": json.loads(row[2]), "added_at": row[3],
+             "groups": groups.get(row[0], []), "quote": quotes.get(row[0]),
+             "trading_status": statuses.get(row[0]), "current_quote": current_quotes.get(row[0])}
             for row in rows
         ])
 
@@ -203,6 +310,10 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         security = con.execute("select name from symbols where symbol = ?", [payload.symbol]).fetchone()
         if not security:
             return JSONResponse(status_code=404, content={"message": "证券不存在"})
+        if payload.group_id is not None and not con.execute(
+            "select 1 from watchlist_groups where group_id = ?", [payload.group_id]
+        ).fetchone():
+            return JSONResponse(status_code=422, content={"message": "目标分组不存在，请重新选择"})
         existing = con.execute("select sources from watchlist where symbol = ?", [payload.symbol]).fetchone()
         sources = json.loads(existing[0]) if existing else []
         if payload.run_id is not None:
@@ -217,7 +328,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             if not any(item["run_id"] == str(payload.run_id) for item in sources):
                 stored_tree, stored_result = json.loads(source[1]), json.loads(source[2])
                 histories = {timeframe: MarketFeatureStore(context.database).read_history(
-                    payload.symbol, timeframe, source[0], 1000, enrich=False
+                    payload.symbol, timeframe, source[0], 1000, enrich=False, include_vacuum=uses_vacuum(stored_tree), include_shapes=uses_shapes(stored_tree), include_price_action=uses_price_action(stored_tree)
                 ) for timeframe in Timeframe}
                 histories = entry_histories(histories, source[3], source[0], json.loads(source[4]))
                 sources.append({"run_id": str(payload.run_id), "as_of": source[0].isoformat(),
@@ -229,12 +340,16 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             on conflict(symbol) do update set name = excluded.name, sources = excluded.sources""",
             [payload.symbol, security[0], json.dumps(sources, ensure_ascii=False)],
         )
+        if payload.group_id is not None:
+            con.execute("insert into watchlist_group_members values (?, ?) on conflict do nothing", [payload.group_id, payload.symbol])
         return {"symbol": payload.symbol, "name": security[0], "sources": sources}
 
     register_workbench(app, context, add_watchlist, WatchlistRequest)
+    register_sequoia(app, context)
 
     @app.delete("/api/watchlist/{symbol}", status_code=204)
     def remove_watchlist(symbol: str):
+        context.database.connection.execute("delete from watchlist_group_members where symbol = ?", [symbol])
         context.database.connection.execute("delete from watchlist where symbol = ?", [symbol])
         return Response(status_code=204)
 
@@ -318,12 +433,19 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             )
         return Response(status_code=204)
 
-    @app.post("/api/screens/run")
-    def run_screen(request: ScreenRunRequest):
+    def execute_screen(request: ScreenRunRequest, progress=None):
         scope_symbols = None
         con = context.database.connection
         if request.scope == "watchlist":
             scope_symbols = [row[0] for row in con.execute("select symbol from watchlist").fetchall()]
+            if request.watch_group_id is not None:
+                if not con.execute("select 1 from watchlist_groups where group_id = ?", [request.watch_group_id]).fetchone():
+                    return JSONResponse(status_code=422, content={"message": "自选分组不存在"})
+                members = {row[0] for row in con.execute("select symbol from watchlist_group_members where group_id = ?", [request.watch_group_id]).fetchall()}
+                scope_symbols = [symbol for symbol in scope_symbols if symbol in members]
+            elif request.watch_ungrouped:
+                members = {row[0] for row in con.execute("select symbol from watchlist_group_members").fetchall()}
+                scope_symbols = [symbol for symbol in scope_symbols if symbol not in members]
         elif request.scope == "run":
             if request.source_run_id is None or not con.execute("select 1 from screen_runs where run_id = ?", [request.source_run_id]).fetchone():
                 return JSONResponse(status_code=422, content={"message": "请选择有效的来源筛选"})
@@ -343,9 +465,10 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
                 limit=request.limit,
                 offset=request.offset,
                 scope_symbols=scope_symbols,
-                scope_metadata=request.model_dump(mode="json", include={"scope", "source_run_id", "boards", "instrument_type"}),
+                scope_metadata=request.model_dump(mode="json", include={"scope", "source_run_id", "boards", "instrument_type", "watch_group_id", "watch_ungrouped"}),
                 extra_timeframes=request.extra_timeframes,
                 extra_columns=request.extra_columns,
+                progress=progress,
             )
         except ScreenDefinitionError as error:
             return JSONResponse(
@@ -361,7 +484,25 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
                     ]
                 },
             )
-        return _run_response(result)
+        return {**_run_response(result), "new_comparison": previous_run_comparison(context.database.connection, result.run_id)}
+
+    @app.post("/api/screens/run")
+    def run_screen(request: ScreenRunRequest):
+        return execute_screen(request)
+
+    from astock.screening.tasks import ScreeningTasks
+    screen_tasks = ScreeningTasks()
+
+    @app.post("/api/screens/tasks", status_code=202)
+    def start_screen_task(request: ScreenRunRequest, tasks: BackgroundTasks):
+        job, created = screen_tasks.start(request.model_dump(mode="json"))
+        if created:
+            tasks.add_task(screen_tasks.run, job['job_id'], lambda progress: execute_screen(request, progress))
+        return job
+
+    @app.get("/api/screens/tasks/{job_id}")
+    def screen_task(job_id: str):
+        return screen_tasks.get(job_id)
 
     @app.get("/api/screens/runs/{run_id}")
     def screen_results(
@@ -370,6 +511,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         offset: int = Query(default=0, ge=0),
         sort_by: str | None = None,
         sort_direction: Literal["asc", "desc"] | None = None,
+        new_only: bool = False,
     ) -> dict:
         row = context.database.connection.execute(
             """
@@ -386,7 +528,11 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
                 status_code=404,
                 content={"code": "run_not_found", "message": "screen run not found"},
             )
+        comparison = previous_run_comparison(context.database.connection, run_id)
+        entered = comparison['entered'] if comparison else []
         return {
+            "new_comparison": comparison,
+            "filtered_count": len(entered) if new_only else row[6],
             "run_id": str(run_id),
             "status": row[0],
             "mode": row[1],
@@ -398,7 +544,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             "diagnostics": {"conditions": {}, "warnings": [], "data_dates": {},
                             **(json.loads(row[7]) if row[7] else {})},
             "matches": context.screening.results(
-                run_id, limit, offset, sort_by, sort_direction
+                run_id, limit, offset, sort_by, sort_direction, symbols=entered if new_only else None
             ),
         }
 
@@ -463,6 +609,31 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             }
             for row in rows
         ]
+
+    @app.get("/api/symbols/{symbol}/overview")
+    def stock_overview(symbol: str):
+        identity = context.database.connection.execute(
+            "select name, exchange, board, listed_on, instrument_type from symbols where symbol = ?", [symbol]
+        ).fetchone()
+        if identity is None:
+            return JSONResponse(status_code=404, content={"message": "证券不存在"})
+        quote = None
+        message = None
+        provider = context.screening.snapshot_provider
+        try:
+            if provider is not None:
+                batch = provider.snapshot_many([symbol])
+                quote = next((row for row in batch.snapshots if row.symbol == symbol), None)
+            if quote is None:
+                message = "最新行情暂不可用，请稍后刷新"
+        except Exception:  # noqa: BLE001 - external quote provider boundary
+            message = "行情源暂不可用，请稍后刷新"
+        return jsonable_encoder({
+            "symbol": symbol, "name": identity[0], "exchange": identity[1],
+            "board": identity[2], "listed_on": identity[3], "instrument_type": identity[4],
+            "quote": quote, "message": message,
+            "valuation_note": "市盈率采用腾讯公布的 PE 原值，接口未明确标注静态/动态/TTM 口径；负值保留，缺失值不按零处理。市值为当前快照。",
+        })
 
     @app.get("/api/symbols/{symbol}/indicators")
     def symbol_indicators(
@@ -572,8 +743,26 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
                 content={"code": error.code, "message": str(error)},
             )
 
+    def refresh_chart_limits(symbol: str, start: date, end: date) -> None:
+        market_data = getattr(context.market_sync, "market_data", None)
+        if market_data is not None and BAOSTOCK_SESSION_LOCK.acquire(blocking=False):
+            try:
+                market_data.history(symbol, Timeframe.DAY, start, end, Adjustment.NONE)
+                reference = market_data.reference_provider
+                if reference is not None:
+                    statuses = reference.security_status(symbol, start, end)
+                    if statuses:
+                        con = context.database.connection
+                        con.executemany("insert or replace into security_status values (?, ?, ?, ?, ?, ?, ?, ?)",
+                            [[row[key] for key in ("symbol", "trade_date", "board", "is_st", "is_suspended", "previous_close", "limit_up", "limit_down")] for row in statuses])
+            except Exception:
+                logging.getLogger(__name__).exception("chart limit-price data unavailable")
+            finally:
+                BAOSTOCK_SESSION_LOCK.release()
+
     @app.get("/api/symbols/{symbol}/bars")
     def symbol_bars(
+        background_tasks: BackgroundTasks,
         symbol: str,
         timeframe: Timeframe,
         start: date,
@@ -584,6 +773,14 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             symbol, base, Adjustment.QFQ, start, end
         )
         bars = source if timeframe == base else MarketDataService.derive(source, timeframe)
+        identity = context.database.connection.execute("select instrument_type from symbols where symbol = ?", [symbol]).fetchone()
+        if timeframe == Timeframe.DAY and identity and identity[0] == "stock":
+            background_tasks.add_task(refresh_chart_limits, symbol, start, end)
+            raw = context.bar_store.read_range(symbol, Timeframe.DAY, Adjustment.NONE, start, end)
+            statuses = {row[0]: row[1:] for row in context.database.connection.execute(
+                "select trade_date,is_suspended,limit_up,limit_down from security_status where symbol = ? and trade_date between ? and ?", [symbol,start,end]
+            ).fetchall()}
+            return annotate_limits(bars, raw, statuses)
         return [bar.model_dump(mode="json") for bar in bars]
 
     @app.get("/api/symbols/{symbol}/zones")
@@ -800,6 +997,9 @@ def create_default_app(settings: Settings | None = None) -> FastAPI:
         SyncJobRepository(database.connection),
         FeatureBuilder(bars, feature_store, database),
     )
+    market_sync = ResilientDailySync(market_sync, BackupDailySync(
+        database, bars, market_sync.jobs, market_sync.feature_builder, market_sync.updates
+    ))
     benchmark = BenchmarkService(database, bars, market_data, AkShareProvider())
     screening = ScreeningService(
         database,

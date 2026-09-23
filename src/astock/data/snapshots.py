@@ -23,6 +23,8 @@ def overlay_snapshot(history: list[dict], snapshot: MarketSnapshot) -> list[dict
             "amount": snapshot.amount_cny,
             "turnover_rate": snapshot.turnover_rate,
             "volume_ratio": snapshot.volume_ratio,
+            "pe_ratio": snapshot.pe_ratio,
+            "pb_ratio": snapshot.pb_ratio,
             "total_market_cap": snapshot.total_market_cap,
             "float_market_cap": snapshot.float_market_cap,
         }

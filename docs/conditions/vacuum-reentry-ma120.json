@@ -1,0 +1,28 @@
+{
+  "kind": "group",
+  "logic": "and",
+  "children": [
+    {
+      "kind": "condition",
+      "metric": "vacuum_reentry",
+      "timeframe": "1d",
+      "operator": "eq",
+      "right": {
+        "kind": "constant",
+        "value": true,
+        "unit": "boolean"
+      }
+    },
+    {
+      "kind": "condition",
+      "metric": "close",
+      "timeframe": "1d",
+      "operator": "gt",
+      "right": {
+        "kind": "metric",
+        "metric": "ma_120",
+        "timeframe": "1d"
+      }
+    }
+  ]
+}

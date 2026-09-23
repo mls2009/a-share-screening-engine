@@ -41,3 +41,28 @@ def test_flatness_marks_five_average_points():
     marks = condition_marks(tree, {"result": "true"}, {Timeframe.DAY: rows})
     assert marks[0]["metric"] == "ma_10"
     assert marks[0]["periods"] == 5
+
+
+def test_weekly_pinbar_marks_keep_week_timeframe_and_month_support():
+    tree = {'kind':'condition','metric':'pw_bull_within_156','timeframe':'1w',
+            'operator':'eq','right':{'kind':'constant','value':True,'unit':'boolean'}}
+    hit = {'date':'2026-06-12','start_date':'2026-06-05','bars':2,
+           'zone':{'lower':9,'upper':10,'anchor_date':'2025-03-12'},
+           'details':{'pa2_prominent':True,'pa2_bull_trend':True}}
+    marks = condition_marks(tree,{'result':'true'}, {Timeframe.WEEK:[{'pw_bull_year_hits':[hit]}]})
+    assert len(marks)==2
+    assert all(m['timeframe']=='1w' for m in marks)
+    assert marks[0]['periods']==2 and '月线' in marks[0]['label']
+    assert marks[1]['priceLow']==9 and '260周历史月线' in marks[1]['label']
+
+
+def test_body_low_retest_marks_both_references_and_current_visit():
+    tree={'kind':'condition','metric':'body_low_retest','timeframe':'1d','operator':'eq',
+          'right':{'kind':'constant','value':True,'unit':'boolean'}}
+    levels=[dict(rank=i,price=9+i,lower=(9+i)*.95,upper=(9+i)*1.05,
+                 date='2025-01-01',confirmed_date='2025-01-08') for i in (1,2)]
+    marks=condition_marks(tree,{'result':'true'},{Timeframe.DAY:[dict(feature_date=date(2026,9,22),body_low_retest_levels=levels,body_low_retest_hits=levels[:1])]})
+    assert len(marks)==3
+    assert marks[0]['priceLow']==9.5
+    assert '次低' in marks[1]['label']
+    assert marks[2]['label'].startswith('实体低点回访：')

@@ -145,6 +145,7 @@ class BacktestEngine:
         market: dict[str, list[Bar]],
         statuses: dict[tuple[str, object], ExecutionStatus] | None = None,
         execution_market: dict[str, list[Bar]] | None = None,
+        condition_history=None,
     ) -> BacktestResult:
         statuses = statuses or {}
         prepared: dict[str, tuple[list[Bar], list[dict]]] = {}
@@ -307,6 +308,8 @@ class BacktestEngine:
                 history = {request.timeframe: list(reversed(
                     records[max(0, index + 1 - history_limit): index + 1]
                 ))}
+                if condition_history is not None:
+                    history = condition_history(symbol, timestamp)
                 tree = request.exit_tree if symbol in positions else request.entry_tree
                 result = evaluate_tree(tree, history)
                 unknown_evaluations += result.result == TruthValue.UNKNOWN

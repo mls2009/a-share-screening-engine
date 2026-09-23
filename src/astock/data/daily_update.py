@@ -22,25 +22,47 @@ class DailyMarketUpdateScheduler:
         self.service = service
         self._stop = Event()
         self._thread: Thread | None = None
-        self._last_attempted_date: date | None = None
+        self._next_attempt: datetime | None = None
+        self.last_attempt: datetime | None = None
+        self.last_error: str | None = None
+        self.target_date: date | None = None
 
     @property
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
+    @property
+    def next_attempt(self) -> datetime | None:
+        return self._next_attempt
+
     def run_due(self, now: datetime) -> bool:
         local_now = now.astimezone(SHANGHAI)
         today = local_now.date()
-        if local_now.weekday() >= 5 or local_now.time() < self.run_at:
-            return False
-        if self._last_attempted_date == today:
-            return False
         latest = self.service.latest_completed_end_date()
-        if latest is not None and latest >= today:
+        target = today
+        if local_now.time() < self.run_at:
+            target -= timedelta(days=1)
+        while target.weekday() >= 5:
+            target -= timedelta(days=1)
+        # An empty installation waits for its first scheduled close; existing
+        # installations catch up even when restarted before close or on weekends.
+        if latest is None and target != today:
+            return False
+        if latest is not None and latest >= target:
+            return False
+        if self._next_attempt is not None and local_now < self._next_attempt:
             return False
 
-        self._last_attempted_date = today
-        self.service.start(end=today, years=3)
+        self._next_attempt = local_now + timedelta(minutes=30)
+        self.last_attempt = local_now
+        self.target_date = target
+        try:
+            result = self.service.start(end=target, years=3)
+        except Exception as error:
+            self.last_error = str(error)
+            raise
+        self.last_error = (f"更新未全部完成：{getattr(result, 'failed', 0)} 只失败，请查看任务明细"
+                           if getattr(result, "status", None) == "completed_with_errors" else None)
         return True
 
     def _loop(self) -> None:
@@ -65,6 +87,9 @@ class DailyMarketUpdateScheduler:
 
     def stop(self) -> None:
         self._stop.set()
+        cancel = getattr(self.service, "stop", None)
+        if cancel is not None:
+            cancel()
         if self._thread is not None:
-            self._thread.join(timeout=1)
+            self._thread.join(timeout=25 if cancel is not None else 1)
         self._thread = None

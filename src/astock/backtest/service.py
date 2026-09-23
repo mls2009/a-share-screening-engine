@@ -3,6 +3,7 @@ from math import isclose, isfinite
 from uuid import UUID, uuid4
 
 from astock.backtest.engine import BacktestEngine
+from astock.backtest.history import condition_history
 from astock.backtest.models import (
     BacktestRequest,
     BacktestResult,
@@ -146,8 +147,10 @@ class BacktestService:
                         "limit_down": status.limit_down * factor if status.limit_down is not None else None,
                     })
                     converted = True
-        result = self.engine.run(request, market, statuses, execution_market=execution_market)
+        history = condition_history(request, self.database, self.bar_store, calendar)
+        result = self.engine.run(request, market, statuses, execution_market=execution_market, condition_history=history)
         warnings = list(result.warnings)
+        warnings.append("条件只读取信号时间之前已完成的各周期 K 线；历史状态缺失时不按正常状态填充。所属板块使用证券基本资料，未重建历史转板记录；支撑压力按当时历史自动识别，不使用事后手动画线。")
         if request.adjustment != Adjustment.NONE:
             warnings.append("使用复权价格进行研究性撮合，未逐笔模拟分红送转与真实现金流。")
         if converted:

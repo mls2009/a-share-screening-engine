@@ -1,3 +1,4 @@
+import { DataDateInput } from "../../components/DataDateInput";
 import { FileJson, FolderOpen, Play, Radio, Save, SlidersHorizontal, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -7,7 +8,7 @@ import { ConditionTree } from "./ConditionTree";
 import { ResultsTable, type ScreenSortField, type SortDirection } from "./ResultsTable";
 import { createGroup, fromApiNode, toApiNode } from "./treeModel";
 import { conditionEntries, describe, metricLabel } from "./presentation";
-import type { SourceNode } from "../watchlist/model";
+import type { SourceNode, WatchSource } from "../watchlist/model";
 import type { RunComparison, RunSummary } from "./workbenchTypes";
 import { StockDetailPanel } from "./StockDetailPanel";
 
@@ -22,8 +23,8 @@ export interface ScreenerClient {
   listScreenTemplates(): Promise<ScreenTemplate[]>;
   saveScreenTemplate(name: string, tree: unknown): Promise<ScreenTemplate>;
   deleteScreenTemplate(templateId: string): Promise<void>;
-  runScreen(payload: object): Promise<ScreenRunResult>;
-  screenResults(runId: string, limit: number, offset: number, sortBy?: ScreenSortField, sortDirection?: SortDirection): Promise<ScreenRunResult>;
+  runScreen(payload: object, onProgress?: (value: {progress:number;message:string;processed:number;total:number}) => void): Promise<ScreenRunResult>;
+  screenResults(runId: string, limit: number, offset: number, sortBy?: ScreenSortField, sortDirection?: SortDirection, newOnly?: boolean): Promise<ScreenRunResult>;
 }
 
 const today = () => new Intl.DateTimeFormat("en-CA", {
@@ -37,7 +38,7 @@ export function ScreenerPage({
   onMonitor,
 }: {
   client?: ScreenerClient;
-  onOpenChart: (symbol: string) => void;
+  onOpenChart: (symbol: string, source?: WatchSource) => void;
   onBacktest?: (symbol: string, tree: SourceNode) => void;
   onMonitor?: (symbol: string, price: number) => void;
 }) {
@@ -56,7 +57,7 @@ export function ScreenerPage({
   const syncSectors=async()=>{try{await api.syncSectors();setSectorStatus(await api.sectorStatus());}catch(cause){setError(cause instanceof Error?cause.message:"板块更新失败");}};
   const [tree, setTree] = useState<UiGroupNode>(() => saved?.tree ?? createGroup());
   const [mode, setMode] = useState<"close" | "live">(saved?.mode ?? "close");
-  const [asOf, setAsOf] = useState(saved?.asOf ?? today());
+  const [asOf, setAsOf] = useState("");
   const [result, setResult] = useState<ScreenRunResult | undefined>(saved?.result);
   const [selected, setSelected] = useState<ScreenMatch | undefined>(saved?.selected);
   const [loading, setLoading] = useState(false);
@@ -67,6 +68,15 @@ export function ScreenerPage({
   const [sortDirection, setSortDirection] = useState<SortDirection | undefined>(saved?.sortDirection);
   const sortRef = useRef<{ by?: ScreenSortField; direction?: SortDirection }>({by:saved?.sortBy,direction:saved?.sortDirection});
   const [error, setError] = useState("");
+  const openResultChart = async (symbol: string) => {
+    if (client !== api || !result) { onOpenChart(symbol); return; }
+    try {
+      const detail = await api.screenDetail(result.run_id, symbol);
+      onOpenChart(symbol, detail.source);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "读取K线入选依据失败");
+    }
+  };
   const [templates, setTemplates] = useState<ScreenTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateName, setTemplateName] = useState("");
@@ -79,6 +89,15 @@ export function ScreenerPage({
   const [sourceRunId, setSourceRunId] = useState(saved?.sourceRunId ?? "");
   const [runTree, setRunTree] = useState<SourceNode | undefined>(saved?.runTree);
   const [runSignature, setRunSignature] = useState(saved?.runSignature ?? "");
+  const [watchGroups, setWatchGroups] = useState<import("../watchlist/model").WatchGroup[]>([]);
+  const [targetWatchGroup, setTargetWatchGroup] = useState("");
+  useEffect(() => {
+    if (client !== api) return;
+    const load = () => api.watchGroups().then(setWatchGroups).catch((cause: Error) => setError(cause.message));
+    void load();
+    window.addEventListener("focus", load);
+    return () => window.removeEventListener("focus", load);
+  }, [client]);
   const [checked, setChecked] = useState<string[]>([]);
   const [allChecked, setAllChecked] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState<string[]>(saved?.hiddenColumns ?? []);
@@ -87,6 +106,7 @@ export function ScreenerPage({
   const [columnTimeframe, setColumnTimeframe] = useState("1d");
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [previousRunId, setPreviousRunId] = useState("");
+  const [newOnly, setNewOnly] = useState(saved?.newOnly ?? false);
   const [comparison, setComparison] = useState<RunComparison>();
   const [batchBusy, setBatchBusy] = useState(false);
   const [detailOpen, setDetailOpen] = useState(saved?.detailOpen ?? false);
@@ -110,10 +130,17 @@ export function ScreenerPage({
 
   useEffect(() => {
     if (client !== api) return;
-    try { localStorage.setItem(storageKey,JSON.stringify({tree,mode,asOf,result,selected,page,pageSize,sortBy,sortDirection,scope,instrumentType,boards,sourceRunId,runTree,runSignature,hiddenColumns,extraColumns,detailOpen})); }
+    try { localStorage.setItem(storageKey,JSON.stringify({tree,mode,asOf,result,selected,page,pageSize,sortBy,sortDirection,scope,instrumentType,boards,sourceRunId,runTree,runSignature,hiddenColumns,extraColumns,detailOpen,newOnly})); }
     catch { setError("浏览器存储空间不足，当前筛选仍可使用；请保存模板以保留条件。"); }
-  },[client,tree,mode,asOf,result,selected,page,pageSize,sortBy,sortDirection,scope,instrumentType,boards,sourceRunId,runTree,runSignature,hiddenColumns,extraColumns,detailOpen]);
+  },[client,tree,mode,asOf,result,selected,page,pageSize,sortBy,sortDirection,scope,instrumentType,boards,sourceRunId,runTree,runSignature,hiddenColumns,extraColumns,detailOpen,newOnly]);
   useEffect(() => { if (client === api) api.screenRuns().then(setRuns).catch((cause:Error)=>setError(cause.message)); },[client,result?.run_id]);
+  useEffect(() => {
+    if (client !== api || !result || result.new_comparison !== undefined) return;
+    let active = true;
+    api.screenResults(result.run_id,pageSize,(page-1)*pageSize,sortBy,sortDirection,newOnly)
+      .then(next=>{if(active)setResult(next);}).catch((cause:Error)=>{if(active)setError(cause.message);});
+    return ()=>{active=false;};
+  },[client,result?.run_id]);
   const stepStock = (delta:number) => {
     if (!result) return;
     const index = result.matches.findIndex((match)=>match.symbol===selected?.symbol);
@@ -125,15 +152,15 @@ export function ScreenerPage({
   const batchAdd = async () => {
     if (!result) return;
     setBatchBusy(true);
-    try { const next = await api.batchWatchlist(result.run_id,checked,allChecked); setWatchMessage(`已将 ${next.added} 只股票加入自选并保存来源`); }
+    try { const next = await api.batchWatchlist(result.run_id,allChecked && newOnly ? result.new_comparison?.entered ?? [] : checked,allChecked && !newOnly,targetWatchGroup || undefined); setWatchMessage(`已将 ${next.added} 只股票加入${watchGroups.find(group => group.id === targetWatchGroup)?.name ?? "自选股"}并保存来源`); }
     catch(cause){setError(cause instanceof Error ? cause.message : "批量加入失败");}
     finally {setBatchBusy(false);}
   };
   const addWatchlist = async (symbol: string) => {
     if (!result) return;
     try {
-      await api.addWatchlist(symbol, result.run_id);
-      setWatchMessage(`${symbol} 已加入自选，已保存本次筛选条件`);
+      await api.batchWatchlist(result.run_id, [symbol], false, targetWatchGroup || undefined);
+      setWatchMessage(`${symbol} 已加入${watchGroups.find(group => group.id === targetWatchGroup)?.name ?? "自选股"}，已保存本次筛选条件`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "加入自选失败"); }
   };
 
@@ -146,7 +173,6 @@ export function ScreenerPage({
   useEffect(() => {
     client.listScreenTemplates().then((items) => {
       setTemplates(items);
-      setSelectedTemplateId((current) => current || items[0]?.template_id || "");
     }).catch((cause: Error) => setError(cause.message));
   }, [client]);
 
@@ -184,11 +210,14 @@ export function ScreenerPage({
     }
   };
 
-  const loadTemplate = () => {
-    const selectedTemplate = templates.find((item) => item.template_id === selectedTemplateId);
+  const loadTemplate = (templateId = selectedTemplateId) => {
+    const selectedTemplate = templates.find((item) => item.template_id === templateId);
     if (!selectedTemplate) { setError("请先选择模板"); return; }
     try {
       setImportedTree(selectedTemplate.tree);
+      setSelectedTemplateId(templateId);
+      setResult(undefined); setSelected(undefined); setRunTree(undefined); setRunSignature("");
+      setChecked([]); setPage(1); setWatchMessage("");
       setTemplateName(selectedTemplate.name);
       setError("");
     } catch (cause) {
@@ -202,22 +231,23 @@ export function ScreenerPage({
       await client.deleteScreenTemplate(selectedTemplateId);
       const remaining = templates.filter((item) => item.template_id !== selectedTemplateId);
       setTemplates(remaining);
-      setSelectedTemplateId(remaining[0]?.template_id ?? "");
+      setSelectedTemplateId("");
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "删除模板失败");
     }
   };
 
+  const [screenProgress, setScreenProgress] = useState<{progress:number;message:string;processed:number;total:number}>();
   const run = async () => {
     if (!tree.children.length) { setError("至少需要一个筛选条件"); return; }
-    setLoading(true); setError("");
+    setLoading(true); setError(""); setScreenProgress({progress:0,message:"正在提交筛选任务",processed:0,total:0});
     try {
       const submittedTree = toApiNode(tree, catalog);
-      const next = await client.runScreen({ tree: submittedTree, mode, as_of: asOf, limit: pageSize, offset: 0,
+      const next = await client.runScreen({ tree: submittedTree, mode, as_of: asOf || today(), limit: pageSize, offset: 0,
         scope, instrument_type:instrumentType, boards, source_run_id:scope === "run" ? sourceRunId : undefined,
-        extra_columns:extraColumns });
-      setRunTree(submittedTree as SourceNode); setRunSignature(signature); setChecked([]); setAllChecked(false); setComparison(undefined);
+        extra_columns:extraColumns }, setScreenProgress);
+      setRunTree(submittedTree as SourceNode); setRunSignature(signature); setChecked([]); setAllChecked(false); setComparison(undefined); setNewOnly(false);
       setResult(next);
       setSelected(next.matches[0]);
       setPage(1);
@@ -237,6 +267,7 @@ export function ScreenerPage({
     nextSortBy = sortRef.current.by,
     nextSortDirection = sortRef.current.direction,
     selectLast = false,
+    onlyNew = newOnly,
   ) => {
     if (!result) return;
     setPaging(true); setError("");
@@ -247,8 +278,9 @@ export function ScreenerPage({
         (nextPage - 1) * nextPageSize,
         nextSortBy,
         nextSortDirection,
+        onlyNew,
       );
-      setResult(next);
+      setResult(next); setNewOnly(onlyNew);
       setSelected(selectLast ? next.matches.at(-1) : next.matches[0]);
       setPage(nextPage);
     } catch (cause) {
@@ -268,14 +300,14 @@ export function ScreenerPage({
     void loadPage(1, pageSize, nextSortBy, nextDirection);
   };
 
-  const totalPages = result ? Math.max(1, Math.ceil(result.match_count / pageSize)) : 1;
+  const totalPages = result ? Math.max(1, Math.ceil((newOnly ? result.filtered_count ?? 0 : result.match_count) / pageSize)) : 1;
 
   return (
     <main className={`screener-page ${detailOpen ? "has-stock-detail" : ""}`}>
       <header className="compact-heading">
         <div><p className="eyebrow">FULL MARKET / RULE COMPOSER</p><h1>选股工作台</h1></div>
         <div className="screen-controls">
-          <label><span>数据日期</span><input aria-label="数据日期" type="date" value={asOf} onChange={(event) => setAsOf(event.target.value)} /></label>
+          <DataDateInput label="数据日期" value={asOf} onChange={setAsOf} />
           <label><span>运行方式</span><select aria-label="筛选模式" value={mode} onChange={(event) => setMode(event.target.value as "close" | "live")}><option value="close">收盘数据</option><option value="live">实时行情</option></select></label>
           <button type="button" className="run-button" aria-label="运行全市场筛选" disabled={loading || !catalog.length} onClick={run}>{mode === "live" ? <Radio size={16} /> : <Play size={16} />}{loading ? "计算中…" : "运行筛选"}</button>
         </div>
@@ -283,6 +315,7 @@ export function ScreenerPage({
       {mode === "live" && <p role="note">盘中仅更新行情、涨跌幅、均线和成交量相关指标；RSI、MACD、形态等动态指标暂不支持实时计算，缺失值不会命中。周/月条件使用最近完整周期。</p>}
       {error && <div className="error-banner" role="alert">{error}</div>}
       {watchMessage && <p role="status">{watchMessage}</p>}
+      {loading && screenProgress && <section className="screen-progress" role="status" aria-label="条件选股进度"><div><strong>{screenProgress.message}</strong><span>{screenProgress.progress}%{screenProgress.total > 0 ? ` · 本阶段已处理 ${screenProgress.processed} / ${screenProgress.total} 只` : ''}</span></div><progress max="100" value={screenProgress.progress} aria-label="筛选进度" /><small>百分比按执行阶段估算；股票数量按实际处理进度更新。</small></section>}
       {client===api && <section className="sector-status" aria-label="东方财富板块数据"><div><strong>东方财富行业 / 概念</strong><span>{sectorStatus?.updated_at ? `快照 ${sectorStatus.updated_at} · ${sectorStatus.industries} 个行业 · ${sectorStatus.concepts} 个概念` : "尚无完整板块快照"}</span><small>按东方财富原始成分名单，不自行分类；历史选股采用当前名单，不代表历史归属。</small></div><button disabled={sectorStatus?.running} onClick={()=>void syncSectors()}>{sectorStatus?.running ? `同步 ${sectorStatus.done}/${sectorStatus.total} · ${sectorStatus.current}` : "更新板块数据"}</button>{sectorStatus?.error && <p role="alert">{sectorStatus.error}</p>}</section>}
       <section className="scope-toolbar" aria-label="筛选范围">
         <label>筛选范围 <select aria-label="筛选范围" value={scope} onChange={event=>setScope(event.target.value)}><option value="market">全市场</option><option value="board">指定板块</option><option value="watchlist">自选股</option><option value="run">某次筛选结果</option></select></label>
@@ -295,8 +328,8 @@ export function ScreenerPage({
         <div className="template-toolbar">
           <label><span>模板名称</span><input aria-label="模板名称" value={templateName} maxLength={80} placeholder="例如：月线强势股" onChange={(event) => setTemplateName(event.target.value)} /></label>
           <button type="button" aria-label="保存模板" onClick={() => void saveTemplate()}><Save size={14} />保存模板</button>
-          <label><span>已保存模板</span><select aria-label="已保存模板" value={selectedTemplateId} onChange={(event) => setSelectedTemplateId(event.target.value)}><option value="">请选择</option>{templates.map((item) => <option key={item.template_id} value={item.template_id}>{item.name} · v{item.version}</option>)}</select></label>
-          <button type="button" aria-label="加载模板" disabled={!selectedTemplateId} onClick={loadTemplate}><FolderOpen size={14} />加载</button>
+          <label><span>已保存模板</span><select aria-label="已保存模板" value={selectedTemplateId} disabled={loading || paging || !catalog.length} onChange={(event) => { const id = event.target.value; if (id) loadTemplate(id); else setSelectedTemplateId(""); }}><option value="">请选择</option>{templates.map((item) => <option key={item.template_id} value={item.template_id}>{item.name} · v{item.version}</option>)}</select></label>
+          <button type="button" aria-label="加载模板" disabled={!selectedTemplateId || loading || paging} onClick={() => loadTemplate()}><FolderOpen size={14} />加载</button>
           <button type="button" className="danger-action" aria-label="删除模板" disabled={!selectedTemplateId} onClick={() => void deleteTemplate()}><Trash2 size={14} />删除</button>
         </div>
         {selectedTemplateId && <details><summary>模板收盘自动筛选与飞书通知</summary><p>对已保存模板使用全市场范围、收盘模式；每日16:10后等待当天行情同步完成，再执行一次。模板修改后按新版本建立对比基线。</p><label><input type="checkbox" checked={scheduleEnabled} onChange={event=>setScheduleEnabled(event.target.checked)}/>启用自动筛选</label> <label><input type="checkbox" checked={scheduleNotify} onChange={event=>setScheduleNotify(event.target.checked)}/>向已配置的飞书机器人发送结果变化</label> <button onClick={()=>void saveSchedule()}>保存自动筛选设置</button>{schedules.filter(item=>item.template_id===selectedTemplateId).map(item=><p key={item.template_id}>上次执行：{item.last_date??"尚未执行"} {item.last_error?`执行失败：${item.last_error}`:""}</p>)}</details>}
@@ -326,7 +359,7 @@ export function ScreenerPage({
             <input aria-label="搜索结果列" placeholder="搜索要添加的指标" value={columnSearch} onChange={event=>setColumnSearch(event.target.value)}/><select aria-label="新增列周期" value={columnTimeframe} onChange={event=>setColumnTimeframe(event.target.value)}>{["1d","1w","1mo","5m","15m","30m","60m"].map(value=><option key={value}>{value}</option>)}</select>
             <select aria-label="添加结果列" value="" onChange={event=>setExtraColumns(values=>[...new Set([...values,`${columnTimeframe}:${event.target.value}`])])}><option value="">选择添加列</option>{catalog.filter(item=>item.visible!==false && `${item.label} ${item.key}`.includes(columnSearch)).map(item=><option key={item.key} value={item.key}>{metricLabel(item.key,catalog)}</option>)}</select><p>新加入周期的数据在下次运行时保存；未提供的数据会显示“数据不足”。</p>
           </details>
-          <div className="scope-toolbar"><button onClick={()=>{setChecked(result.matches.map(match=>match.symbol));setAllChecked(false);}}>选择当前页</button><button onClick={()=>{setAllChecked(true);setChecked(result.matches.map(match=>match.symbol));}}>选择全部 {result.match_count} 只</button><button onClick={()=>{setChecked([]);setAllChecked(false);}}>取消勾选</button><span>已选 {allChecked?result.match_count:checked.length} 只{allChecked?"（全部命中）":""}</span><button disabled={batchBusy || (!allChecked && !checked.length)} onClick={()=>void batchAdd()}>{batchBusy?"加入中…":"批量加入自选"}</button>
+          <div className="scope-toolbar"><button onClick={()=>{setChecked(result.matches.map(match=>match.symbol));setAllChecked(false);}}>选择当前页</button><button onClick={()=>{setAllChecked(true);setChecked(result.matches.map(match=>match.symbol));}}>选择全部 {newOnly ? result.new_comparison?.count ?? 0 : result.match_count} 只</button><button onClick={()=>{setChecked([]);setAllChecked(false);}}>取消勾选</button><span>已选 {allChecked?(newOnly ? result.new_comparison?.count ?? 0 : result.match_count):checked.length} 只{allChecked?(newOnly?"（全部新增）":"（全部命中）"):""}</span><label>加入到分组 <select aria-label="目标自选分组" disabled={batchBusy} value={targetWatchGroup} onChange={event=>setTargetWatchGroup(event.target.value)}><option value="">仅加入自选（保留已有分组）</option>{watchGroups.map(group=><option key={group.id} value={group.id}>{group.name}</option>)}</select></label><button disabled={batchBusy || (!allChecked && !checked.length)} onClick={()=>void batchAdd()}>{batchBusy?"加入中…":"批量加入自选"}</button>
             <a download href={`/api/workbench/runs/${result.run_id}/export?${new URLSearchParams({columns:columns.join(","),...(sortBy?{sort_by:sortBy,sort_direction:sortDirection??"asc"}:{})})}`}>导出全部结果CSV</a><button onClick={()=>{setScope("run");setSourceRunId(result.run_id);}}>在本次结果中继续筛选</button>
           </div>
           <details className="run-comparison"><summary>历史记录与两次筛选对比</summary><select aria-label="对比筛选记录" value={previousRunId} onChange={event=>setPreviousRunId(event.target.value)}><option value="">选择另一条记录</option>{runs.filter(run=>run.run_id!==result.run_id).map(run=><option key={run.run_id} value={run.run_id}>{run.as_of} · {run.match_count}只 · {run.run_id.slice(0,8)}</option>)}</select><button disabled={!previousRunId} onClick={()=>void api.compareRuns(result.run_id,previousRunId).then(setComparison).catch((cause:Error)=>setError(cause.message))}>对比结果</button>
@@ -342,7 +375,11 @@ export function ScreenerPage({
               {Object.entries(counts.reasons).map(([reason, count]) => <p key={reason}>{reason}：{count} 只</p>)}
             </div>)}
           </details>}
-          <ResultsTable matches={result.matches} selected={selected?.symbol} onSelect={match=>{setSelected(match);setDetailOpen(true);}} onOpenChart={onOpenChart} onAddWatchlist={addWatchlist} sortBy={sortBy} sortDirection={sortDirection} onSort={changeSort} columns={client===api?columns:undefined} catalog={catalog} checked={checked} onCheck={symbol=>{setAllChecked(false);setChecked(values=>values.includes(symbol)?values.filter(value=>value!==symbol):[...values,symbol]);}} hideExplanation={client===api}/>
+          <div className="scope-toolbar">
+            {result.new_comparison ? <><span>对比上次相同条件：{result.new_comparison.finished_at.replace('T',' ').slice(0,19)}（运行时间） · 数据日期 {result.new_comparison.as_of} · 新增 {result.new_comparison.count} 只</span>
+              <label><input type="checkbox" aria-label="仅看新增" checked={newOnly} disabled={paging || loading} onChange={event=>{setChecked([]);setAllChecked(false);void loadPage(1,pageSize,sortRef.current.by,sortRef.current.direction,false,event.target.checked);}}/>仅看新增</label></> : <span>暂无上一次相同条件、范围和模式的已完成筛选记录，无法判断新增。</span>}
+          </div>
+          <ResultsTable newSymbols={result.new_comparison?.entered} matches={result.matches} selected={selected?.symbol} onSelect={match=>{setSelected(match);setDetailOpen(true);}} onOpenChart={(symbol) => void openResultChart(symbol)} onAddWatchlist={addWatchlist} sortBy={sortBy} sortDirection={sortDirection} onSort={changeSort} columns={client===api?columns:undefined} catalog={catalog} checked={checked} onCheck={symbol=>{setAllChecked(false);setChecked(values=>values.includes(symbol)?values.filter(value=>value!==symbol):[...values,symbol]);}} hideExplanation={client===api}/>
           <div className="results-pagination">
             <label>每页<select aria-label="每页数量" value={pageSize} disabled={paging} onChange={(event) => {
               const nextSize = Number(event.target.value);
@@ -355,7 +392,7 @@ export function ScreenerPage({
           </div>
         </>}
       </section>
-      {client===api && detailOpen && selected && result && <StockDetailPanel key={`${result.run_id}:${selected.symbol}`} runId={result.run_id} match={selected} catalog={catalog} onClose={()=>setDetailOpen(false)} onStep={stepStock} onOpenChart={onOpenChart} onAddWatchlist={addWatchlist} onBacktest={onBacktest} onMonitor={onMonitor}/>}
+      {client===api && detailOpen && selected && result && <StockDetailPanel key={`${result.run_id}:${selected.symbol}`} runId={result.run_id} match={selected} catalog={catalog} onClose={()=>setDetailOpen(false)} onStep={stepStock} onOpenChart={(symbol) => void openResultChart(symbol)} onAddWatchlist={addWatchlist} onBacktest={onBacktest} onMonitor={onMonitor}/>}
     </main>
   );
 }

@@ -34,6 +34,22 @@ class FakeSync:
         )
 
 
+def test_watchlist_wave_endpoint_requires_watchlist_and_rejects_current_sectors(tmp_path):
+    client, _ = _client(tmp_path)
+    path = "/api/watchlist/600001.SH/waves"
+    tree = {"kind": "condition", "metric": "close", "timeframe": "1d", "operator": "gt",
+            "right": {"kind": "constant", "value": 10, "unit": "price"}}
+    assert client.post(path, json={"tree": tree}).status_code == 404
+    assert client.post("/api/watchlist", json={"symbol": "600001.SH"}).status_code == 200
+    response = client.post(path, json={"tree": tree})
+    assert response.status_code == 200
+    assert response.json()["matched_days"] == 1
+    assert response.json()["matches"][0]["days"] == 1
+    assert client.post(path, json={"days": 5, "gain": 40}).status_code == 422
+    assert client.post(path, json={"tree": {"kind": "condition", "metric": "em_concept", "timeframe": "1d", "operator": "in", "right": {"kind": "constant", "value": ["存储芯片"], "unit": "category"}}}).status_code == 422
+
+
+
 def _client(tmp_path: Path, benchmark_factory=None) -> tuple[TestClient, Database]:
     database = Database(tmp_path / "api.duckdb")
     database.migrate()
@@ -1150,3 +1166,332 @@ def test_monitor_task_crud_and_scheduler_status_endpoints(tmp_path: Path) -> Non
     assert client.get("/api/monitor/status").json()["running"] is True
     assert client.post("/api/monitor/stop").json()["running"] is False
     assert client.delete(f"/api/monitor/tasks/{task_id}").status_code == 204
+
+
+def test_watchlist_groups_and_latest_daily_quotes(tmp_path):
+    client, database = _client(tmp_path)
+    client.post("/api/watchlist", json={"symbol": "600001.SH"})
+    group = client.post("/api/watchlist/groups", json={"name": "芯片观察"})
+    assert group.status_code == 200
+    group_id = group.json()["id"]
+    assert client.put("/api/watchlist/600001.SH/groups", json={"group_ids": [group_id]}).status_code == 200
+    database.connection.execute("update market_features set return_1 = 2.5 where symbol = '600001.SH'")
+    item = client.get("/api/watchlist").json()[0]
+    assert item["groups"] == [{"id": group_id, "name": "芯片观察"}]
+    assert item["quote"] == {"date": "2026-08-20", "close": 12.0, "change_percent": 2.5}
+    database.connection.execute("insert into market_features(symbol,timeframe,feature_date,feature_version,close,return_1) values ('600001.SH','1d','2026-08-21','v1',13,-1)")
+    assert client.get("/api/watchlist").json()[0]["quote"]["date"] == "2026-08-21"
+    assert client.put(f"/api/watchlist/groups/{group_id}", json={"name": "重点观察"}).status_code == 200
+    assert client.get("/api/watchlist").json()[0]["groups"][0]["name"] == "重点观察"
+    assert client.delete(f"/api/watchlist/groups/{group_id}").status_code == 204
+    assert client.get("/api/watchlist").json()[0]["groups"] == []
+    assert client.post("/api/watchlist/groups", json={"name": "   "}).status_code == 422
+    assert client.put("/api/watchlist/600001.SH/groups", json={"group_ids": [group_id]}).status_code == 422
+
+
+def test_batch_watchlist_adds_selected_group_without_losing_other_memberships(tmp_path):
+    client, _ = _client(tmp_path)
+    run = client.post("/api/screens/run", json={"tree": CONDITION, "as_of": "2026-08-20"}).json()
+    first = client.post("/api/watchlist/groups", json={"name": "重点"}).json()["id"]
+    second = client.post("/api/watchlist/groups", json={"name": "观察"}).json()["id"]
+    url = f"/api/workbench/runs/{run['run_id']}/watchlist"
+    assert client.post(url, json={"all_matches": True, "group_id": "00000000-0000-0000-0000-000000000000"}).status_code == 422
+    assert client.get("/api/watchlist").json() == []
+    for group in [first, second, first]:
+        assert client.post(url, json={"symbols": ["600001.SH"], "group_id": group}).json() == {"added": 1}
+    item = client.get("/api/watchlist").json()[0]
+    assert {group["id"] for group in item["groups"]} == {first, second}
+    assert len(item["sources"]) == 1
+
+
+def test_batch_watchlist_all_matches_includes_other_pages(tmp_path):
+    client, database = _client(tmp_path)
+    database.connection.execute("insert into symbols(symbol,name,exchange,board,is_listed) values ('600002.SH','股票二','SH','main',true)")
+    database.connection.execute("insert into market_features(symbol,timeframe,feature_date,feature_version,close,return_20) values ('600002.SH','1d','2026-08-20','v1',15,40)")
+    run = client.post("/api/screens/run", json={"tree": CONDITION, "as_of": "2026-08-20", "limit": 1}).json()
+    assert len(run["matches"]) == 1
+    assert run["match_count"] == 2
+    group = client.post("/api/watchlist/groups", json={"name": "全部命中"}).json()["id"]
+    response = client.post(f"/api/workbench/runs/{run['run_id']}/watchlist", json={"all_matches": True, "group_id": group})
+    assert response.json() == {"added": 2}
+    items = client.get("/api/watchlist").json()
+    assert {item["symbol"] for item in items} == {"600001.SH", "600002.SH"}
+    assert all(item["groups"][0]["id"] == group and len(item["sources"]) == 1 for item in items)
+
+
+def test_watchlist_reports_suspension_without_fabricating_new_candle(tmp_path):
+    client, database = _client(tmp_path)
+    client.post("/api/watchlist", json={"symbol": "600001.SH"})
+    database.connection.execute("insert into security_status values ('600001.SH','2026-08-21','main',false,true,12,null,null)")
+    item = client.get("/api/watchlist").json()[0]
+    assert item["trading_status"] == {"date": "2026-08-21", "is_suspended": True}
+    assert item["quote"]["date"] == "2026-08-20"
+
+
+def test_manual_add_to_group_and_invalid_group_does_not_add(tmp_path):
+    from uuid import uuid4
+    client, _database = _client(tmp_path)
+    assert client.post('/api/watchlist', json={'symbol': '600001.SH', 'group_id': str(uuid4())}).status_code == 422
+    assert client.get('/api/watchlist').json() == []
+    group = client.post('/api/watchlist/groups', json={'name': '观察'}).json()
+    assert client.post('/api/watchlist', json={'symbol': '600001.SH', 'group_id': group['id']}).status_code == 200
+    assert client.get('/api/watchlist').json()[0]['groups'] == [group]
+
+
+def test_stock_overview_uses_current_snapshot_and_handles_unknown_symbol(tmp_path):
+    from astock.data.providers.tencent import SnapshotBatchResult
+    from astock.domain.market import MarketSnapshot
+    client, _database = _client(tmp_path)
+    class Quotes:
+        def snapshot_many(self, symbols):
+            return SnapshotBatchResult((MarketSnapshot(symbol=symbols[0], timestamp='2026-08-20T15:00:00+08:00', price=12, volume_shares=100, amount_cny=1200, pe_ratio=15, pb_ratio=2, total_market_cap=1200000000, float_market_cap=800000000, source='tencent'),), 1, 0)
+    client.app.state.context.screening.snapshot_provider = Quotes()
+    result = client.get('/api/symbols/600001.SH/overview')
+    assert result.status_code == 200
+    assert result.json()['quote']['pe_ratio'] == 15
+    assert result.json()['quote']['total_market_cap'] == 1200000000
+    assert client.get('/api/symbols/999999.SH/overview').status_code == 404
+
+
+def test_screen_can_limit_to_selected_watchlist_group(tmp_path):
+    from uuid import uuid4
+    client, database = _client(tmp_path)
+    database.connection.execute("insert into symbols(symbol,name,exchange,is_listed) values ('600002.SH','股票二','SH',true)")
+    database.connection.execute("insert into market_features(symbol,timeframe,feature_date,feature_version,close) values ('600002.SH','1d','2026-08-20','v1',12)")
+    group = client.post('/api/watchlist/groups', json={'name':'分组一'}).json()
+    client.post('/api/watchlist', json={'symbol':'600001.SH','group_id':group['id']})
+    client.post('/api/watchlist', json={'symbol':'600002.SH'})
+    payload = {'tree':{'kind':'condition','metric':'close','timeframe':'1d','operator':'gt','right':{'kind':'constant','value':0,'unit':'price'}},'as_of':'2026-08-20','scope':'watchlist','watch_group_id':group['id']}
+    result = client.post('/api/screens/run', json=payload)
+    assert result.status_code == 200
+    assert [item['symbol'] for item in result.json()['matches']] == ['600001.SH']
+    payload.pop('watch_group_id')
+    payload['watch_ungrouped'] = True
+    assert [item['symbol'] for item in client.post('/api/screens/run', json=payload).json()['matches']] == ['600002.SH']
+    payload['watch_group_id'] = str(uuid4())
+    assert client.post('/api/screens/run', json=payload).status_code == 422
+
+
+def test_watchlist_current_change_uses_quote_previous_close_not_stored_return(tmp_path):
+    from astock.data.providers.tencent import SnapshotBatchResult
+    from astock.domain.market import MarketSnapshot
+    client, database = _client(tmp_path)
+    client.post('/api/watchlist', json={'symbol': '600001.SH'})
+    database.connection.execute("update market_features set return_1 = 99 where symbol='600001.SH'")
+    class Quotes:
+        def snapshot_many(self, symbols):
+            return SnapshotBatchResult((MarketSnapshot(symbol=symbols[0], timestamp='2026-09-08T15:00:00+08:00', price=11, previous_close=10, volume_shares=100, amount_cny=1100, source='tencent'),),1,0)
+    client.app.state.context.screening.snapshot_provider = Quotes()
+    row = client.get('/api/watchlist').json()[0]
+    assert round(row['current_quote']['change_percent'], 5) == 10
+    assert row['current_quote']['date'] == '2026-09-08'
+    assert row['quote']['change_percent'] == 99
+
+
+def test_candle_limit_color_uses_unadjusted_close(tmp_path):
+    client, database = _client(tmp_path)
+    bars = client.app.state.context.bar_store
+    original = bars.read('600001.SH', Timeframe.DAY, Adjustment.QFQ)[0]
+    bars.upsert([original.model_copy(update={'adjustment': Adjustment.NONE, 'open': 10.5, 'high': 11, 'low': 10, 'close': 11})])
+    database.connection.execute("insert into security_status values ('600001.SH','2026-08-20','main',false,false,10,11,9)")
+    response = client.get('/api/symbols/600001.SH/bars?timeframe=1d&start=2026-08-20&end=2026-08-20')
+    assert response.status_code == 200
+    assert response.json()[0]['close'] == 12
+    assert response.json()[0]['limit_state'] == 'up'
+
+
+def test_chart_bars_defers_external_limit_data(tmp_path):
+    from fastapi import BackgroundTasks
+    from unittest.mock import Mock
+
+    client, _ = _client(tmp_path)
+    context = client.app.state.context
+    market_data = Mock()
+    context.market_sync.market_data = market_data
+    endpoint = next(route.endpoint for route in client.app.routes if getattr(route, 'path', '') == '/api/symbols/{symbol}/bars')
+    tasks = BackgroundTasks()
+    result = endpoint(background_tasks=tasks, symbol='600001.SH', timeframe=Timeframe.DAY,
+                      start=date(2026, 8, 20), end=date(2026, 8, 20))
+    assert result[0]['close'] == 12
+    market_data.history.assert_not_called()
+    assert len(tasks.tasks) == 1
+
+
+def test_vacuum_screen_history_backtest_and_saved_evidence_agree(tmp_path):
+    import json
+    import pandas as pd
+    from astock.features.technical import compute_technical_features
+    from astock.backtest.history import condition_history
+    from astock.backtest.models import BacktestRequest
+    from astock.screening.evaluator import evaluate_tree, TruthValue
+
+    client, database = _client(tmp_path)
+    context = client.app.state.context
+    prices = [(20.2, 19.8, 20.)] * 120 + [
+        (33., 30., 32.), (28., 26., 27.), (26., 24., 24.5),
+        (25., 23.8, 24.2), (24., 22., 22.7), (24., 22., 22.7),
+        (24., 22., 22.7),
+        (24., 22., 22.7), (24., 22., 22.7), (25., 23.6, 24.5),
+    ]
+    timestamps = pd.bdate_range(end='2026-08-20', periods=len(prices))
+    bars = [Bar(symbol='600001.SH', timestamp=datetime.combine(stamp.date(), time(15), ZoneInfo('Asia/Shanghai')),
+                timeframe=Timeframe.DAY, open=c, high=h, low=l, close=c, volume_shares=1000 if c==20. else 500,
+                amount_cny=c * 1000, adjustment=Adjustment.QFQ, source='test')
+            for stamp, (h, l, c) in zip(timestamps, prices, strict=True)]
+    context.bar_store.upsert(bars)
+    frame = pd.DataFrame([b.model_dump() for b in bars])
+    MarketFeatureStore(database).upsert('600001.SH', Timeframe.DAY, compute_technical_features(frame))
+    tree = json.loads(Path('docs/conditions/vacuum-reentry-ma120.json').read_text())
+    assert client.post('/api/screens/validate', json=tree).status_code == 200
+    assert client.post('/api/screens/run', json={'tree': tree, 'as_of': '2026-08-20', 'mode': 'live'}).status_code == 422
+    before = client.post('/api/screens/run', json={'tree': tree, 'as_of': '2026-08-19'}).json()
+    assert before['match_count'] == 0
+    response = client.post('/api/screens/run', json={'tree': tree, 'as_of': '2026-08-20'})
+    assert response.status_code == 200, response.text
+    run = response.json()
+    assert run['match_count'] == 1
+    assert run['matches'][0]['features']['vacuum_lower'] == 24
+    identifier = run['run_id']
+    detail = client.get(f'/api/workbench/runs/{identifier}/detail/600001.SH')
+    assert detail.status_code == 200, detail.text
+    assert '缩量急跌区间 24.00～33.00' in detail.text
+    added = client.post('/api/watchlist', json={'symbol': '600001.SH', 'run_id': identifier})
+    assert added.status_code == 200
+    sources = json.loads(database.connection.execute("select sources from watchlist where symbol='600001.SH'").fetchone()[0])
+    assert sources[0]['marks'][0]['priceLow'] == 24
+    assert client.post('/api/watchlist/600001.SH/waves', json={'tree': tree}).json()['matched_days'] == 1
+    request = BacktestRequest(symbols=['600001.SH'], timeframe='1d', start=date(2026, 8, 19),
+                              end=date(2026, 8, 20), entry_tree=tree, exit_tree=tree, initial_cash=100000)
+    at = condition_history(request, database, context.bar_store, [])
+    assert evaluate_tree(request.entry_tree, at('600001.SH', pd.Timestamp(bars[-1].timestamp))).result == TruthValue.TRUE
+    assert evaluate_tree(request.entry_tree, at('600001.SH', pd.Timestamp(bars[-2].timestamp))).result == TruthValue.FALSE
+
+
+def test_year_vacuum_json_uses_past_signal_and_marks_its_original_date(tmp_path):
+    import json
+    import pandas as pd
+    from astock.features.technical import compute_technical_features
+    client, database = _client(tmp_path)
+    prices = [(20.2, 19.8, 20.)] * 120 + [
+        (33., 30., 32.), (28., 26., 27.), (26., 24., 24.5),
+        (25., 23.8, 24.2), (24., 22., 22.7), (24., 22., 22.7),
+        (24., 22., 22.7),
+        (24., 22., 22.7), (24., 22., 22.7), (25., 23.6, 24.5),
+        (20., 18., 19.),
+    ]
+    timestamps = pd.bdate_range(end='2026-08-20', periods=len(prices))
+    frame = pd.DataFrame([dict(timestamp=stamp, open=c, high=h, low=l, close=c, volume_shares=1000 if c==20. else 500, amount_cny=c*1000)
+                          for stamp, (h,l,c) in zip(timestamps, prices, strict=True)])
+    MarketFeatureStore(database).upsert('600001.SH', Timeframe.DAY, compute_technical_features(frame))
+    tree = json.loads(Path('docs/conditions/vacuum-reentry-ma120-year.json').read_text())
+    assert client.post('/api/screens/validate', json=tree).json()['valid'] is True
+    response = client.post('/api/screens/run', json={'tree': tree, 'as_of': '2026-08-20'})
+    assert response.status_code == 200, response.text
+    run = response.json()
+    assert run['match_count'] == 1
+    assert run['matches'][0]['features']['close'] < run['matches'][0]['features']['ma_120']
+    detail = client.get(f"/api/workbench/runs/{run['run_id']}/detail/600001.SH").json()
+    marks = detail['source']['marks']
+    assert marks[1]['date'] == '2026-08-19'
+    assert '收盘24.50 > 当日MA120' in marks[1]['label']
+
+
+def test_price_action_json_screen_watchlist_and_backtest_share_signals(tmp_path):
+    import json
+    import pandas as pd
+    from astock.features.price_action import price_action_tree
+    from astock.features.technical import compute_technical_features
+    from astock.backtest.history import condition_history
+    from astock.backtest.models import BacktestRequest
+    from astock.screening.evaluator import evaluate_tree, TruthValue
+
+    client, database = _client(tmp_path)
+    context = client.app.state.context
+    centers = [12]*14 + [11,10,8,10,12,12,12,11]
+    prices = [(c,c+.5,c-.5,c) for c in centers for _ in range(5)]
+    prices += [(10,11,9,10),(9,10,8.5,9),(8.7,9.5,8,8.7),(8.5,9,6,8.8)]
+    timestamps = pd.bdate_range(end='2026-08-20', periods=len(prices))
+    bars = [Bar(symbol='600001.SH', timestamp=datetime.combine(stamp.date(), time(15), ZoneInfo('Asia/Shanghai')),
+                timeframe=Timeframe.DAY, open=o, high=h, low=l, close=c, volume_shares=1000,
+                amount_cny=c*1000, adjustment=Adjustment.QFQ, source='test')
+            for stamp, (o, h, l, c) in zip(timestamps, prices, strict=True)]
+    context.bar_store.upsert(bars)
+    MarketFeatureStore(database).upsert('600001.SH', Timeframe.DAY,
+                                      compute_technical_features(pd.DataFrame([b.model_dump() for b in bars])))
+    tree = price_action_tree('bull')
+    assert client.post('/api/screens/validate', json=tree).json()['valid'] is True
+    assert client.post('/api/screens/run', json={'tree': tree, 'as_of': '2026-08-20', 'mode': 'live'}).status_code == 422
+    response = client.post('/api/screens/run', json={'tree': tree, 'as_of': '2026-08-20'})
+    assert response.status_code == 200, response.text
+    run = response.json()
+    assert run['match_count'] == 1
+    assert run['matches'][0]['features']['pa_left_eye'] is True
+    assert client.post('/api/watchlist', json={'symbol': '600001.SH', 'run_id': run['run_id']}).status_code == 200
+    sources = json.loads(database.connection.execute("select sources from watchlist where symbol='600001.SH'").fetchone()[0])
+    assert any('Pinbar' in mark['label'] for mark in sources[0]['marks'])
+    detail = client.get(f"/api/workbench/runs/{run['run_id']}/detail/600001.SH")
+    assert detail.status_code == 200, detail.text
+    assert 'Pinbar' in detail.text
+    assert client.post('/api/watchlist/600001.SH/waves', json={'tree': tree}).json()['matched_days'] == 1
+    request = BacktestRequest(symbols=['600001.SH'], timeframe='1d', start=date(2026, 8, 19),
+                              end=date(2026, 8, 20), entry_tree=tree, exit_tree=tree, initial_cash=100000)
+    at = condition_history(request, database, context.bar_store, [])
+    assert evaluate_tree(request.entry_tree, at('600001.SH', pd.Timestamp(bars[-1].timestamp))).result == TruthValue.TRUE
+    assert evaluate_tree(request.entry_tree, at('600001.SH', pd.Timestamp(bars[-2].timestamp))).result == TruthValue.FALSE
+
+
+def test_shape_screening_and_detail_use_historical_shapes_without_breakout(tmp_path):
+    import math
+    client, database = _client(tmp_path)
+    values=[]
+    for i in range(65):
+        p=15+5*math.cos(i*math.pi/5)
+        values.append([date(2025,1,1)+timedelta(days=i),p,p+.05,p-.05,p])
+    database.connection.executemany("insert into market_features(symbol,timeframe,feature_date,feature_version,open,high,low,close) values ('600001.SH','1d',?,'v1',?,?,?,?)",values)
+    tree={'kind':'group','logic':'and','children':[{'kind':'condition','metric':'shape_range_within_2y','timeframe':'1d','operator':'eq','right':{'kind':'constant','value':True,'unit':'boolean'}}]}
+    assert client.post('/api/screens/validate',json=tree).json()['valid']
+    response=client.post('/api/screens/run',json={'tree':tree,'mode':'close','as_of':'2025-03-06'})
+    assert response.status_code==200,response.text
+    result=response.json()
+    assert result['match_count']==1
+    detail=client.get(f"/api/workbench/runs/{result['run_id']}/detail/600001.SH").json()
+    marks=detail['source']['marks']
+    assert len(marks)==1
+    assert marks[0]['shape']['kind']=='range'
+    assert len(marks[0]['shape']['high_points'])>=3
+    run_count = database.connection.execute("select count(*) from screen_runs").fetchone()[0]
+    chart = client.get('/api/symbols/600001.SH/chart-shapes?as_of=2025-03-06')
+    assert chart.status_code == 200, chart.text
+    assert [m['shape'] for m in chart.json()['marks']] == [m['shape'] for m in marks]
+    assert database.connection.execute("select count(*) from screen_runs").fetchone()[0] == run_count
+    assert client.get('/api/symbols/999999.SH/chart-shapes?as_of=2025-03-06').json()['marks'] == []
+
+
+def test_new_only_filters_full_result_before_pagination(tmp_path):
+    client,database=_client(tmp_path)
+    tree={'kind':'group','logic':'and','children':[{'kind':'condition','metric':'close','timeframe':'1d','operator':'gt','right':{'kind':'constant','value':10,'unit':'price'}}]}
+    request={'tree':tree,'as_of':'2026-08-20','mode':'close'}
+    first=client.post('/api/screens/run',json=request).json()
+    assert first['new_comparison'] is None
+    for symbol in ['600002.SH','600003.SH']:
+        database.connection.execute("insert into symbols(symbol,name,exchange,board,is_listed) values (?,?,'SH','main',true)",[symbol,symbol])
+        database.connection.execute("insert into market_features(symbol,timeframe,feature_date,feature_version,close) values (?,'1d','2026-08-20','v1',15)",[symbol])
+    second=client.post('/api/screens/run',json=request).json()
+    assert second['new_comparison']['run_id']==first['run_id']
+    assert second['new_comparison']['count']==2
+    page=client.get(f"/api/screens/runs/{second['run_id']}?new_only=true&limit=1&offset=1").json()
+    assert page['match_count']==3 and page['filtered_count']==2 and len(page['matches'])==1
+    assert page['matches'][0]['symbol'] in second['new_comparison']['entered']
+    empty=client.get(f"/api/screens/runs/{first['run_id']}?new_only=true").json()
+    assert empty['matches']==[] and empty['filtered_count']==0
+
+
+def test_background_screen_task_returns_saved_result(tmp_path):
+    client,_=_client(tmp_path)
+    payload={'tree':{'kind':'group','logic':'and','children':[{'kind':'condition','metric':'close','timeframe':'1d','operator':'gt','right':{'kind':'constant','value':0,'unit':'price'}}]},'as_of':'2026-08-20'}
+    started=client.post('/api/screens/tasks',json=payload)
+    assert started.status_code==202
+    result=client.get('/api/screens/tasks/'+started.json()['job_id']).json()
+    assert result['status']=='completed' and result['progress']==100
+    assert result['result']['run_id']
+    assert result['processed']==result['total']

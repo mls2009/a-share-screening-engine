@@ -1,7 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  for (const path of ["/api/watchlist/groups", "/api/workbench/schedules", "/api/workbench/runs"]) {
+    await page.route(`**${path}`, route => route.fulfill({ json: [] }));
+  }
+  await page.route("**/api/sectors/status", route => route.fulfill({ json: {running: false} }));
+  await page.route("**/api/symbols/*/overview", route => route.fulfill({ json: {
+    symbol: "600519.SH", name: "贵州茅台", close: 1604.87, metrics: {},
+  } }));
+});
+
 async function hoverChartValue(page: Page, dataIndex: number, value: number) {
   const chartElement = page.getByRole("img", { name: "K 线与成交量图" });
+  await chartElement.scrollIntoViewIfNeeded();
   const box = await chartElement.boundingBox();
   if (!box) throw new Error("无法获取图表位置");
   const point = await chartElement.evaluate(async (element, coordinate) => {
@@ -121,8 +132,8 @@ test("workbench and chart desk render without browser errors", async ({ page }) 
   await expect(page.getByText("自动上升趋势线 · 06-10 07:00 · 1545.70", { exact: true })).toBeVisible();
 
   await hoverChartValue(page, 20, 1500 + 20 * 1.2 + Math.sin(20 / 4) * 22 + Math.cos(20) * 8);
-  await expect(page.getByText("K 线", { exact: true })).toBeVisible();
-  await expect(page.getByText("成交量", { exact: true })).toBeVisible();
+  await expect(page.getByText(/涨跌幅（相对上一根收盘）：/)).toBeVisible();
+  await expect(page.getByText(/成交量：.*股/).first()).toBeVisible();
   await expect(page.getByText("自动水平支撑 · 1518.00", { exact: true })).toBeHidden();
   await expect(page.getByText("自动上升趋势线 · 06-10 07:00 · 1545.70", { exact: true })).toBeHidden();
   await page.screenshot({ path: "test-results/chart-desk.png", fullPage: true });
@@ -211,7 +222,7 @@ test("mobile workbench fits phones and chart supports landscape focus", async ({
 
   await page.getByRole("button", { name: "K 线研究" }).click();
   await expect(page.getByRole("img", { name: "K 线与成交量图" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "删除指标 MA 5/10/20/30" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "删除指标 MA 5/10/20/30/120/250" })).toBeVisible();
   await expectNoViewportOverflow(page);
 
   await clickChartValue(page, 40, 1548);
@@ -221,10 +232,10 @@ test("mobile workbench fits phones and chart supports landscape focus", async ({
   await expect(page.getByRole("img", { name: "K 线与成交量图" })).toBeVisible();
   await page.getByRole("button", { name: "开启大盘对比" }).click();
   await expect(page.getByRole("img", { name: "大盘走势对比图" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "删除指标 MA 5/10/20/30" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "删除指标 MA 5/10/20/30/120/250" })).toBeHidden();
   await expectNoViewportOverflow(page);
   await page.getByRole("button", { name: "关闭大盘对比" }).click();
-  await expect(page.getByRole("button", { name: "删除指标 MA 5/10/20/30" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "删除指标 MA 5/10/20/30/120/250" })).toBeVisible();
 
   await page.getByRole("button", { name: "全屏看盘" }).click();
   await expect(page.getByTestId("chart-desk")).toHaveClass(/is-fullscreen/);

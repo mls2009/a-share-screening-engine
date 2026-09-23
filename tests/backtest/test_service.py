@@ -158,3 +158,30 @@ def test_period_signal_executes_after_holiday(tmp_path, timeframe, signal_day, n
     assert result.trades[0].signal_at.hour == 15
     assert result.trades[0].signal_at.date() == signal_day
     assert result.trades[0].timestamp == datetime(2026, 5, 6, 9, 30, tzinfo=TZ)
+
+
+def test_mixed_histories_exclude_unclosed_daily_bars_and_missing_status(tmp_path):
+    from astock.backtest.history import condition_history
+    _, database, store = _service(tmp_path)
+    store.upsert(_daily_bars())
+    database.connection.execute("insert into symbols(symbol,name,exchange,board,listed_on,is_listed) values ('600001.SH','股票','SH','main','2026-08-03',true)")
+    entry = {"kind": "condition", "metric": "is_st", "timeframe": "1d", "operator": "eq", "right": {"kind": "constant", "value": False, "unit": "boolean"}}
+    request = BacktestRequest(symbols=["600001.SH"], timeframe="1w", start=date(2026,8,3), end=date(2026,8,15), entry_tree=entry, exit_tree=CONDITION, initial_cash=100000)
+    history = condition_history(request, database, store, {})
+    morning = history("600001.SH", datetime(2026,8,4,9,30,tzinfo=TZ))
+    assert morning[Timeframe.DAY][0]["timestamp"].date() == date(2026,8,3)
+    assert morning[Timeframe.DAY][0]["is_st"] is None
+    assert morning[Timeframe.WEEK] == []
+    close = history("600001.SH", datetime(2026,8,4,15,tzinfo=TZ))
+    assert close[Timeframe.DAY][0]["timestamp"].date() == date(2026,8,4)
+    assert close[Timeframe.DAY][0]["listing_trade_days"] == 2
+
+
+def test_historical_pattern_conditions_produce_trades(tmp_path):
+    service, _, store = _service(tmp_path)
+    store.upsert(_daily_bars())
+    entry = {"kind":"condition", "metric":"pattern_type", "timeframe":"1d", "operator":"in", "right":{"kind":"constant", "value":["doji"], "unit":"category"}}
+    request = BacktestRequest(symbols=["600001.SH"], timeframe="1d", start=date(2026,8,3), end=date(2026,8,12), entry_tree=entry, exit_tree=entry, initial_cash=100000)
+    result = service.run(request)
+    assert result.result.trades
+    assert result.result.trades[0].signal_at.date() == date(2026,8,3)

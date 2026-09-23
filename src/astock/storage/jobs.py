@@ -52,7 +52,7 @@ class SyncJobRepository:
         row = self.connection.execute(
             """
             select max(end_date) from data_sync_jobs
-            where status in ('completed', 'completed_with_errors')
+            where status = 'completed'
             """
         ).fetchone()
         return row[0] if row else None

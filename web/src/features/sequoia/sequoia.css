@@ -1,0 +1,82 @@
+.sequoia-page { min-width: 0; padding: 32px; color: #e5ebed; background: #0e1214; color-scheme: dark; }
+.sequoia-page .sq-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 24px; }
+.sequoia-page h1:where(:not(.chart-page *)) { margin: 8px 0; font-size: 30px; font-weight: 650; }
+.sequoia-page h2:where(:not(.chart-page *)) { margin: 0; font-size: 19px; }
+.sequoia-page p:where(:not(.chart-page *)) { color: #aebcc1; line-height: 1.7; }
+.sequoia-page a:where(:not(.chart-page *)) { color: #99d7cd; }
+.sequoia-page button:where(:not(.chart-page *)), .sequoia-page input:where(:not(.chart-page *)):not([type=checkbox]), .sequoia-page select:where(:not(.chart-page *)), .sequoia-page textarea:where(:not(.chart-page *)), .sequoia-page .sq-file { color: #e5ebed; background: #1b262b; border: 1px solid #415159; border-radius: 5px; font: inherit; padding: 9px 12px; }
+.sequoia-page input:where(:not(.chart-page *))[type=checkbox] { accent-color: #71c8b6; width: 16px; height: 16px; flex-shrink: 0; }
+.sequoia-page button:where(:not(.chart-page *)), .sequoia-page summary:where(:not(.chart-page *)), .sequoia-page .sq-file { cursor: pointer; }
+.sequoia-page button:where(:not(.chart-page *)):hover:not(:disabled) { border-color: #71c8b6; background: #25383d; }
+.sequoia-page button:where(:not(.chart-page *)):disabled { opacity: .45; cursor: default; }
+.sequoia-page :focus-visible { outline: 2px solid #91e0cd; outline-offset: 3px; }
+.sequoia-page button:where(:not(.chart-page *)).active { border-color: #83d8c4; background: #203e3a; color: #b2f2e3; }
+.sequoia-page .sq-primary { background: #215346; border-color: #78cfb6; color: #e7fff6; font-weight: 650; }
+.sequoia-page .sq-panel { background: #141b1f; border: 1px solid #303d44; border-radius: 8px; padding: 22px; margin-bottom: 22px; }
+.sequoia-page .sq-section-title { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; }
+.sequoia-page .sq-section-title > span { color: #8fa9a7; font-size: 12px; }
+.sequoia-page .sq-section-title select { max-width: 360px; }
+.sequoia-page .sq-strategies { display: grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap: 12px; }
+.sequoia-page .sq-strategy { background: #10171b; border: 1px solid #303f47; border-radius: 6px; padding: 16px; }
+.sequoia-page .sq-strategy.chosen { border-color: #618f85; background: #14231f; }
+.sequoia-page .sq-strategy-title { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.sequoia-page .sq-index { font-family: monospace; color: #75b6a7; font-size: 12px; }
+.sequoia-page .sq-strategy p { font-size: 12px; margin: 12px 0; }
+.sequoia-page summary:where(:not(.chart-page *)) { font-size: 12px; color: #bfced4; padding: 8px 0; }
+.sequoia-page .sq-param { display: grid; grid-template-columns: 1fr 115px; gap: 6px; align-items: center; margin: 9px 0; color: #adbfbd; font-size: 12px; }
+.sequoia-page .sq-param input { min-width: 0; width: 100%; box-sizing: border-box; }
+.sequoia-page .sq-controls, .sequoia-page .sq-actions { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin-top: 20px; }
+.sequoia-page .sq-controls label { display: grid; gap: 8px; font-size: 12px; color: #afc2c4; }
+.sequoia-page .sq-json { border-top: 1px solid #303d44; margin-top: 18px; padding-top: 8px; }
+.sequoia-page .sq-json textarea { display: block; box-sizing: border-box; width: 100%; height: 180px; font-family: monospace; }
+.sequoia-page .sq-json p, .sequoia-page .sq-data { font-size: 12px; }
+.sequoia-page .sq-file { display: inline-block; position: relative; }
+.sequoia-page .sq-file input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+.sequoia-page .sq-empty { text-align: center; padding: 30px 10px; }
+.sequoia-page .sq-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 12px; }
+.sequoia-page .sq-tabs b { margin-left: 5px; color: #8cdac7; }
+.sequoia-page .sq-diagnostics { border-block: 1px solid #303d44; padding: 6px 0; }
+.sequoia-page .sq-diagnostics p { font-size: 12px; }
+.sequoia-page .sq-table { width: 100%; overflow: auto; margin-top: 20px; max-height: 650px; }
+.sequoia-page table { border-collapse: collapse; width: 100%; white-space: nowrap; }
+.sequoia-page th { position: sticky; top: 0; background: #202b31; color: #a8bbc4; font-size: 12px; text-align: left; z-index: 1; }
+.sequoia-page td, .sequoia-page th { padding: 12px 10px; border-bottom: 1px solid #2d3a41; }
+.sequoia-page td { font-size: 13px; }
+.sequoia-page .sq-stock { display: grid; gap: 6px; text-align: left; padding: 0; border: 0; background: transparent; }
+.sequoia-page .sq-stock strong { font-size: 15px; }.sequoia-page .sq-stock small { color: #9cabb4; }
+.sequoia-page .sq-tags { display: flex; gap: 6px; flex-wrap: wrap; max-width: 360px; }
+.sequoia-page .sq-tags button { font-size: 11px; padding: 5px 8px; color: #b0e0d1; border-color: #395950; background: #1c302b; }
+.sequoia-page .sq-up { color: #ff8980; }.sequoia-page .sq-down { color: #72d7ae; }
+.sequoia-page .sq-error { background: #3b2125; color: #ffb3b6; border: 1px solid #834449; border-radius: 5px; padding: 12px; overflow-wrap: anywhere; }
+.sequoia-page .sq-notice { background: #17372d; color: #b0e8d2; border: 1px solid #3c7160; border-radius: 5px; padding: 12px; }
+.sequoia-page .sq-detail { scroll-margin-top: 16px; }
+.sequoia-page .sq-chart-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 11px 12px; border: 1px solid #35434a; border-radius: 6px; background: #10191d; }
+.sequoia-page .sq-chart-legend > span { margin-right: 4px; color: #c4d6d8; font-size: 12px; font-weight: 650; }
+.sequoia-page .sq-chart-legend button { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; padding: 6px 9px; }
+.sequoia-page .sq-chart-legend button i { display: block; width: 10px; height: 10px; transform: rotate(45deg); border: 1px solid #10191d; }
+.sequoia-page .sq-chart-legend button.sq-legend-off { opacity: .48; text-decoration: line-through; }
+.sequoia-page .sq-chart-legend small { color: #8fa5ad; font-size: 11px; }
+.sequoia-page .sq-confluence { margin: 5px 0 16px; }
+.sequoia-page .sq-confluence p { overflow-wrap: anywhere; font-size: 12px; }
+.sequoia-page .sq-evidence { display: grid; grid-template-columns: repeat(auto-fit,minmax(270px,1fr)); gap: 15px; margin-bottom: 16px; }
+.sequoia-page .sq-evidence article { border-left: 3px solid #72bea8; background: #10191d; padding: 15px; }
+.sequoia-page .sq-evidence h3 { color: #a5decf; font-size: 16px; margin: 0 0 14px; }
+.sequoia-page .sq-evidence button { display: grid; width: 100%; text-align: left; gap: 7px; margin: 7px 0; }
+.sequoia-page .sq-evidence small { color: #b6c7ca; }.sequoia-page .sq-evidence em { color: #dfc483; font-size: 11px; font-style: normal; }
+.sequoia-page .chart-page { padding: 20px 0 0; }
+.sequoia-page .sq-foot { font-size: 11px; color: #859ca4; line-height: 1.8; }
+.sequoia-page progress:where(:not(.chart-page *)) { accent-color: #78cfb6; width: 100%; }
+@media(max-width: 800px) { .sequoia-page { padding: 18px 12px 90px; }.sequoia-page .sq-panel { padding: 15px; }.sequoia-page .sq-heading { align-items: start; }.sequoia-page .sq-strategies { grid-template-columns: 1fr; }.sequoia-page .sq-section-title select { max-width: 220px; } }
+.sequoia-page .sq-run-config pre { color: #b5c7d1; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+
+/* Keep the embedded research desk aligned without changing standalone chart pages. */
+.sequoia-page .chart-heading form { height: 44px; }
+.sequoia-page .chart-heading form input { height: 100%; min-height: 0; min-width: 0; }
+.sequoia-page .chart-actions > button span { font: inherit; }
+@media (max-width: 600px) {
+  .sequoia-page .chart-actions { flex-wrap: wrap; }
+  .sequoia-page .timeframe-toolbar { flex: 1 0 100%; }
+}
+
+.sequoia-page .sq-detail-navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.sequoia-page .sq-detail-navigation span { color: #8fa9a7; font-variant-numeric: tabular-nums; }

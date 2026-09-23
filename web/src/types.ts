@@ -80,6 +80,8 @@ export interface Evaluation {
 }
 
 export interface ScreenRunResult {
+  filtered_count?: number;
+  new_comparison?: {run_id:string;as_of:string;finished_at:string;entered:string[];count:number} | null;
   run_id: string;
   status: string;
   universe_size: number;
@@ -108,6 +110,7 @@ export interface ScreenTemplate {
 }
 
 export interface Bar {
+  limit_state?: "up" | "down" | null;
   symbol: string;
   timestamp: string;
   open: number;
@@ -153,6 +156,8 @@ export interface ChartIndicatorPoint {
   ma_10: number | null;
   ma_20: number | null;
   ma_30: number | null;
+  ma_120?: number | null;
+  ma_250?: number | null;
   boll_upper: number | null;
   boll_middle: number | null;
   boll_lower: number | null;

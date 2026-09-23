@@ -1,16 +1,19 @@
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from threading import RLock
 from types import ModuleType
 from zoneinfo import ZoneInfo
 
 import baostock
 
+from astock.data.providers.baostock_transport import bounded_transport
 from astock.domain.market import Adjustment, Bar, Timeframe
 from astock.domain.security import Security
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+BAOSTOCK_SESSION_LOCK = RLock()
 ADJUST_FLAGS = {
     Adjustment.NONE: "3",
     Adjustment.QFQ: "2",
@@ -49,6 +52,12 @@ class BaoStockProvider:
 
     @contextmanager
     def bulk_session(self) -> Iterator[None]:
+        # BaoStock uses a process-global socket: concurrent requests corrupt replies.
+        with BAOSTOCK_SESSION_LOCK, self._locked_session():
+            yield
+
+    @contextmanager
+    def _locked_session(self) -> Iterator[None]:
         if self._session_depth:
             self._session_depth += 1
             try:
@@ -56,14 +65,16 @@ class BaoStockProvider:
             finally:
                 self._session_depth -= 1
             return
-        login = self.module.login()
-        self._ensure_success(login)
-        self._session_depth = 1
-        try:
-            yield
-        finally:
-            self._session_depth = 0
-            self.module.logout()
+        transport = bounded_transport() if self.module is baostock else nullcontext()
+        with transport:
+            login = self.module.login()
+            self._ensure_success(login)
+            self._session_depth = 1
+            try:
+                yield
+            finally:
+                self._session_depth = 0
+                self.module.logout()
 
     @contextmanager
     def _session(self) -> Iterator[None]:
@@ -332,13 +343,15 @@ class BaoStockProvider:
         statuses = []
         for row in rows:
             is_st = row["isST"] == "1"
-            rate = Decimal("0.05") if is_st else {
+            trade_date = date.fromisoformat(row["date"])
+            rate = Decimal("0.05") if is_st and board == "main" else {
                 "main": Decimal("0.10"),
                 "chinext": Decimal("0.20"),
                 "star": Decimal("0.20"),
                 "beijing": Decimal("0.30"),
             }[board]
-            trade_date = date.fromisoformat(row["date"])
+            if board == "chinext" and trade_date < date(2020, 8, 24):
+                rate = Decimal("0.05") if is_st else Decimal("0.10")
             previous_close = float(row["preclose"]) if row["preclose"] else None
             if trade_date in unlimited_dates or previous_close is None:
                 limit_up, limit_down = None, None

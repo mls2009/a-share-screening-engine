@@ -229,3 +229,15 @@ def test_sync_universe_persists_etf_instrument_type(tmp_path: Path) -> None:
     assert database.connection.execute(
         "select instrument_type from symbols where symbol = '159558.SZ'"
     ).fetchone() == ("etf",)
+
+
+def test_watchlist_status_sync_persists_provider_status(tmp_path: Path) -> None:
+    service = _service(tmp_path, FakeHistory([]))
+    service.reference_provider = FakeReference()
+    service.database.connection.execute(
+        "insert into watchlist(symbol,name,sources) values ('600519.SH','贵州茅台','[]')"
+    )
+    service.sync_watchlist_status(END)
+    assert service.database.connection.execute(
+        "select trade_date,is_suspended from security_status where symbol='600519.SH'"
+    ).fetchall() == [(START, False)]

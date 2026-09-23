@@ -1,5 +1,5 @@
 import type { Bar, PriceZone } from "../../types";
-import { buildChartOption, zonePresentation } from "./chartOptions";
+import { buildChartOption, candleTooltip, zonePresentation } from "./chartOptions";
 
 type TestTooltip = {
   show?: boolean;
@@ -239,4 +239,97 @@ it("默认叠加 MA，并为 BOLL 和 MACD 生成对应图形", () => {
   expect(series.find((item) => item.name === "DIF")).toMatchObject({ type: "line", yAxisIndex: 2 });
   expect(xAxis).toHaveLength(3);
   expect((option.dataZoom as unknown[])[0]).toMatchObject({ xAxisIndex: [0, 1, 2] });
+});
+
+it("uses dedicated limit colors for candles and matching volume bars", () => {
+  const option = buildChartOption([{...bars[0],limit_state:"up"},{...bars[1],limit_state:"down"}],[],[],[]);
+  const series = option.series as Array<{ data: Array<{itemStyle: {color: string; borderColor?: string}}> }>;
+  expect(series[0].data[0].itemStyle.color).toBe("#ffca45");
+  expect(series[0].data[1].itemStyle.borderColor).toBe("#a78bfa");
+  expect(series[1].data[0].itemStyle.color).toBe("#ffca45");
+  expect(series[1].data[1].itemStyle.color).toBe("#a78bfa");
+});
+
+
+it("指标提示文字使用对应线条和柱状图颜色", () => {
+  const option = buildChartOption(bars, [], [], ["ma", "boll", "macd", "kdj", "rsi", "obv", "atr", "volume_ma"]);
+  const series = option.series as Array<{name:string; type:string; lineStyle?:{color:string}; itemStyle?:{color:string}}>;
+  const lines = series.filter(item => item.type === "line");
+  expect(lines.length).toBeGreaterThan(10);
+  for (const item of lines) {
+    expect(item.itemStyle?.color).toBe(item.lineStyle?.color);
+    expect(candleTooltip(bars, [{ dataIndex: 1, seriesType: "line", seriesName: item.name, value: 12.34, color: item.itemStyle?.color }]))
+      .toContain(`<span style="color:${item.lineStyle?.color}">${item.name}：12.34</span>`);
+  }
+  expect(candleTooltip(bars, [{dataIndex: 1, seriesType: "bar", seriesName: "MACD柱", value: 0.2, color: "#aab5b8"}]))
+    .toContain('<span style="color:#aab5b8">MACD柱：0.20</span>');
+});
+
+it("真空区标记使用冻结的上下沿", () => {
+  const option = buildChartOption(bars, [], [], [], [{
+    metric: "close", timeframe: "1d", date: "2026-08-20", startDate: "2026-08-19",
+    periods: 2, label: "真空区", priceLow: 9.8, priceHigh: 11.2,
+  }]);
+  const series = option.series as Array<{ markArea?: { data: Array<Array<{ yAxis: number }>> } }>;
+  const box = series.find(item => item.markArea)?.markArea?.data[0];
+  expect(box?.map(point => point.yAxis)).toEqual([9.8, 11.2]);
+});
+
+it("默认均线包含MA120和MA250且提示配色跟随线条", () => {
+  const indicators = bars.map(bar => ({timestamp: bar.timestamp, ma_120: 10, ma_250: 9.9})) as import("../../types").ChartIndicatorPoint[];
+  const option = buildChartOption(bars, [], indicators);
+  const series = option.series as Array<{name: string; data: number[]; lineStyle?: {color: string}; itemStyle?: {color: string}}>;
+  for (const [name, value] of [["MA120", 10], ["MA250", 9.9]] as const) {
+    const line = series.find(item => item.name === name);
+    expect(line?.data).toEqual([value, value]);
+    expect(line?.itemStyle?.color).toBe(line?.lineStyle?.color);
+  }
+});
+
+it("shows a visible Pinbar label on the exact signal candle", () => {
+  const option = buildChartOption(bars, [], [], [], [{metric:"close", timeframe:"1d", date:"2026-08-20", periods:1,
+    label:"裸K：看涨Pinbar（下影占比>2/3）：True"}]);
+  const series = option.series as Array<{markPoint?: {label?: {show?:boolean}; data:Array<{name:string;coord:unknown[]}>}}>;
+  const signal = series.find(item => item.markPoint?.data.some(point => point.name === "看涨Pinbar"));
+  expect(signal?.markPoint?.label?.show).toBe(true);
+  expect(signal?.markPoint?.data[0].coord).toEqual([bars[1].timestamp, bars[1].low]);
+});
+
+it("initial viewport includes older Pinbar hits as well as recent hits", () => {
+  const history = Array.from({length:300}, (_,i)=>({...bars[0],timestamp:new Date(Date.UTC(2025,0,i+1)).toISOString()}));
+  const marks = [40,270].map(i=>({metric:'close',timeframe:'1d' as const,date:history[i].timestamp.slice(0,10),periods:1,label:'裸K：看涨Pinbar'}));
+  const option=buildChartOption(history,[],[],[],marks);
+  const zoom=option.dataZoom as Array<{start:number}>;
+  expect(zoom[0].start).toBeLessThan(40/300*100);
+  const series=option.series as Array<{markPoint?:unknown}>;
+  expect(series.filter(s=>s.markPoint)).toHaveLength(2);
+});
+
+it('labels a two-bar Pinbar distinctly and covers both candles',()=>{
+  const option=buildChartOption(bars,[],[],[],[{metric:'close',timeframe:'1d',date:'2026-08-20',startDate:'2026-08-19',periods:2,label:'裸K：双K合成·看涨Pinbar'}]);
+  const series=option.series as Array<{markPoint?:{data:Array<{name:string}>};markArea?:{data:Array<Array<{xAxis:number}>>}}>;
+  expect(series.find(s=>s.markPoint)?.markPoint?.data[0].name).toBe('双K·看涨Pinbar');
+  expect(series.find(s=>s.markArea)?.markArea?.data[0].map(p=>p.xAxis)).toEqual([-.45,1.45]);
+});
+
+it('历史形态绘制两条斜边和转折点，而非突破标记',()=>{
+  const option=buildChartOption(bars,[],[],[],[{metric:'close',timeframe:'1d',date:'2026-08-20',startDate:'2026-08-19',periods:2,label:'上升三角形 · 测试',
+    shape:{kind:'ascending',upper_start:12,upper_end:12,lower_start:9,lower_end:10,
+      high_points:[{date:'2026-08-19',price:12}],low_points:[{date:'2026-08-20',price:10}]}}]);
+  const series=(option.series as TestSeries[]).find(s=>s.name==='上升三角形 · 测试');
+  expect(series?.markLine?.data).toEqual([
+    [{coord:[expect.any(String),12]},{coord:[expect.any(String),12]}],
+    [{coord:[expect.any(String),9]},{coord:[expect.any(String),10]}],
+  ]);
+  expect(series?.markArea).toBeUndefined();
+});
+
+it('三种形态的边界线使用各自固定颜色',()=>{
+  for (const [kind,color] of [['ascending','#f3c969'],['descending','#b49aff'],['range','#6bc5ff']] as const) {
+    const option=buildChartOption(bars,[],[],[],[{metric:'close',timeframe:'1d',date:'2026-08-20',startDate:'2026-08-19',periods:2,label:kind,
+      shape:{kind,upper_start:12,upper_end:12,lower_start:9,lower_end:10,high_points:[],low_points:[]}}]);
+    const lines=option.series as Array<{name:string;markLine?:{lineStyle:{color:string};data:unknown[]}}>;
+    expect(lines.find(s=>s.name===kind)?.markLine?.lineStyle.color).toBe(color);
+    expect(lines.find(s=>s.name===kind)?.markLine?.data).toHaveLength(2);
+  }
 });
