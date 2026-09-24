@@ -66,3 +66,24 @@ def test_body_low_retest_marks_both_references_and_current_visit():
     assert marks[0]['priceLow']==9.5
     assert '次低' in marks[1]['label']
     assert marks[2]['label'].startswith('实体低点回访：')
+
+
+def test_ma_pierce_2y_marks_each_hit_date():
+    tree = {"kind": "condition", "metric": "ma_cluster_pierce_up_2y", "timeframe": "1d",
+            "operator": "eq", "right": {"kind": "constant", "value": True, "unit": "boolean"}}
+    rows = [{"feature_date": date(2026, 9, 24), "ma_cluster_pierce_2y_hits": [
+        {"date": "2025-08-08", "open": 9.5, "close": 11.0},
+        {"date": "2026-03-12", "open": 8.8, "close": 10.2},
+    ]}]
+    marks = condition_marks(tree, {"result": "true"}, {Timeframe.DAY: rows})
+    assert [mark["date"] for mark in marks] == ["2025-08-08", "2026-03-12"]
+    assert {mark["metric"] for mark in marks} == {"close"}
+    assert "均线粘连走平" in marks[0]["label"]
+
+
+def test_ma_pierce_single_k_marks_latest_bar():
+    tree = {"kind": "condition", "metric": "ma_cluster_pierce_up", "timeframe": "1d",
+            "operator": "eq", "right": {"kind": "constant", "value": True, "unit": "boolean"}}
+    rows = [{"feature_date": date(2026, 9, 24)}]
+    marks = condition_marks(tree, {"result": "true", "actual": True}, {Timeframe.DAY: rows})
+    assert [mark["date"] for mark in marks] == ["2026-09-24"]

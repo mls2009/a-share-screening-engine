@@ -1,16 +1,23 @@
 """Freeze chart evidence from the successful leaves of a saved screening run."""
 import re
+from astock.screening.sequoia_confluence import METRIC as SEQUOIA_CONFLUENCE, HIT_KEYS as SEQUOIA_HIT_KEYS
 from astock.features.chart_shapes import SHAPE_LABELS
 
 from astock.domain.market import Timeframe
 from astock.screening.evaluator import TruthValue, evaluate_tree
 from astock.screening.models import ConditionNode
 from astock.features.price_action import PA_LABELS
+from astock.features.ma_pierce import MA_PIERCE_2Y_HITS, MA_PIERCE_2Y_METRIC, MA_PIERCE_METRIC
 
 
 def entry_histories(histories: dict, mode: str, as_of, snapshot: dict) -> dict:
     """Keep intraday evidence independent of subsequently downloaded closing bars."""
     if mode != "live":
+        evidence = {key: snapshot[key] for key in SEQUOIA_HIT_KEYS.values() if key in snapshot}
+        if evidence:
+            rows = histories.get(Timeframe.DAY, [])
+            return {**histories, Timeframe.DAY: [
+                {**(rows[0] if rows else {}), **evidence}, *rows[1:]]}
         return histories
     result = {timeframe: [row for row in rows if row["feature_date"] < as_of]
               for timeframe, rows in histories.items()}
@@ -44,6 +51,22 @@ def condition_marks(tree: dict, explanation: dict, histories: dict) -> list[dict
         rows = histories.get(Timeframe(timeframe), [])
         label = f"实际 {result.get('actual')}，期望 {result.get('expected')}"
         if not rows:
+            return
+        if metric in SEQUOIA_HIT_KEYS:
+            title = "海龟突破＋均线金叉放量" + ("＋RPS强势近高点" if metric == SEQUOIA_CONFLUENCE else "")
+            for hit in rows[0].get(SEQUOIA_HIT_KEYS[metric], []):
+                marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
+                              "date": hit["date"], "periods": 1,
+                              "label": f"{title}；{hit['branch']}；开{hit['open']:.2f} 收{hit['close']:.2f} MA120 {hit['ma120']:.2f}"})
+            return
+        if metric == MA_PIERCE_2Y_METRIC:
+            for hit in rows[0].get(MA_PIERCE_2Y_HITS, []):
+                marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
+                              "date": hit["date"], "periods": 1,
+                              "label": f"均线粘连走平·放量大阳穿线 {hit['date']}；开{hit['open']:.2f} 收{hit['close']:.2f}"})
+            return
+        if metric == MA_PIERCE_METRIC:
+            add("close", timeframe, rows, 0, 0, f"阳线实体上穿除年线外全部均线：{result.get('actual')}")
             return
         if metric == "vacuum_reentry_ma120_within_250":
             for hit in rows[0].get("vacuum_year_hits", []):
