@@ -5,10 +5,11 @@ import pandas as pd
 
 from astock.data.periods import final_session, period_end
 from astock.domain.market import Timeframe
-from astock.features.zones import nearest_zones
-from astock.features.vacuum import vacuum_features
 from astock.features.chart_shapes import chart_shape_features
+from astock.features.ma_pierce import ma_pierce_features
 from astock.features.price_action import price_action_features, weekly_price_action_features
+from astock.features.vacuum import vacuum_features
+from astock.features.zones import nearest_zones
 from astock.storage.database import Database
 
 FEATURE_COLUMNS = [
@@ -175,6 +176,7 @@ class MarketFeatureStore:
         include_vacuum: bool = False,
         include_price_action: bool = False,
         include_shapes: bool = False,
+        include_ma_pierce: bool = False,
     ) -> list[dict]:
         period_filter, period_args = self._period_filter(timeframe, end)
         cursor = self.connection.execute(
@@ -192,6 +194,8 @@ class MarketFeatureStore:
             self.attach_vacuum({symbol: rows}, end, feature_version)
         if include_shapes and timeframe == Timeframe.DAY:
             self.attach_shapes({symbol: rows}, end, feature_version)
+        if include_ma_pierce and timeframe == Timeframe.DAY:
+            self.attach_ma_pierce({symbol: rows})
         if include_price_action and timeframe in {Timeframe.DAY, Timeframe.WEEK}:
             self.attach_price_action({symbol: rows}, end, feature_version, timeframe)
         return [self._enrich(symbol, timeframe, row) for row in rows] if enrich else rows
@@ -208,6 +212,7 @@ class MarketFeatureStore:
         include_vacuum: bool = False,
         include_price_action: bool = False,
         include_shapes: bool = False,
+        include_ma_pierce: bool = False,
         progress=None,
     ) -> dict[str, list[dict]]:
         if not symbols:
@@ -239,9 +244,18 @@ class MarketFeatureStore:
             self.attach_vacuum(histories, end, feature_version, progress=progress)
         if include_shapes and timeframe == Timeframe.DAY:
             self.attach_shapes(histories, end, feature_version, progress=progress)
+        if include_ma_pierce and timeframe == Timeframe.DAY:
+            self.attach_ma_pierce(histories)
         if include_price_action and timeframe in {Timeframe.DAY, Timeframe.WEEK}:
             self.attach_price_action(histories, end, feature_version, timeframe, progress=progress)
         return histories
+
+    @staticmethod
+    def attach_ma_pierce(histories: dict[str, list[dict]]) -> None:
+        """穿线判定只依赖每行自带的 OHLC 与均线值，无需回读全量历史。"""
+        for rows in histories.values():
+            for row, derived in zip(rows, ma_pierce_features(rows), strict=True):
+                row.update(derived)
 
     def attach_vacuum(self, histories: dict[str, list[dict]], end: date, feature_version: str = "v1", progress=None) -> None:
         """Read narrow OHLC batches; derive on demand without rewriting stored features."""

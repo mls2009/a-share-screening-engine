@@ -1,4 +1,3 @@
-from astock.features.chart_shapes import SHAPE_LABELS, chart_shape_features
 from bisect import bisect_right
 from datetime import date
 
@@ -8,11 +7,17 @@ from astock.backtest.engine import _close_at, _frame, _records
 from astock.backtest.models import _tree_timeframes
 from astock.data.service import MarketDataService
 from astock.domain.market import Timeframe
+from astock.features.chart_shapes import SHAPE_LABELS, chart_shape_features
+from astock.features.ma_pierce import MA_PIERCE_METRICS, MA_PIERCE_WINDOWS, ma_pierce_features
 from astock.features.patterns import detect_patterns
+from astock.features.price_action import (
+    PA_METRICS,
+    price_action_features,
+    weekly_price_action_features,
+)
 from astock.features.technical import compute_burst_features
-from astock.features.zones import detect_zones
 from astock.features.vacuum import VACUUM_METRICS, vacuum_features
-from astock.features.price_action import PA_METRICS, price_action_features, weekly_price_action_features
+from astock.features.zones import detect_zones
 from astock.screening.service import _requirements
 
 
@@ -50,6 +55,15 @@ def condition_history(request, database, bar_store, calendar):
                     row.update(derived)
             if timeframe == Timeframe.DAY and keys & SHAPE_LABELS.keys():
                 for row, derived in zip(records, chart_shape_features(records), strict=True):
+                    row.update(derived)
+            if timeframe == Timeframe.DAY and keys & MA_PIERCE_METRICS:
+                closes = pd.Series([row["close"] for row in records], dtype=float)
+                for window in MA_PIERCE_WINDOWS:
+                    averages = closes.rolling(window).mean()
+                    for index, row in enumerate(records):
+                        value = averages.iloc[index]
+                        row[f"ma_{window}"] = None if pd.isna(value) else float(value)
+                for row, derived in zip(records, ma_pierce_features(records), strict=True):
                     row.update(derived)
             frame = _frame(bars)
             if timeframe == Timeframe.DAY and keys & {"return_10_max_60", "limit_up_count_5_max_60", "limit_up_burst_5_count_60"}:

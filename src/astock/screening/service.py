@@ -8,13 +8,16 @@ from astock.data.providers.tencent import SnapshotBatchResult
 from astock.data.sectors import SECTOR_KEYS, SectorStore
 from astock.data.snapshots import overlay_snapshot
 from astock.domain.market import Timeframe
+from astock.features.chart_shapes import SHAPE_LABELS
+from astock.features.ma_pierce import MA_PIERCE_METRICS
+from astock.features.price_action import PA_METRICS
 from astock.features.store import MarketFeatureStore
 from astock.features.vacuum import VACUUM_METRICS
-from astock.features.price_action import PA_METRICS
-from astock.features.chart_shapes import SHAPE_LABELS
 from astock.screening.catalog import DEFAULT_CATALOG
 from astock.screening.evaluator import Evaluation, TruthValue, evaluate_tree
 from astock.screening.models import ConditionNode, GroupNode, MetricOperand, Node, Operator
+from astock.screening.sequoia_confluence import HIT_KEYS as SEQUOIA_METRICS
+from astock.screening.sequoia_confluence import attach_confluence
 from astock.screening.validation import ScreenValidationIssue, validate_tree
 from astock.storage.database import Database
 
@@ -204,6 +207,10 @@ class ScreeningService:
                 f"{uncertain} 只股票缺少上市或退市日期；兼容当前在市记录，退市日期未知者保守排除。"
             )
         timeframes, history_limit, metrics = _requirements(tree)
+        if mode == "live" and metrics & SEQUOIA_METRICS.keys():
+            raise ScreenDefinitionError([ScreenValidationIssue(
+                "requires_close_mode", "Sequoia同日共振需使用已完成日线", "root",
+            )])
         if mode == "live" and metrics & VACUUM_METRICS:
             raise ScreenDefinitionError([ScreenValidationIssue(
                 "requires_close_mode", "真空区条件需使用收盘模式，不能用未收盘行情确认重新进入", "root",
@@ -211,6 +218,10 @@ class ScreeningService:
         if mode == "live" and metrics & (PA_METRICS | SHAPE_LABELS.keys()):
             raise ScreenDefinitionError([ScreenValidationIssue(
                 "requires_close_mode", "裸K形态需使用收盘模式，以已完成日线确认", "root",
+            )])
+        if mode == "live" and metrics & MA_PIERCE_METRICS:
+            raise ScreenDefinitionError([ScreenValidationIssue(
+                "requires_close_mode", "均线穿线条件需使用收盘模式，以已完成日线确认", "root",
             )])
         current_only = [DEFAULT_CATALOG.get(key) for key in metrics
                         if DEFAULT_CATALOG.get(key).supported_modes == frozenset({"live"})]
@@ -255,6 +266,7 @@ class ScreeningService:
                 include_vacuum=bool(metrics & VACUUM_METRICS),
                 include_price_action=bool(metrics & PA_METRICS),
                 include_shapes=bool(metrics & SHAPE_LABELS.keys()),
+                include_ma_pierce=bool(metrics & MA_PIERCE_METRICS),
                 progress=lambda message, done, total: report(10 + int(50*done/max(1,total)), message, done, total),
             )
             for timeframe in timeframes
@@ -288,8 +300,12 @@ class ScreeningService:
                 include_vacuum=bool(metrics & VACUUM_METRICS),
                 include_price_action=bool(metrics & PA_METRICS),
                 include_shapes=bool(metrics & SHAPE_LABELS.keys()),
+                include_ma_pierce=bool(metrics & MA_PIERCE_METRICS),
                 progress=lambda message, done, total: report(10 + int(50*done/max(1,total)), message, done, total),
             )
+        for metric in sorted(metrics & SEQUOIA_METRICS.keys()):
+            attach_confluence(self.connection, histories[Timeframe.DAY], as_of,
+                              lambda percent, message: report(60 + int(percent * .3), message, 0, len(symbols)), metric=metric)
         identities = {row[0]: {"name": row[1], "board": row[2]} for row in securities if row[0] in symbols}
 
         def record(evaluation, symbol):
@@ -307,10 +323,11 @@ class ScreeningService:
                 counts["reasons"][evaluation.reason] = counts["reasons"].get(evaluation.reason, 0) + 1
 
         candidates = []
-        report(65, "逐股判断筛选条件", 0, len(symbols))
+        evaluation_start = 90 if metrics & SEQUOIA_METRICS.keys() else 65
+        report(evaluation_start, "逐股判断筛选条件", 0, len(symbols))
         for index, symbol in enumerate(symbols):
             if index % 50 == 0:
-                report(65 + int(30 * index / max(1, len(symbols))), "逐股判断筛选条件", index, len(symbols))
+                report(evaluation_start + int((95 - evaluation_start) * index / max(1, len(symbols))), "逐股判断筛选条件", index, len(symbols))
             history = {
                 timeframe: histories[timeframe].get(symbol, [])
                 for timeframe in timeframes

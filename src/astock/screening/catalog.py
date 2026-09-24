@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 
 from astock.domain.market import Timeframe
-from astock.features.price_action import PA_LABELS
 from astock.features.chart_shapes import SHAPE_LABELS
+from astock.features.price_action import PA_LABELS
 from astock.screening.models import Operator, Unit
 
 NUMERIC_OPERATORS = frozenset(
@@ -115,10 +115,23 @@ PATTERN_CHOICES = (
 
 
 METRICS = [
+    MetricSpec("sequoia_triple_ma120_within_2y", "近两年Sequoia三策略同日共振＋MA120", Unit.BOOLEAN,
+               timeframes=frozenset({Timeframe.DAY}), operators=EQUALITY_OPERATORS, group="trend",
+               choices=(ChoiceSpec("true", "是"), ChoiceSpec("false", "否")),
+               supported_modes=frozenset({"close"})),
+    MetricSpec("sequoia_double_ma120_within_2y", "近两年Sequoia双策略（无RPS）同日共振＋MA120", Unit.BOOLEAN,
+               timeframes=frozenset({Timeframe.DAY}), operators=EQUALITY_OPERATORS, group="trend",
+               choices=(ChoiceSpec("true", "是"), ChoiceSpec("false", "否")),
+               supported_modes=frozenset({"close"})),
     *[MetricSpec(key, label, Unit.BOOLEAN, timeframes=frozenset({Timeframe.WEEK if key.startswith("pw_") else Timeframe.DAY}),
                  operators=EQUALITY_OPERATORS, group="candlestick", family=key,
                  choices=(ChoiceSpec("true", "是"), ChoiceSpec("false", "否")),
                  supported_modes=frozenset({"close", "backtest"})) for key, label in (PA_LABELS | SHAPE_LABELS).items()],
+    MetricSpec("ma_cluster_pierce_up", "单K：阳线实体上穿除年线外全部均线（MA5/10/20/30/60/120）", Unit.BOOLEAN,
+               timeframes=frozenset({Timeframe.DAY}), operators=EQUALITY_OPERATORS, group="trend",
+               family="ma_cluster_pierce",
+               choices=(ChoiceSpec("true", "是"), ChoiceSpec("false", "否")),
+               supported_modes=frozenset({"close", "backtest"})),
     MetricSpec("vacuum_reentry_ma120_within_250", "近250交易日内缩量急跌区间重入且当日站上MA120", Unit.BOOLEAN,
                timeframes=frozenset({Timeframe.DAY}), operators=EQUALITY_OPERATORS, group="trend",
                choices=(ChoiceSpec("true", "是"), ChoiceSpec("false", "否"))),

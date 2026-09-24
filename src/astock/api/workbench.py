@@ -1,4 +1,3 @@
-from astock.features.chart_shapes import uses_shapes
 import csv
 import io
 import json
@@ -11,9 +10,11 @@ from pydantic import BaseModel, Field, TypeAdapter, field_validator
 
 from astock.data.sectors import SectorStore
 from astock.domain.market import Timeframe
+from astock.features.chart_shapes import uses_shapes
+from astock.features.ma_pierce import uses_ma_pierce
+from astock.features.price_action import PA_METRICS, uses_price_action
 from astock.features.store import MarketFeatureStore
 from astock.features.vacuum import uses_vacuum
-from astock.features.price_action import PA_METRICS, uses_price_action
 from astock.live.calendar import SHANGHAI
 from astock.screening.annotations import condition_marks, entry_histories
 from astock.screening.evaluator import evaluate_tree
@@ -128,7 +129,7 @@ def register_workbench(app, context, add_watchlist, watch_request):
                         raise HTTPException(422, "历史条件筛选支持日线价格、成交活跃度和技术指标")
             check(payload.tree)
         count = con.execute("select count(*) from market_features where symbol = ? and timeframe = '1d'", [symbol]).fetchone()[0]
-        rows = MarketFeatureStore(context.database).read_history(symbol, Timeframe.DAY, datetime.now(SHANGHAI).date(), count, enrich=False, include_vacuum=uses_vacuum(payload.tree), include_shapes=uses_shapes(payload.tree), include_price_action=uses_price_action(payload.tree))
+        rows = MarketFeatureStore(context.database).read_history(symbol, Timeframe.DAY, datetime.now(SHANGHAI).date(), count, enrich=False, include_vacuum=uses_vacuum(payload.tree), include_shapes=uses_shapes(payload.tree), include_price_action=uses_price_action(payload.tree), include_ma_pierce=uses_ma_pierce(payload.tree))
         return scan_waves(rows, payload)
 
     @app.get("/api/workbench/schedules")
@@ -248,7 +249,7 @@ def register_workbench(app, context, add_watchlist, watch_request):
             return {item.get("timeframe", node.get("timeframe")) for item in (node, node.get("right", {}))
                     if item.get("metric") in {"support_distance", "resistance_distance"}}
         enriched_frames = zone_timeframes(record["tree"])
-        histories = {timeframe: store.read_history(symbol, timeframe, as_of, 1100, enrich=timeframe.value in enriched_frames, include_vacuum=uses_vacuum(record["tree"]), include_shapes=uses_shapes(record["tree"]), include_price_action=uses_price_action(record["tree"])) for timeframe in Timeframe}
+        histories = {timeframe: store.read_history(symbol, timeframe, as_of, 1100, enrich=timeframe.value in enriched_frames, include_vacuum=uses_vacuum(record["tree"]), include_shapes=uses_shapes(record["tree"]), include_price_action=uses_price_action(record["tree"]), include_ma_pierce=uses_ma_pierce(record["tree"])) for timeframe in Timeframe}
         # Point-in-time status and patterns are needed for historic condition checks.
         statuses = con.execute("select trade_date, is_st, is_suspended from security_status where symbol = ? and trade_date <= ? order by trade_date", [symbol, as_of]).fetchall()
         identity = con.execute("select name, board from symbols where symbol = ?", [symbol]).fetchone()
@@ -264,6 +265,10 @@ def register_workbench(app, context, add_watchlist, watch_request):
                 value["pattern_type"] = [event[0] for event in events] or None
                 value["pattern_strength"] = max((event[1] for event in events), default=None)
         tree = TypeAdapter(Node).validate_python(record["tree"])
+        from astock.screening.sequoia_confluence import HIT_KEYS, attach_confluence
+        for metric in HIT_KEYS:
+            if latest and metric in json.dumps(record["tree"]):
+                attach_confluence(con, {symbol: histories[Timeframe.DAY]}, as_of, lambda *_: None, metric=metric)
         evaluation = evaluate_tree(tree, histories).to_dict() if latest else json.loads(row[1])
         changes = []
         for day in reversed(histories[Timeframe.DAY][:days]):

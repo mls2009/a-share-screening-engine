@@ -1,5 +1,3 @@
-from astock.screening.comparison import previous_run_comparison
-from astock.features.chart_shapes import uses_shapes
 import asyncio
 import json
 import logging
@@ -18,12 +16,11 @@ from pydantic import BaseModel, Field
 from astock.api.dependencies import ApiContext
 from astock.api.notes import register_notes
 from astock.api.workbench import register_workbench
-from astock.sequoia.api import register_sequoia
 from astock.backtest.models import BacktestRequest
 from astock.backtest.service import BacktestDataError, BacktestService
 from astock.config import Settings
-from astock.data.daily_update import DailyMarketUpdateScheduler
 from astock.data.backup_daily import BackupDailySync, ResilientDailySync
+from astock.data.daily_update import DailyMarketUpdateScheduler
 from astock.data.limit_colors import annotate_limits
 from astock.data.market_sync import MarketSyncService
 from astock.data.providers.akshare import AkShareProvider
@@ -36,10 +33,12 @@ from astock.data.updates import MarketUpdates
 from astock.domain.market import Adjustment, Timeframe
 from astock.features.benchmark import BenchmarkDataError, BenchmarkService
 from astock.features.builder import FeatureBuilder, chart_base_timeframe
-from astock.features.store import MarketFeatureStore
-from astock.features.vacuum import uses_vacuum
+from astock.features.chart_shapes import uses_shapes
+from astock.features.ma_pierce import uses_ma_pierce
 from astock.features.price_action import uses_price_action
+from astock.features.store import MarketFeatureStore
 from astock.features.technical import compute_technical_features
+from astock.features.vacuum import uses_vacuum
 from astock.features.zones import (
     ManualZoneInput,
     chart_zones,
@@ -55,9 +54,11 @@ from astock.notifications.feishu import FeishuNotifier
 from astock.notifications.outbox import OutboxWorker
 from astock.screening.annotations import condition_marks, entry_histories
 from astock.screening.catalog import DEFAULT_CATALOG
+from astock.screening.comparison import previous_run_comparison
 from astock.screening.models import Node
 from astock.screening.scheduler import ScreenScheduleRunner
 from astock.screening.service import ScreenDefinitionError, ScreeningService
+from astock.sequoia.api import register_sequoia
 from astock.storage.bars import BarStore
 from astock.storage.database import Database
 from astock.storage.jobs import SyncJobRepository
@@ -328,7 +329,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             if not any(item["run_id"] == str(payload.run_id) for item in sources):
                 stored_tree, stored_result = json.loads(source[1]), json.loads(source[2])
                 histories = {timeframe: MarketFeatureStore(context.database).read_history(
-                    payload.symbol, timeframe, source[0], 1000, enrich=False, include_vacuum=uses_vacuum(stored_tree), include_shapes=uses_shapes(stored_tree), include_price_action=uses_price_action(stored_tree)
+                    payload.symbol, timeframe, source[0], 1000, enrich=False, include_vacuum=uses_vacuum(stored_tree), include_shapes=uses_shapes(stored_tree), include_price_action=uses_price_action(stored_tree), include_ma_pierce=uses_ma_pierce(stored_tree)
                 ) for timeframe in Timeframe}
                 histories = entry_histories(histories, source[3], source[0], json.loads(source[4]))
                 sources.append({"run_id": str(payload.run_id), "as_of": source[0].isoformat(),
@@ -346,6 +347,8 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
 
     register_workbench(app, context, add_watchlist, WatchlistRequest)
     register_sequoia(app, context)
+    from astock.api.result_reviews import register_result_reviews
+    register_result_reviews(app, context.database)
 
     @app.delete("/api/watchlist/{symbol}", status_code=204)
     def remove_watchlist(symbol: str):
@@ -512,6 +515,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         sort_by: str | None = None,
         sort_direction: Literal["asc", "desc"] | None = None,
         new_only: bool = False,
+        failed_only: bool = False,
     ) -> dict:
         row = context.database.connection.execute(
             """
@@ -530,9 +534,14 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             )
         comparison = previous_run_comparison(context.database.connection, run_id)
         entered = comparison['entered'] if comparison else []
+        filtered = entered if new_only else None
+        if failed_only:
+            failed = [item[0] for item in context.database.connection.execute(
+                "select symbol from result_reviews where source='screen' and run_id=?", [run_id]).fetchall()]
+            filtered = [symbol for symbol in failed if not new_only or symbol in entered]
         return {
             "new_comparison": comparison,
-            "filtered_count": len(entered) if new_only else row[6],
+            "filtered_count": len(filtered) if filtered is not None else row[6],
             "run_id": str(run_id),
             "status": row[0],
             "mode": row[1],
@@ -544,7 +553,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             "diagnostics": {"conditions": {}, "warnings": [], "data_dates": {},
                             **(json.loads(row[7]) if row[7] else {})},
             "matches": context.screening.results(
-                run_id, limit, offset, sort_by, sort_direction, symbols=entered if new_only else None
+                run_id, limit, offset, sort_by, sort_direction, symbols=filtered
             ),
         }
 
