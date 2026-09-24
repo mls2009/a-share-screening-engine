@@ -1,6 +1,12 @@
+import pandas as pd
+
 from astock.features.ma_pierce import (
+    MA_PIERCE_2Y_METRIC,
     MA_PIERCE_METRIC,
     MA_PIERCE_WINDOWS,
+    ma_pierce_2y_exists,
+    ma_pierce_2y_hits,
+    ma_pierce_2y_scan,
     ma_pierce_features,
     uses_ma_pierce,
 )
@@ -66,3 +72,92 @@ def test_uses_ma_pierce_detects_nested_metric():
     other = {"kind": "condition", "metric": "ma_20", "timeframe": "1d",
              "operator": "gt", "right": {"kind": "constant", "value": 5, "unit": "price"}}
     assert uses_ma_pierce(other) is False
+
+
+def flat_frame(length=120, price=10.0, volume=1000.0):
+    """横向盘整的日线 frame：均线全部放平粘连在 price 上，量能恒定。"""
+    dates = pd.bdate_range("2024-01-01", periods=length)
+    return pd.DataFrame({
+        "feature_date": dates,
+        "open": [price] * length,
+        "close": [price] * length,
+        "volume": [volume] * length,
+        "volume_ma_20": [volume] * length,
+        **{f"ma_{window}": [price] * length for window in MA_PIERCE_WINDOWS},
+    })
+
+
+def pierced_row(frame, index, open_, close, volume=None):
+    frame.loc[index, "open"] = open_
+    frame.loc[index, "close"] = close
+    if volume is not None:
+        frame.loc[index, "volume"] = volume
+
+
+def test_2y_scan_detects_full_pattern():
+    frame = flat_frame()
+    pierced_row(frame, 60, 9.5, 11.0, volume=2500.0)
+    result = ma_pierce_2y_scan(frame)
+    assert bool(result.iloc[60]) is True
+    assert int(result.sum()) == 1
+
+
+def test_2y_scan_rejects_without_volume():
+    frame = flat_frame()
+    pierced_row(frame, 60, 9.5, 11.0, volume=1500.0)  # 不足 2 倍均量
+    assert bool(ma_pierce_2y_scan(frame).iloc[60]) is False
+
+
+def test_2y_scan_rejects_rising_cluster():
+    frame = flat_frame()
+    # 均线束整体上行（每日约 0.8%）：MA10/20/30 斜率远超走平阈值
+    for window in MA_PIERCE_WINDOWS:
+        frame[f"ma_{window}"] = [10.0 * (1 + 0.008 * i) for i in range(len(frame))]
+    pierced_row(frame, 100, 13.0, 14.5, volume=2500.0)
+    assert bool(ma_pierce_2y_scan(frame).iloc[100]) is False
+
+
+def test_2y_scan_rejects_wide_spread():
+    frame = flat_frame()
+    # MA10/20/30 相互距离超过 2%
+    for index in range(len(frame)):
+        frame.loc[index, "ma_10"] = 10.3
+        frame.loc[index, "ma_30"] = 9.7
+    pierced_row(frame, 60, 9.4, 11.2, volume=2500.0)
+    assert bool(ma_pierce_2y_scan(frame).iloc[60]) is False
+
+
+def test_2y_scan_ignores_rows_with_missing_ma():
+    frame = flat_frame(30)
+    pierced_row(frame, 25, 9.5, 11.0, volume=2500.0)
+    frame.loc[25, "ma_120"] = None  # 上市不足 120 日
+    assert bool(ma_pierce_2y_scan(frame).iloc[25]) is False
+
+
+def test_2y_hits_report_dates():
+    frame = flat_frame()
+    pierced_row(frame, 40, 9.5, 11.0, volume=2500.0)
+    hits = ma_pierce_2y_hits(frame)
+    assert len(hits) == 1
+    assert hits[0]["date"] == str(frame.loc[40, "feature_date"].date())
+    assert hits[0]["close"] == 11.0
+
+
+def test_2y_exists_respects_two_year_window():
+    # 命中发生在 ~2.2 年前：对最新一行已超出两年窗口
+    long_frame = flat_frame(580)  # 约 2.3 个自然年
+    pierced_row(long_frame, 10, 9.5, 11.0, volume=2500.0)
+    exists = ma_pierce_2y_exists(long_frame)
+    assert bool(exists.iloc[10]) is True
+    assert bool(exists.iloc[-1]) is False
+
+    # 命中发生在 ~1.3 年前：仍在窗口内
+    short_frame = flat_frame(340)
+    pierced_row(short_frame, 10, 9.5, 11.0, volume=2500.0)
+    assert bool(ma_pierce_2y_exists(short_frame).iloc[-1]) is True
+
+
+def test_2y_metric_detected_by_uses_ma_pierce():
+    tree = {"kind": "condition", "metric": MA_PIERCE_2Y_METRIC, "timeframe": "1d",
+            "operator": "eq", "right": {"kind": "constant", "value": True, "unit": "boolean"}}
+    assert uses_ma_pierce(tree) is True

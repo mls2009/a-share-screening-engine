@@ -6,7 +6,12 @@ import pandas as pd
 from astock.data.periods import final_session, period_end
 from astock.domain.market import Timeframe
 from astock.features.chart_shapes import chart_shape_features
-from astock.features.ma_pierce import ma_pierce_features
+from astock.features.ma_pierce import (
+    MA_PIERCE_2Y_HITS,
+    MA_PIERCE_2Y_METRIC,
+    ma_pierce_2y_hits,
+    ma_pierce_features,
+)
 from astock.features.price_action import price_action_features, weekly_price_action_features
 from astock.features.vacuum import vacuum_features
 from astock.features.zones import nearest_zones
@@ -195,7 +200,7 @@ class MarketFeatureStore:
         if include_shapes and timeframe == Timeframe.DAY:
             self.attach_shapes({symbol: rows}, end, feature_version)
         if include_ma_pierce and timeframe == Timeframe.DAY:
-            self.attach_ma_pierce({symbol: rows})
+            self.attach_ma_pierce({symbol: rows}, end, feature_version)
         if include_price_action and timeframe in {Timeframe.DAY, Timeframe.WEEK}:
             self.attach_price_action({symbol: rows}, end, feature_version, timeframe)
         return [self._enrich(symbol, timeframe, row) for row in rows] if enrich else rows
@@ -245,17 +250,54 @@ class MarketFeatureStore:
         if include_shapes and timeframe == Timeframe.DAY:
             self.attach_shapes(histories, end, feature_version, progress=progress)
         if include_ma_pierce and timeframe == Timeframe.DAY:
-            self.attach_ma_pierce(histories)
+            self.attach_ma_pierce(histories, end, feature_version)
         if include_price_action and timeframe in {Timeframe.DAY, Timeframe.WEEK}:
             self.attach_price_action(histories, end, feature_version, timeframe, progress=progress)
         return histories
 
-    @staticmethod
-    def attach_ma_pierce(histories: dict[str, list[dict]]) -> None:
-        """穿线判定只依赖每行自带的 OHLC 与均线值，无需回读全量历史。"""
+    def attach_ma_pierce(
+        self, histories: dict[str, list[dict]], end: date, feature_version: str = "v1",
+    ) -> None:
+        """单K穿线逐行判定；近两年变体回读两年窗口扫描完整形态，标记在最新一行。"""
         for rows in histories.values():
             for row, derived in zip(rows, ma_pierce_features(rows), strict=True):
                 row.update(derived)
+        symbols = [symbol for symbol, rows in histories.items() if rows]
+        if not symbols:
+            return
+        start = (pd.Timestamp(end) - pd.DateOffset(years=2) - pd.Timedelta(days=30)).date()
+        for offset in range(0, len(symbols), 64):
+            batch = symbols[offset:offset + 64]
+            cursor = self.connection.execute(
+                """
+                select symbol, feature_date, open, close, volume, volume_ma_20,
+                       ma_5, ma_10, ma_20, ma_30, ma_60, ma_120
+                from market_features
+                where symbol in (select unnest(?)) and timeframe = '1d' and feature_version = ?
+                  and feature_date between ? and ?
+                order by symbol, feature_date
+                """,
+                [batch, feature_version, start, end],
+            )
+            records: dict[str, list[dict]] = {symbol: [] for symbol in batch}
+            for row_values in cursor.fetchall():
+                (symbol, day, opening, closing, volume, average_volume,
+                 ma5, ma10, ma20, ma30, ma60, ma120) = row_values
+                records[symbol].append({
+                    "feature_date": day, "open": opening, "close": closing, "volume": volume,
+                    "volume_ma_20": average_volume, "ma_5": ma5, "ma_10": ma10, "ma_20": ma20,
+                    "ma_30": ma30, "ma_60": ma60, "ma_120": ma120,
+                })
+            for symbol, rows in records.items():
+                targets = histories.get(symbol) or []
+                if not targets:
+                    continue
+                frame = pd.DataFrame(rows)
+                if frame.empty:
+                    continue
+                hits = ma_pierce_2y_hits(frame)
+                targets[0][MA_PIERCE_2Y_METRIC] = bool(hits)
+                targets[0][MA_PIERCE_2Y_HITS] = hits[:8]
 
     def attach_vacuum(self, histories: dict[str, list[dict]], end: date, feature_version: str = "v1", progress=None) -> None:
         """Read narrow OHLC batches; derive on demand without rewriting stored features."""
