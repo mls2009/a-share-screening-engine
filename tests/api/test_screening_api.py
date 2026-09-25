@@ -1495,3 +1495,21 @@ def test_background_screen_task_returns_saved_result(tmp_path):
     assert result['status']=='completed' and result['progress']==100
     assert result['result']['run_id']
     assert result['processed']==result['total']
+
+
+def test_failed_review_filter_is_applied_before_pagination(tmp_path):
+    client, db = _client(tmp_path)
+    run = client.post('/api/screens/run', json={'tree': CONDITION, 'as_of':'2026-08-20'}).json()
+    run_id = run['run_id']
+    matches = run['matches']
+    assert matches
+    symbol = matches[-1]['symbol']
+    path = f'/api/result-reviews/screen/{run_id}/{symbol}'
+    assert client.put(path, json={'failed':True}).status_code == 200
+    filtered = client.get(f'/api/screens/runs/{run_id}?failed_only=true&limit=1').json()
+    assert filtered['filtered_count'] == 1
+    assert [m['symbol'] for m in filtered['matches']] == [symbol]
+    assert client.get(f'/api/screens/runs/{run_id}?failed_only=true&offset=1').json()['matches'] == []
+    client.put(path, json={'failed':False})
+    assert client.get(f'/api/screens/runs/{run_id}?failed_only=true').json()['filtered_count'] == 0
+    db.connection.close()

@@ -1,0 +1,17 @@
+{
+  "kind": "group",
+  "logic": "and",
+  "children": [
+    {
+      "kind": "condition",
+      "metric": "ma120_250_repeat_support_2y",
+      "timeframe": "1d",
+      "operator": "eq",
+      "right": {
+        "kind": "constant",
+        "value": true,
+        "unit": "boolean"
+      }
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import { FailureButton } from "../reviews/FailureButton";
 import { ArrowUpRight, ChevronRight } from "lucide-react";
 
 import type { Evaluation, ScreenMatch } from "../../types";
@@ -15,7 +16,10 @@ function leaves(evaluation: Evaluation): Evaluation[] {
   return evaluation.children.length ? evaluation.children.flatMap(leaves) : [evaluation];
 }
 
-export function ResultsTable({ matches, selected, onSelect, onOpenChart, onAddWatchlist, sortBy, sortDirection, onSort, columns, catalog = [], checked, onCheck, hideExplanation, newSymbols = [] }: {
+export function ResultsTable({ matches, selected, onSelect, onOpenChart, onAddWatchlist, sortBy, sortDirection, onSort, columns, catalog = [], checked, onCheck, hideExplanation, newSymbols = [], failedSymbols = [], reviewBusy = false, onToggleFailure }: {
+  failedSymbols?: string[];
+  reviewBusy?: boolean;
+  onToggleFailure?: (symbol:string)=>void;
   newSymbols?: string[];
   columns?: string[];
   catalog?: MetricSpec[];
@@ -38,7 +42,7 @@ export function ResultsTable({ matches, selected, onSelect, onOpenChart, onAddWa
         <table className="results-table">
           <thead><tr>{onCheck && <th>选择</th>}{(columns ? [["rank", "#"], ["symbol", "证券"], ...columns.map((key) => [key, metricLabel(key, catalog)])] : [
             ["rank", "#"], ["symbol", "证券"], ["close", "现价"], ["return_20", "20 周期"], ["volume_ratio_20", "量比"],
-          ]).map(([field, label]) => <th key={field}><button type="button" aria-label={`按 ${label} 排序`} onClick={() => onSort(field)}>{label}{sortBy === field && <span aria-hidden="true"> {sortDirection === "desc" ? "↓" : "↑"}</span>}</button></th>)}<th /></tr></thead>
+          ]).map(([field, label]) => <th key={field}><button type="button" aria-label={`按 ${label} 排序`} onClick={() => onSort(field)}>{label}{sortBy === field && <span aria-hidden="true"> {sortDirection === "desc" ? "↓" : "↑"}</span>}</button></th>)}{onToggleFailure && <th>复盘标记</th>}<th /></tr></thead>
           <tbody>
             {matches.map((match) => (
               <tr key={match.symbol} className={selected === match.symbol ? "selected" : ""} onClick={() => onSelect(match)}>
@@ -48,6 +52,7 @@ export function ResultsTable({ matches, selected, onSelect, onOpenChart, onAddWa
                 {columns ? columns.map((key) => {const value=formatValue(key.includes(":") ? (match.features.metric_values as Record<string, unknown> | undefined)?.[key] : match.features[key], catalog.find((item) => item.key === key.split(":").at(-1)));return <td key={key} className={key.includes("em_")?"sector-cell":undefined} title={value}>{value}</td>;}) : <><td>{number(match.features.close)}</td>
                 <td className={Number(match.features.return_20) >= 0 ? "positive" : "negative"}>{number(match.features.return_20)}%</td>
                 <td>{number(match.features.volume_ratio_20)}x</td></>}
+                {onToggleFailure && <td><FailureButton symbol={match.symbol} failed={failedSymbols.includes(match.symbol)} disabled={reviewBusy} onClick={()=>onToggleFailure(match.symbol)} /></td>}
                 <td>{onAddWatchlist && <button type="button" aria-label={`加入自选 ${match.symbol}`} onClick={(event) => { event.stopPropagation(); onAddWatchlist(match.symbol); }}>+ 自选</button>}<button type="button" aria-label={`查看 ${match.symbol} K 线`} onClick={(event) => { event.stopPropagation(); onOpenChart(match.symbol); }}><ArrowUpRight size={15} /></button></td>
               </tr>
             ))}

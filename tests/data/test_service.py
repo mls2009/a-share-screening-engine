@@ -241,3 +241,41 @@ def test_watchlist_status_sync_persists_provider_status(tmp_path: Path) -> None:
     assert service.database.connection.execute(
         "select trade_date,is_suspended from security_status where symbol='600519.SH'"
     ).fetchall() == [(START, False)]
+
+
+def test_empty_daily_response_does_not_poison_coverage(tmp_path):
+    provider = FakeHistory([])
+    service = _service(tmp_path, provider)
+    assert service.history('600519.SH', Timeframe.DAY, START, END) == []
+    provider.bars = [_bar(35).model_copy(update={
+        'timeframe': Timeframe.DAY,
+        'timestamp': datetime(2026, 8, 20, 15, tzinfo=TZ),
+    })]
+    assert len(service.history('600519.SH', Timeframe.DAY, START, END)) == 1
+    assert len(provider.calls) == 2
+
+
+def test_partial_daily_response_leaves_missing_tail_retryable(tmp_path):
+    from datetime import timedelta
+    tomorrow = END + timedelta(days=1)
+    provider = FakeHistory([_bar(35).model_copy(update={
+        'timeframe': Timeframe.DAY, 'timestamp': datetime(2026, 8, 20, 15, tzinfo=TZ),
+    })])
+    service = _service(tmp_path, provider)
+    service.history('600519.SH', Timeframe.DAY, START, tomorrow)
+    assert service.coverage.missing_ranges(
+        '600519.SH', Timeframe.DAY, Adjustment.NONE, START, tomorrow
+    ) == [(tomorrow, tomorrow)]
+
+
+def test_primary_readiness_requires_target_day_from_provider(tmp_path):
+    provider = FakeHistory([])
+    service = _service(tmp_path, provider)
+    with pytest.raises(RuntimeError, match='尚未发布'):
+        service.ensure_daily_published(END)
+    assert service.database.connection.execute('select count(*) from bar_coverage').fetchone()[0] == 0
+    provider.bars = [_bar(35).model_copy(update={
+        'symbol': '000001.SH', 'timeframe': Timeframe.DAY,
+        'timestamp': datetime(2026,8,20,15,tzinfo=TZ),
+    })]
+    service.ensure_daily_published(END)

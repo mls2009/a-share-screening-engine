@@ -9,7 +9,7 @@ from astock.data.service import MarketDataService
 from astock.domain.market import Timeframe
 from astock.features.chart_shapes import SHAPE_LABELS, chart_shape_features
 from astock.features.ma_pierce import (
-    MA_PIERCE_2Y_METRIC,
+    MA_PIERCE_2Y_METRIC, MA_PIERCE_10D_METRIC,
     MA_PIERCE_METRICS,
     MA_PIERCE_WINDOWS,
     ma_pierce_2y_exists,
@@ -71,12 +71,13 @@ def condition_history(request, database, bar_store, calendar):
                         row[f"ma_{window}"] = None if pd.isna(value) else float(value)
                 for row, derived in zip(records, ma_pierce_features(records), strict=True):
                     row.update(derived)
-                if MA_PIERCE_2Y_METRIC in keys:
-                    frame = pd.DataFrame(records)
-                    frame["feature_date"] = [row["timestamp"] for row in records]
-                    exists = ma_pierce_2y_exists(frame)
-                    for index, row in enumerate(records):
-                        row[MA_PIERCE_2Y_METRIC] = bool(exists.iloc[index])
+                for metric in (MA_PIERCE_2Y_METRIC, MA_PIERCE_10D_METRIC):
+                    if metric in keys:
+                        frame = pd.DataFrame(records)
+                        frame["feature_date"] = [row["timestamp"] for row in records]
+                        exists = ma_pierce_2y_exists(frame, ten_day=metric == MA_PIERCE_10D_METRIC)
+                        for index, row in enumerate(records):
+                            row[metric] = bool(exists.iloc[index])
             frame = _frame(bars)
             if timeframe == Timeframe.DAY and keys & {"return_10_max_60", "limit_up_count_5_max_60", "limit_up_burst_5_count_60"}:
                 thresholds = [((state[3] / state[2] - 1) * 100 if state and state[2] and state[3] is not None else None)

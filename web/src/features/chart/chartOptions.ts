@@ -215,7 +215,7 @@ export function buildChartOption(
   marks: ConditionMark[] = [],
 ): EChartsOption {
   const dates = bars.map((bar) => bar.timestamp);
-  const pinbarDates = new Set(marks.filter(mark => (mark.label.startsWith("裸K") && mark.label.includes("Pinbar")) || mark.label.startsWith("海龟突破 · 首次满足") || Boolean(mark.strategyId && mark.label.includes(" · 命中 "))).map(mark => mark.referenceStartDate ?? mark.date));
+  const pinbarDates = new Set(marks.filter(mark => (mark.label.startsWith("裸K") && mark.label.includes("Pinbar")) || mark.label.startsWith("海龟突破 · 首次满足") || mark.label.startsWith("海龟突破＋均线金叉放量；") || mark.label.startsWith("海龟突破＋均线金叉放量＋RPS强势近高点；") || mark.label.startsWith("均线重复支撑·") || mark.label.startsWith("均线粘连走平·") || mark.label.startsWith("阳线实体上穿除年线外全部均线") || Boolean(mark.strategyId && mark.label.includes(" · 命中 "))).map(mark => mark.referenceStartDate ?? mark.date));
   const firstSignal = bars.findIndex(bar => pinbarDates.has(bar.timestamp.slice(0, 10)));
   const initialStart = firstSignal >= 0 ? Math.min(Math.max(0, bars.length - 120), Math.max(0, firstSignal - 10)) : Math.max(0, bars.length - 120);
   const candleData = bars.map((bar) => {
@@ -330,7 +330,7 @@ export function buildChartOption(
       });
       continue;
     }
-    const markColor = mark.strategyId ? STRATEGY_COLORS[mark.strategyId] ?? "#f3c969" : "#f3c969";
+    const markColor = mark.label.startsWith("均线重复支撑·") ? (mark.label.includes("MA250") ? "#d897ff" : "#64d8cb") : mark.strategyId ? STRATEGY_COLORS[mark.strategyId] ?? "#f3c969" : "#f3c969";
     if (mark.strategyId && (mark.label.includes(" · 命中 ") || mark.label.startsWith("海龟突破 · 首次满足"))) {
       const bearish = mark.strategyId === "shakeout" || mark.strategyId === "trend_drop";
       const offset = Object.keys(STRATEGY_COLORS).indexOf(mark.strategyId);
@@ -346,16 +346,19 @@ export function buildChartOption(
       const section = bars.slice(firstIndex, endIndex + 1);
       const pinbar = mark.label.includes("Pinbar") && mark.label.startsWith("裸K");
       const turtle = mark.label.startsWith("海龟突破 · 首次满足");
-      if (pinbar || turtle || mark.label.startsWith("实体低点回访：")) {
+      const confluence = mark.label.startsWith("海龟突破＋均线金叉放量；") || mark.label.startsWith("海龟突破＋均线金叉放量＋RPS强势近高点；");
+      const maSupport = mark.label.startsWith("均线重复支撑·") && mark.label.includes("本次命中");
+      const maPierce = (mark.label.startsWith("均线粘连走平·") && !mark.label.includes("突破前10日整理")) || mark.label.startsWith("阳线实体上穿除年线外全部均线");
+      if (pinbar || turtle || confluence || maPierce || maSupport || mark.label.startsWith("实体低点回访：")) {
         const bullish = !pinbar || mark.label.includes("看涨");
-        chartSeries.push({ name: turtle ? "海龟突破信号" : "裸K信号", type: "line", data: [], z: 20,
+        chartSeries.push({ name: maSupport ? "均线支撑信号" : maPierce ? "均线穿线信号" : confluence ? "组合命中信号" : turtle ? "海龟突破信号" : "裸K信号", type: "line", data: [], z: 20,
           markPoint: { symbol: "triangle", symbolRotate: bullish ? 0 : 180, symbolSize: 14,
             symbolOffset: [0, bullish ? 12 : -12],
             itemStyle: { color: markColor },
             label: { show: true, formatter: "{b}", position: bullish ? "bottom" : "top",
               color: markColor, backgroundColor: "#111517", padding: [4, 6], borderRadius: 3 },
             tooltip: { formatter: mark.label },
-            data: [{ name: turtle ? "海龟突破" : !pinbar ? "实体低点回访" : `${mark.label.includes("双K合成") ? "双K·" : ""}${bullish ? "看涨Pinbar" : "看跌Pinbar"}`, coord: [dates[endIndex], bullish ? bars[endIndex].low : bars[endIndex].high] }],
+            data: [{ name: maSupport ? (mark.label.includes("MA250") ? "年线支撑" : "半年线支撑") : maPierce ? "均线穿线" : confluence ? "组合命中" : turtle ? "海龟突破" : !pinbar ? "实体低点回访" : `${mark.label.includes("双K合成") ? "双K·" : ""}${bullish ? "看涨Pinbar" : "看跌Pinbar"}`, coord: [dates[endIndex], bullish ? bars[endIndex].low : bars[endIndex].high] }],
           },
         });
       }

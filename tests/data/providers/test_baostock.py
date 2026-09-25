@@ -381,3 +381,18 @@ def test_chinext_risk_warning_keeps_board_limit():
     rows = BaoStockProvider(fake).security_status("300001.SZ", date(2026,8,20), date(2026,8,20))
     assert rows[0]['limit_up'] == 12
     assert rows[0]['limit_down'] == 8
+
+
+def test_history_checks_error_after_result_iteration():
+    import pytest
+
+    from astock.data.providers.baostock import BaoStockError
+    class Interrupted(FakeResult):
+        def next(self):
+            self.error_code = '10002007'
+            self.error_msg = 'response interrupted'
+            return False
+    fake = FakeBaoStock()
+    fake.query_history_k_data_plus = lambda **kw: Interrupted(kw['fields'].split(','), [])
+    with pytest.raises(BaoStockError, match='interrupted'):
+        BaoStockProvider(fake).history('600519.SH', Timeframe.DAY, date(2026,8,20), date(2026,8,20))

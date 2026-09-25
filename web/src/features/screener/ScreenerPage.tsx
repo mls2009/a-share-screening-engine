@@ -1,3 +1,4 @@
+import { useResultReviews } from "../reviews/useResultReviews";
 import { DataDateInput } from "../../components/DataDateInput";
 import { FileJson, FolderOpen, Play, Radio, Save, SlidersHorizontal, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -24,7 +25,7 @@ export interface ScreenerClient {
   saveScreenTemplate(name: string, tree: unknown): Promise<ScreenTemplate>;
   deleteScreenTemplate(templateId: string): Promise<void>;
   runScreen(payload: object, onProgress?: (value: {progress:number;message:string;processed:number;total:number}) => void): Promise<ScreenRunResult>;
-  screenResults(runId: string, limit: number, offset: number, sortBy?: ScreenSortField, sortDirection?: SortDirection, newOnly?: boolean): Promise<ScreenRunResult>;
+  screenResults(runId: string, limit: number, offset: number, sortBy?: ScreenSortField, sortDirection?: SortDirection, newOnly?: boolean, failedOnly?: boolean): Promise<ScreenRunResult>;
 }
 
 const today = () => new Intl.DateTimeFormat("en-CA", {
@@ -107,6 +108,9 @@ export function ScreenerPage({
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [previousRunId, setPreviousRunId] = useState("");
   const [newOnly, setNewOnly] = useState(saved?.newOnly ?? false);
+  const [failedOnly, setFailedOnly] = useState(saved?.failedOnly ?? false);
+  const reviewRun = useRef(result?.run_id);
+  const reviews = useResultReviews("screen", client === api ? result?.run_id : undefined);
   const [comparison, setComparison] = useState<RunComparison>();
   const [batchBusy, setBatchBusy] = useState(false);
   const [detailOpen, setDetailOpen] = useState(saved?.detailOpen ?? false);
@@ -130,9 +134,9 @@ export function ScreenerPage({
 
   useEffect(() => {
     if (client !== api) return;
-    try { localStorage.setItem(storageKey,JSON.stringify({tree,mode,asOf,result,selected,page,pageSize,sortBy,sortDirection,scope,instrumentType,boards,sourceRunId,runTree,runSignature,hiddenColumns,extraColumns,detailOpen,newOnly})); }
+    try { localStorage.setItem(storageKey,JSON.stringify({tree,mode,asOf,result,selected,page,pageSize,sortBy,sortDirection,scope,instrumentType,boards,sourceRunId,runTree,runSignature,hiddenColumns,extraColumns,detailOpen,newOnly,failedOnly})); }
     catch { setError("浏览器存储空间不足，当前筛选仍可使用；请保存模板以保留条件。"); }
-  },[client,tree,mode,asOf,result,selected,page,pageSize,sortBy,sortDirection,scope,instrumentType,boards,sourceRunId,runTree,runSignature,hiddenColumns,extraColumns,detailOpen,newOnly]);
+  },[client,tree,mode,asOf,result,selected,page,pageSize,sortBy,sortDirection,scope,instrumentType,boards,sourceRunId,runTree,runSignature,hiddenColumns,extraColumns,detailOpen,newOnly,failedOnly]);
   useEffect(() => { if (client === api) api.screenRuns().then(setRuns).catch((cause:Error)=>setError(cause.message)); },[client,result?.run_id]);
   useEffect(() => {
     if (client !== api || !result || result.new_comparison !== undefined) return;
@@ -141,6 +145,7 @@ export function ScreenerPage({
       .then(next=>{if(active)setResult(next);}).catch((cause:Error)=>{if(active)setError(cause.message);});
     return ()=>{active=false;};
   },[client,result?.run_id]);
+  useEffect(()=>{if(reviewRun.current !== result?.run_id) {setFailedOnly(false);reviewRun.current=result?.run_id;}},[result?.run_id]);
   const stepStock = (delta:number) => {
     if (!result) return;
     const index = result.matches.findIndex((match)=>match.symbol===selected?.symbol);
@@ -152,7 +157,7 @@ export function ScreenerPage({
   const batchAdd = async () => {
     if (!result) return;
     setBatchBusy(true);
-    try { const next = await api.batchWatchlist(result.run_id,allChecked && newOnly ? result.new_comparison?.entered ?? [] : checked,allChecked && !newOnly,targetWatchGroup || undefined); setWatchMessage(`已将 ${next.added} 只股票加入${watchGroups.find(group => group.id === targetWatchGroup)?.name ?? "自选股"}并保存来源`); }
+    try { const next = await api.batchWatchlist(result.run_id,allChecked && failedOnly ? reviews.symbols.filter(symbol=>!newOnly || result.new_comparison?.entered.includes(symbol)) : allChecked && newOnly ? result.new_comparison?.entered ?? [] : checked,allChecked && !newOnly && !failedOnly,targetWatchGroup || undefined); setWatchMessage(`已将 ${next.added} 只股票加入${watchGroups.find(group => group.id === targetWatchGroup)?.name ?? "自选股"}并保存来源`); }
     catch(cause){setError(cause instanceof Error ? cause.message : "批量加入失败");}
     finally {setBatchBusy(false);}
   };
@@ -268,6 +273,7 @@ export function ScreenerPage({
     nextSortDirection = sortRef.current.direction,
     selectLast = false,
     onlyNew = newOnly,
+    onlyFailed = failedOnly,
   ) => {
     if (!result) return;
     setPaging(true); setError("");
@@ -279,8 +285,9 @@ export function ScreenerPage({
         nextSortBy,
         nextSortDirection,
         onlyNew,
+        onlyFailed,
       );
-      setResult(next); setNewOnly(onlyNew);
+      setResult(next); setNewOnly(onlyNew); setFailedOnly(onlyFailed);
       setSelected(selectLast ? next.matches.at(-1) : next.matches[0]);
       setPage(nextPage);
     } catch (cause) {
@@ -300,7 +307,7 @@ export function ScreenerPage({
     void loadPage(1, pageSize, nextSortBy, nextDirection);
   };
 
-  const totalPages = result ? Math.max(1, Math.ceil((newOnly ? result.filtered_count ?? 0 : result.match_count) / pageSize)) : 1;
+  const totalPages = result ? Math.max(1, Math.ceil(((newOnly || failedOnly) ? result.filtered_count ?? 0 : result.match_count) / pageSize)) : 1;
 
   return (
     <main className={`screener-page ${detailOpen ? "has-stock-detail" : ""}`}>
@@ -359,7 +366,7 @@ export function ScreenerPage({
             <input aria-label="搜索结果列" placeholder="搜索要添加的指标" value={columnSearch} onChange={event=>setColumnSearch(event.target.value)}/><select aria-label="新增列周期" value={columnTimeframe} onChange={event=>setColumnTimeframe(event.target.value)}>{["1d","1w","1mo","5m","15m","30m","60m"].map(value=><option key={value}>{value}</option>)}</select>
             <select aria-label="添加结果列" value="" onChange={event=>setExtraColumns(values=>[...new Set([...values,`${columnTimeframe}:${event.target.value}`])])}><option value="">选择添加列</option>{catalog.filter(item=>item.visible!==false && `${item.label} ${item.key}`.includes(columnSearch)).map(item=><option key={item.key} value={item.key}>{metricLabel(item.key,catalog)}</option>)}</select><p>新加入周期的数据在下次运行时保存；未提供的数据会显示“数据不足”。</p>
           </details>
-          <div className="scope-toolbar"><button onClick={()=>{setChecked(result.matches.map(match=>match.symbol));setAllChecked(false);}}>选择当前页</button><button onClick={()=>{setAllChecked(true);setChecked(result.matches.map(match=>match.symbol));}}>选择全部 {newOnly ? result.new_comparison?.count ?? 0 : result.match_count} 只</button><button onClick={()=>{setChecked([]);setAllChecked(false);}}>取消勾选</button><span>已选 {allChecked?(newOnly ? result.new_comparison?.count ?? 0 : result.match_count):checked.length} 只{allChecked?(newOnly?"（全部新增）":"（全部命中）"):""}</span><label>加入到分组 <select aria-label="目标自选分组" disabled={batchBusy} value={targetWatchGroup} onChange={event=>setTargetWatchGroup(event.target.value)}><option value="">仅加入自选（保留已有分组）</option>{watchGroups.map(group=><option key={group.id} value={group.id}>{group.name}</option>)}</select></label><button disabled={batchBusy || (!allChecked && !checked.length)} onClick={()=>void batchAdd()}>{batchBusy?"加入中…":"批量加入自选"}</button>
+          <div className="scope-toolbar"><button onClick={()=>{setChecked(result.matches.map(match=>match.symbol));setAllChecked(false);}}>选择当前页</button><button onClick={()=>{setAllChecked(true);setChecked(result.matches.map(match=>match.symbol));}}>选择全部 {failedOnly ? result.filtered_count ?? 0 : newOnly ? result.new_comparison?.count ?? 0 : result.match_count} 只</button><button onClick={()=>{setChecked([]);setAllChecked(false);}}>取消勾选</button><span>已选 {allChecked?(failedOnly ? result.filtered_count ?? 0 : newOnly ? result.new_comparison?.count ?? 0 : result.match_count):checked.length} 只{allChecked?(newOnly?"（全部新增）":"（全部命中）"):""}</span><label>加入到分组 <select aria-label="目标自选分组" disabled={batchBusy} value={targetWatchGroup} onChange={event=>setTargetWatchGroup(event.target.value)}><option value="">仅加入自选（保留已有分组）</option>{watchGroups.map(group=><option key={group.id} value={group.id}>{group.name}</option>)}</select></label><button disabled={batchBusy || (!allChecked && !checked.length)} onClick={()=>void batchAdd()}>{batchBusy?"加入中…":"批量加入自选"}</button>
             <a download href={`/api/workbench/runs/${result.run_id}/export?${new URLSearchParams({columns:columns.join(","),...(sortBy?{sort_by:sortBy,sort_direction:sortDirection??"asc"}:{})})}`}>导出全部结果CSV</a><button onClick={()=>{setScope("run");setSourceRunId(result.run_id);}}>在本次结果中继续筛选</button>
           </div>
           <details className="run-comparison"><summary>历史记录与两次筛选对比</summary><select aria-label="对比筛选记录" value={previousRunId} onChange={event=>setPreviousRunId(event.target.value)}><option value="">选择另一条记录</option>{runs.filter(run=>run.run_id!==result.run_id).map(run=><option key={run.run_id} value={run.run_id}>{run.as_of} · {run.match_count}只 · {run.run_id.slice(0,8)}</option>)}</select><button disabled={!previousRunId} onClick={()=>void api.compareRuns(result.run_id,previousRunId).then(setComparison).catch((cause:Error)=>setError(cause.message))}>对比结果</button>
@@ -379,7 +386,8 @@ export function ScreenerPage({
             {result.new_comparison ? <><span>对比上次相同条件：{result.new_comparison.finished_at.replace('T',' ').slice(0,19)}（运行时间） · 数据日期 {result.new_comparison.as_of} · 新增 {result.new_comparison.count} 只</span>
               <label><input type="checkbox" aria-label="仅看新增" checked={newOnly} disabled={paging || loading} onChange={event=>{setChecked([]);setAllChecked(false);void loadPage(1,pageSize,sortRef.current.by,sortRef.current.direction,false,event.target.checked);}}/>仅看新增</label></> : <span>暂无上一次相同条件、范围和模式的已完成筛选记录，无法判断新增。</span>}
           </div>
-          <ResultsTable newSymbols={result.new_comparison?.entered} matches={result.matches} selected={selected?.symbol} onSelect={match=>{setSelected(match);setDetailOpen(true);}} onOpenChart={(symbol) => void openResultChart(symbol)} onAddWatchlist={addWatchlist} sortBy={sortBy} sortDirection={sortDirection} onSort={changeSort} columns={client===api?columns:undefined} catalog={catalog} checked={checked} onCheck={symbol=>{setAllChecked(false);setChecked(values=>values.includes(symbol)?values.filter(value=>value!==symbol):[...values,symbol]);}} hideExplanation={client===api}/>
+          {client === api && <div className="scope-toolbar"><label><input type="checkbox" checked={failedOnly} disabled={paging || loading || reviews.busy} onChange={event=>{setChecked([]);setAllChecked(false);void loadPage(1,pageSize,sortBy,sortDirection,false,newOnly,event.target.checked);}} />仅看失败</label><span>本次筛选已标失败 {reviews.symbols.length} 只 · 手动复盘标记</span>{reviews.error && <span role="alert">{reviews.error}</span>}</div>}
+          <ResultsTable failedSymbols={reviews.symbols} reviewBusy={reviews.busy} onToggleFailure={client===api ? symbol=>{void reviews.toggle(symbol).then(saved=>{if(saved && failedOnly) {setChecked([]);setAllChecked(false);void loadPage(1);}});} : undefined} newSymbols={result.new_comparison?.entered} matches={result.matches} selected={selected?.symbol} onSelect={match=>{setSelected(match);setDetailOpen(true);}} onOpenChart={(symbol) => void openResultChart(symbol)} onAddWatchlist={addWatchlist} sortBy={sortBy} sortDirection={sortDirection} onSort={changeSort} columns={client===api?columns:undefined} catalog={catalog} checked={checked} onCheck={symbol=>{setAllChecked(false);setChecked(values=>values.includes(symbol)?values.filter(value=>value!==symbol):[...values,symbol]);}} hideExplanation={client===api}/>
           <div className="results-pagination">
             <label>每页<select aria-label="每页数量" value={pageSize} disabled={paging} onChange={(event) => {
               const nextSize = Number(event.target.value);

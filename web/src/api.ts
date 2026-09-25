@@ -14,6 +14,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  resultReviews: (source: string, runId: string) => request<string[]>(`/api/result-reviews/${source}/${encodeURIComponent(runId)}`),
+  saveResultReview: (source: string, runId: string, symbol: string, failed: boolean) => request<{failed:boolean}>(`/api/result-reviews/${source}/${encodeURIComponent(runId)}/${encodeURIComponent(symbol)}`, {method:"PUT",body:JSON.stringify({failed})}),
   stockOverview: (symbol: string) => request<import("./features/stock/StockOverview").StockOverviewData>(`/api/symbols/${encodeURIComponent(symbol)}/overview`),
   historyWaves: (symbol: string, payload: object) => request<import("./features/watchlist/HistoryWaves").WaveResult>(`/api/watchlist/${encodeURIComponent(symbol)}/waves`, { method: "POST", body: JSON.stringify(payload) }),
   sectorStatus: () => request<{source:string;updated_at:string|null;running:boolean;done:number;total:number;current:string;error:string;industries:number;concepts:number}>("/api/sectors/status"),
@@ -60,8 +62,9 @@ export const api = {
       job = await request<Job>(`/api/screens/tasks/${encodeURIComponent(job.job_id)}`);
     }
   },
-  screenResults: (runId: string, limit: number, offset: number, sortBy?: string, sortDirection?: "asc" | "desc", newOnly = false) => {
+  screenResults: (runId: string, limit: number, offset: number, sortBy?: string, sortDirection?: "asc" | "desc", newOnly = false, failedOnly = false) => {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (failedOnly) params.set("failed_only", "true");
     if (newOnly) params.set("new_only", "true");
     if (sortBy && sortDirection) {
       params.set("sort_by", sortBy);

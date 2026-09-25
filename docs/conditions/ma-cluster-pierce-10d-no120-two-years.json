@@ -1,0 +1,17 @@
+{
+  "kind": "group",
+  "logic": "and",
+  "children": [
+    {
+      "kind": "condition",
+      "metric": "ma_cluster_pierce_10d_no120_2y",
+      "timeframe": "1d",
+      "operator": "eq",
+      "right": {
+        "kind": "constant",
+        "value": true,
+        "unit": "boolean"
+      }
+    }
+  ]
+}

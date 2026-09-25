@@ -47,15 +47,15 @@ describe("ScreenerPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "运行全市场筛选" }));
 
     await userEvent.click(screen.getByRole("button", { name: "按 20 周期 排序" }));
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, "return_20", "desc", false));
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, "return_20", "desc", false, false));
     expect(screen.getByRole("button", { name: "按 20 周期 排序" })).toHaveTextContent("20 周期 ↓");
 
     await userEvent.click(screen.getByRole("button", { name: "按 20 周期 排序" }));
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, "return_20", "asc", false));
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, "return_20", "asc", false, false));
     expect(screen.getByRole("button", { name: "按 20 周期 排序" })).toHaveTextContent("20 周期 ↑");
 
     await userEvent.click(screen.getByRole("button", { name: "按 20 周期 排序" }));
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, undefined, undefined, false));
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 200, 0, undefined, undefined, false, false));
     expect(screen.getByRole("button", { name: "按 20 周期 排序" })).toHaveTextContent("20 周期");
   });
 
@@ -140,11 +140,11 @@ describe("ScreenerPage", () => {
     expect(screen.getByText("第 1 / 3 页")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "下一页" }));
-    await waitFor(() => expect(fetchPage).toHaveBeenCalledWith("run-1", 200, 200, undefined, undefined, false));
+    await waitFor(() => expect(fetchPage).toHaveBeenCalledWith("run-1", 200, 200, undefined, undefined, false, false));
     expect((await screen.findAllByText("北交样本")).length).toBeGreaterThanOrEqual(1);
 
     await userEvent.selectOptions(screen.getByLabelText("每页数量"), "50");
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 50, 0, undefined, undefined, false));
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith("run-1", 50, 0, undefined, undefined, false, false));
     expect(screen.getByText("第 1 / 9 页")).toBeInTheDocument();
   });
 
@@ -272,7 +272,7 @@ it('标记新增、显示比较日期并通过服务端筛选新增',async()=>{
   expect(await screen.findByText('新增')).toBeInTheDocument();
   expect(screen.getByText(/2026-09-18 16:30:00/)).toHaveTextContent('数据日期 2026-09-18');
   await userEvent.click(screen.getByLabelText('仅看新增'));
-  await waitFor(()=>expect(c.screenResults).toHaveBeenLastCalledWith('run-1',200,0,undefined,undefined,true));
+  await waitFor(()=>expect(c.screenResults).toHaveBeenLastCalledWith('run-1',200,0,undefined,undefined,true,false));
   expect(screen.getByLabelText('仅看新增')).toBeChecked();
 });
 

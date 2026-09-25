@@ -49,6 +49,7 @@ class DailyMarketUpdateScheduler:
         if latest is None and target != today:
             return False
         if latest is not None and latest >= target:
+            self._next_attempt = None
             return False
         if self._next_attempt is not None and local_now < self._next_attempt:
             return False

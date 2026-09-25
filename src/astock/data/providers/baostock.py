@@ -115,6 +115,7 @@ class BaoStockProvider:
             rows = []
             while result.next():
                 rows.append(dict(zip(result.fields, result.get_row_data(), strict=True)))
+            self._ensure_success(result)
             return rows
 
     def history(
@@ -147,6 +148,7 @@ class BaoStockProvider:
             rows = []
             while result.next():
                 rows.append(dict(zip(result.fields, result.get_row_data(), strict=True)))
+            self._ensure_success(result)
 
         def timestamp(row: dict[str, str]) -> datetime:
             if timeframe == Timeframe.DAY:

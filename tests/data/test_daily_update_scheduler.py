@@ -78,3 +78,22 @@ def test_startup_catches_up_previous_weekday_before_close():
     scheduler = DailyMarketUpdateScheduler(service)
     assert scheduler.run_due(moment(7, 9, 0)) is True
     assert service.calls == [(date(2026, 9, 4), 3)]
+
+
+def test_incomplete_update_retries_after_backoff_and_clears_next_attempt():
+    class Delayed(FakeMarketSync):
+        def start(self, end, years=3):
+            self.calls.append((end, years))
+            if len(self.calls) == 1:
+                return SimpleNamespace(status='completed_with_errors', failed=2)
+            self.latest = end
+            return SimpleNamespace(status='completed', failed=0)
+    service = Delayed()
+    scheduler = DailyMarketUpdateScheduler(service)
+    assert scheduler.run_due(moment(4,16,10))
+    assert '2' in scheduler.last_error
+    assert not scheduler.run_due(moment(4,16,20))
+    assert scheduler.run_due(moment(4,16,40))
+    assert scheduler.last_error is None
+    assert not scheduler.run_due(moment(4,17,0))
+    assert scheduler.next_attempt is None

@@ -372,3 +372,11 @@ create table if not exists watchlist_group_members (
   symbol varchar not null,
   primary key(group_id, symbol)
 );
+
+create table if not exists result_reviews (
+  source varchar not null,
+  run_id uuid not null,
+  symbol varchar not null,
+  created_at timestamp not null default current_timestamp,
+  primary key(source, run_id, symbol)
+);

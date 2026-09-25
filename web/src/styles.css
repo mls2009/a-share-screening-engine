@@ -729,3 +729,7 @@ select:focus, input:focus { border-color: #7c8a8f; box-shadow: inset 2px 0 var(-
 .screen-progress > div { display: flex; justify-content: space-between; gap: 16px; }
 .screen-progress progress { width: 100%; height: 12px; margin: 10px 0; accent-color: #a9d88b; }
 .screen-progress small { color: #91a59b; }
+
+button.failure-review { background: #20262b; color: #d7dfe7; border: 1px solid #57616d; white-space: nowrap; padding: 5px 9px; border-radius: 5px; }
+button.failure-review.is-failed { background: #3a2027; border-color: #d87587; color: #ffadb9; font-weight: 600; }
+button.failure-review:disabled { opacity: .5; cursor: wait; }

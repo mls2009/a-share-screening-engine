@@ -161,3 +161,57 @@ def test_2y_metric_detected_by_uses_ma_pierce():
     tree = {"kind": "condition", "metric": MA_PIERCE_2Y_METRIC, "timeframe": "1d",
             "operator": "eq", "right": {"kind": "constant", "value": True, "unit": "boolean"}}
     assert uses_ma_pierce(tree) is True
+
+
+def test_flat_slope_uses_five_prior_sessions_not_breakout_day():
+    import pandas as pd
+    from astock.features.ma_pierce import ma_pierce_2y_scan
+    frame = pd.DataFrame({
+        'open': [9.0]*10, 'close': [12.0]*10,
+        'volume': [300.0]*10, 'volume_ma_20': [100.0]*10,
+        **{f'ma_{w}': [10.0]*9+[11.0] for w in (5,10,20,30,60,120)},
+    })
+    # 五个完整的前置交易日均线走平，突破日均线跳升不影响走平判定。
+    result = ma_pierce_2y_scan(frame)
+    assert not result.iloc[:9].any()
+    assert result.iloc[9]
+    # 前置窗口明显上行，不能被突破当天的回落抵消。
+    for w in (10,20,30):
+        frame[f'ma_{w}'] = [10.0]*4+[9.6,9.7,9.8,9.9,10.0,9.7]
+    assert not ma_pierce_2y_scan(frame).iloc[9]
+
+
+def test_flat_rejects_prior_daily_slope_even_when_last_five_are_flat():
+    frame = flat_frame(12)
+    frame.loc[:8, "ma_20"] = [9.5, 9.6, 9.7, 9.8, 10, 10, 10, 10, 10]
+    pierced_row(frame, 9, 9, 11, volume=2500)
+    assert not ma_pierce_2y_scan(frame).iloc[9]
+
+
+def test_flat_rejects_overall_slope_between_point_one_and_point_two():
+    frame = flat_frame(12)
+    frame["ma_10"] = [10 + .015*i for i in range(12)]
+    pierced_row(frame, 9, 9, 11, volume=2500)
+    assert not ma_pierce_2y_scan(frame).iloc[9]
+
+
+def test_ten_day_version_ignores_ma120_and_marks_full_consolidation():
+    frame = flat_frame(30)
+    frame['ma_120'] = float('nan')
+    pierced_row(frame, 20, 9, 11, volume=2500)
+    assert ma_pierce_2y_scan(frame, ten_day=True).iloc[20]
+    assert not ma_pierce_2y_scan(frame).iloc[20]
+    hit = ma_pierce_2y_hits(frame, ten_day=True)[0]
+    assert hit['start_date'] == str(frame.iloc[10].feature_date.date())
+    assert hit['end_date'] == str(frame.iloc[19].feature_date.date())
+    assert hit['date'] == str(frame.iloc[20].feature_date.date())
+    frame.loc[10, 'ma_30'] = 10.09
+    assert not ma_pierce_2y_scan(frame, ten_day=True).iloc[20]
+
+
+def test_ten_day_version_excludes_breakout_day_from_cluster_and_requires_warmup():
+    frame = flat_frame(30)
+    pierced_row(frame, 20, 9, 11, volume=2500)
+    frame.loc[20, 'ma_30'] = 10.5
+    assert ma_pierce_2y_scan(frame, ten_day=True).iloc[20]
+    assert not ma_pierce_2y_scan(frame.iloc[7:].reset_index(drop=True), ten_day=True).iloc[13]

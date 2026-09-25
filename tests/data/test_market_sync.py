@@ -1,14 +1,21 @@
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from astock.data.market_sync import MarketSyncService
-from astock.domain.market import Adjustment, Timeframe
+from astock.domain.market import Adjustment, Bar, Timeframe
 from astock.domain.security import Security
 from astock.storage.database import Database
 from astock.storage.jobs import SyncJobRepository
 
 
 class FakeReference:
+    def trading_dates(self, start, end):
+        return {date(2026, 8, 20)}
+
+    def security_status(self, symbol, start, end):
+        return []
+
     def securities_on(self, on_date: date) -> list[Security]:
         return [
             Security(
@@ -29,6 +36,9 @@ class FakeReference:
 
 
 class FakeMarketData:
+    def ensure_daily_published(self, target):
+        pass
+
     def __init__(self) -> None:
         self.universe_calls: list[tuple] = []
         self.history_calls: list[tuple] = []
@@ -50,7 +60,10 @@ class FakeMarketData:
         if symbol in self.fail_once:
             self.fail_once.remove(symbol)
             raise RuntimeError("temporary provider error")
-        return []
+        return [Bar(symbol=symbol, timeframe=Timeframe.DAY,
+                    timestamp=datetime(2026, 8, 20, 15, tzinfo=ZoneInfo('Asia/Shanghai')),
+                    open=10, high=11, low=9, close=10, volume_shares=100,
+                    amount_cny=1000, adjustment=adjustment, source='fake')]
 
 
 class FakeFeatureBuilder:
@@ -199,3 +212,85 @@ def test_primary_sync_refuses_low_disk_before_any_provider_or_write(tmp_path, mo
         service.start(end=date(2026,8,20))
     assert market.universe_calls==[] and market.history_calls==[]
     assert jobs.connection.execute('select count(*) from data_sync_jobs').fetchone()[0]==0
+
+
+def test_empty_history_is_not_a_successful_update(tmp_path):
+    service, market, _jobs = _service(tmp_path)
+    market.history = lambda *args: []
+    result = service.start(date(2026, 8, 20))
+    assert result.status == 'completed_with_errors'
+    assert result.succeeded == 0 and result.failed == 2
+    assert service.latest_completed_end_date() is None
+
+
+def test_stale_history_retries_when_provider_publishes_target_day(tmp_path):
+    from datetime import timedelta
+    service, market, _jobs = _service(tmp_path)
+    market.fail_once.clear()
+    original = market.history
+    market.history = lambda *args: [b.model_copy(update={
+        'timestamp': b.timestamp - timedelta(days=1)
+    }) for b in original(*args)]
+    first = service.start(date(2026, 8, 20))
+    assert first.failed == 2
+    market.history = original
+    second = service.start(date(2026, 8, 20))
+    assert second.job_id == first.job_id
+    assert second.status == 'completed' and second.succeeded == 2
+
+
+def test_only_exact_target_day_confirmed_suspension_can_complete_missing_bar(tmp_path):
+    service, market, jobs = _service(tmp_path)
+    market.history = lambda *args: []
+    def statuses(symbol, start, end):
+        return [{'symbol': symbol, 'trade_date': end if symbol == '600000.SH' else date(2026,8,19),
+                 'board': 'main', 'is_st': False, 'is_suspended': True,
+                 'previous_close': 10, 'limit_up': 11, 'limit_down': 9}]
+    service.reference_provider.security_status = statuses
+    result = service.start(date(2026,8,20))
+    assert result.succeeded == 1 and result.failed == 1
+    assert jobs.failed_symbols(result.job_id) == ['000001.SZ']
+
+
+def test_closed_day_uses_last_confirmed_trading_date(tmp_path):
+    service, market, _jobs = _service(tmp_path)
+    market.fail_once.clear()
+    result = service.start(date(2026,8,23))
+    assert result.status == 'completed'
+
+
+def test_delayed_data_can_be_downloaded_on_same_job_retry(tmp_path):
+    from datetime import timedelta
+
+    from astock.data.service import MarketDataService
+    from astock.storage.bars import BarStore
+
+    class Reference(FakeReference):
+        def trading_dates(self, start, end):
+            return {date(2026,8,19), date(2026,8,20)}
+
+    class Provider(FakeMarketData):
+        ready = False
+        def history(self, *args):
+            bars = super().history(*args)
+            if not self.ready and args[0] != '000001.SH':
+                return [b.model_copy(update={'timestamp': b.timestamp-timedelta(days=1)}) for b in bars]
+            return bars
+
+    db = Database(tmp_path/'delayed.duckdb')
+    db.migrate()
+    provider = Provider()
+    provider.fail_once.clear()
+    reference = Reference()
+    data = MarketDataService(provider, BarStore(tmp_path/'bars'), db, reference_provider=reference)
+    jobs = SyncJobRepository(db.connection)
+    service = MarketSyncService(data, reference, jobs)
+    first = service.start(date(2026,8,20))
+    assert first.failed == 2 and service.latest_completed_end_date() is None
+    provider.ready = True
+    second = service.start(date(2026,8,20))
+    assert second.job_id == first.job_id and second.status == 'completed'
+    stock_calls = [call for call in provider.history_calls if call[0] != '000001.SH']
+    assert len(stock_calls) == 4
+    assert all(call[2] == date(2026,8,20) for call in stock_calls[2:])
+    db.connection.close()

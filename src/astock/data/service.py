@@ -85,6 +85,14 @@ class MarketDataService:
             [[symbol, issue.timestamp, issue.code, issue.detail] for issue in issues],
         )
 
+    def ensure_daily_published(self, target: date) -> None:
+        # Probe the primary source directly; a cached index cannot prove publication.
+        bars = self.history_provider.history(
+            "000001.SH", Timeframe.DAY, target, target, Adjustment.NONE
+        )
+        if not any(bar.timestamp.date() == target and bar.is_final for bar in bars):
+            raise RuntimeError(f"主数据源尚未发布 {target} 指数日线，等待发布或切换备用源")
+
     def history(
         self,
         symbol: str,
@@ -113,7 +121,11 @@ class MarketDataService:
             if blocking:
                 raise DataQualityError(blocking)
             self.bar_store.upsert(sorted(incoming, key=lambda bar: bar.timestamp))
-            self.coverage.record(symbol, base, adjustment, gap_start, gap_end)
+            # A successful request may still be empty or stop before the requested end.
+            # Never cache an unpublished tail as downloaded: later retries must reach the provider.
+            if incoming:
+                covered_end = min(gap_end, max(bar.timestamp.date() for bar in incoming))
+                self.coverage.record(symbol, base, adjustment, gap_start, covered_end)
 
         bars = self.bar_store.read_range(symbol, base, adjustment, start, end)
         return self.derive(bars, timeframe)

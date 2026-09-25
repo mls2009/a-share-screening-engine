@@ -6,8 +6,9 @@ import pandas as pd
 from astock.data.periods import final_session, period_end
 from astock.domain.market import Timeframe
 from astock.features.chart_shapes import chart_shape_features
+from astock.features.ma_support import MA_SUPPORT_METRIC, MA_SUPPORT_HITS, support_hits
 from astock.features.ma_pierce import (
-    MA_PIERCE_2Y_HITS,
+    MA_PIERCE_2Y_HITS, MA_PIERCE_10D_METRIC, MA_PIERCE_10D_HITS,
     MA_PIERCE_2Y_METRIC,
     ma_pierce_2y_hits,
     ma_pierce_features,
@@ -182,6 +183,7 @@ class MarketFeatureStore:
         include_price_action: bool = False,
         include_shapes: bool = False,
         include_ma_pierce: bool = False,
+        include_ma_support: bool = False,
     ) -> list[dict]:
         period_filter, period_args = self._period_filter(timeframe, end)
         cursor = self.connection.execute(
@@ -199,6 +201,8 @@ class MarketFeatureStore:
             self.attach_vacuum({symbol: rows}, end, feature_version)
         if include_shapes and timeframe == Timeframe.DAY:
             self.attach_shapes({symbol: rows}, end, feature_version)
+        if include_ma_support and timeframe == Timeframe.DAY:
+            self.attach_ma_support({symbol: rows}, end, feature_version)
         if include_ma_pierce and timeframe == Timeframe.DAY:
             self.attach_ma_pierce({symbol: rows}, end, feature_version)
         if include_price_action and timeframe in {Timeframe.DAY, Timeframe.WEEK}:
@@ -218,6 +222,7 @@ class MarketFeatureStore:
         include_price_action: bool = False,
         include_shapes: bool = False,
         include_ma_pierce: bool = False,
+        include_ma_support: bool = False,
         progress=None,
     ) -> dict[str, list[dict]]:
         if not symbols:
@@ -249,11 +254,35 @@ class MarketFeatureStore:
             self.attach_vacuum(histories, end, feature_version, progress=progress)
         if include_shapes and timeframe == Timeframe.DAY:
             self.attach_shapes(histories, end, feature_version, progress=progress)
+        if include_ma_support and timeframe == Timeframe.DAY:
+            self.attach_ma_support(histories, end, feature_version)
         if include_ma_pierce and timeframe == Timeframe.DAY:
             self.attach_ma_pierce(histories, end, feature_version)
         if include_price_action and timeframe in {Timeframe.DAY, Timeframe.WEEK}:
             self.attach_price_action(histories, end, feature_version, timeframe, progress=progress)
         return histories
+
+    def attach_ma_support(self, histories, end, feature_version="v1"):
+        boundary = (pd.Timestamp(end) - pd.DateOffset(years=2)).date()
+        start = boundary
+        symbols = [symbol for symbol, rows in histories.items() if rows]
+        for offset in range(0, len(symbols), 64):
+            batch = symbols[offset:offset + 64]
+            cursor = self.connection.execute(
+                """select symbol, feature_date, open, high, close, low, ma_120, ma_250
+                   from market_features
+                   where symbol in (select unnest(?)) and timeframe = '1d'
+                     and feature_version = ? and feature_date between ? and ?
+                   order by symbol, feature_date""", [batch, feature_version, start, end])
+            columns = [column[0] for column in cursor.description]
+            records = {symbol: [] for symbol in batch}
+            for values in cursor.fetchall():
+                row = dict(zip(columns, values, strict=True))
+                records[row.pop("symbol")].append(row)
+            for symbol, rows in records.items():
+                hits = support_hits(pd.DataFrame(rows)) if rows else []
+                hits = [hit for hit in hits if str(boundary) <= hit["date"] <= str(end)]
+                histories[symbol][0].update({MA_SUPPORT_METRIC: bool(hits), MA_SUPPORT_HITS: hits})
 
     def attach_ma_pierce(
         self, histories: dict[str, list[dict]], end: date, feature_version: str = "v1",
@@ -297,7 +326,12 @@ class MarketFeatureStore:
                     continue
                 hits = ma_pierce_2y_hits(frame)
                 targets[0][MA_PIERCE_2Y_METRIC] = bool(hits)
-                targets[0][MA_PIERCE_2Y_HITS] = hits[:8]
+                targets[0][MA_PIERCE_2Y_HITS] = hits
+                new_hits = ma_pierce_2y_hits(frame, ten_day=True)
+                boundary = str((pd.Timestamp(end) - pd.DateOffset(years=2)).date())
+                new_hits = [hit for hit in new_hits if boundary <= hit["date"] <= str(end)]
+                targets[0][MA_PIERCE_10D_METRIC] = bool(new_hits)
+                targets[0][MA_PIERCE_10D_HITS] = new_hits
 
     def attach_vacuum(self, histories: dict[str, list[dict]], end: date, feature_version: str = "v1", progress=None) -> None:
         """Read narrow OHLC batches; derive on demand without rewriting stored features."""

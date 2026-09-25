@@ -17,6 +17,8 @@ from astock.storage.jobs import SyncJobRepository
 class MarketDataWriter(Protocol):
     def sync_universe(self, start: date, end: date) -> list[Security]: ...
 
+    def ensure_daily_published(self, target: date) -> None: ...
+
     def history(
         self,
         symbol: str,
@@ -123,20 +125,42 @@ class MarketSyncService:
 
     def _run(self, job_id: UUID, symbols: list[str]) -> SyncSummary:
         job = self.jobs.get(job_id)
+        open_dates = self.reference_provider.trading_dates(job.start_date, job.end_date)
+        if not open_dates:
+            raise RuntimeError("无法确认目标交易日，不能将行情更新标记为完成")
+        target = max(open_dates)
         session = getattr(self.market_data, "bulk_session", nullcontext)
         with session():
+            self.market_data.ensure_daily_published(target)
             for symbol in symbols:
                 if self.stopping.is_set():
                     break
                 self._check_disk_space()
                 try:
-                    self.market_data.history(
+                    bars = self.market_data.history(
                         symbol,
                         Timeframe.DAY,
                         job.start_date,
                         job.end_date,
                         Adjustment.QFQ,
                     )
+                    current = any(bar.timestamp.date() == target and bar.is_final for bar in bars)
+                    if not current:
+                        statuses = self.reference_provider.security_status(symbol, target, target)
+                        suspended = next((row for row in statuses
+                            if row["symbol"] == symbol and row["trade_date"] == target
+                            and row["is_suspended"]), None)
+                        if suspended is None:
+                            latest = max((bar.timestamp.date() for bar in bars), default=None)
+                            raise RuntimeError(
+                                f"目标交易日 {target} 日线尚未到齐（本地最新 {latest or '无'}），"
+                                "且未确认当日停牌，等待重试"
+                            )
+                        self.jobs.connection.execute(
+                            "insert or replace into security_status values (?, ?, ?, ?, ?, ?, ?, ?)",
+                            [suspended[key] for key in ("symbol", "trade_date", "board", "is_st",
+                                "is_suspended", "previous_close", "limit_up", "limit_down")],
+                        )
                     if self.feature_builder is not None:
                         getattr(self.feature_builder, "build_incremental_symbol", self.feature_builder.build_symbol)(symbol, job.end_date)
                 except Exception as error:  # noqa: BLE001 - one stock must not abort the batch

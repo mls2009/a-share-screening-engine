@@ -7,7 +7,7 @@ import pandas as pd
 from .strategies import BY_ID, evaluate, rps_scores, valid
 
 
-def scan_history(con, config, end, progress, bar_store=None):
+def scan_history(con, config, end, progress, bar_store=None, *, scope_symbols=None, strict_volume=False):
     start = (pd.Timestamp(config.as_of)-pd.DateOffset(years=int(config.period[0]))).date()
     securities = con.execute("""select symbol,name,listed_on,delisted_on,is_listed
         from symbols where instrument_type='stock'""").fetchall()
@@ -17,6 +17,8 @@ def scan_history(con, config, end, progress, bar_store=None):
         scope &= {r[0] for r in con.execute('select symbol from watchlist').fetchall()}
         if config.group_id:
             scope &= {r[0] for r in con.execute('select symbol from watchlist_group_members where cast(group_id as varchar)=?', [config.group_id]).fetchall()}
+    if scope_symbols is not None:
+        scope &= set(scope_symbols)
     # RPS always needs the full market; other strategies only load the requested scope.
     read_symbols = list(securities if 'rps' in config.strategies else scope)
     histories = defaultdict(list)
@@ -61,7 +63,7 @@ def scan_history(con, config, end, progress, bar_store=None):
             history = current[symbol]
             matched = []
             for strategy in config.strategies:
-                result = evaluate(strategy, history, config.parameters.get(strategy), rps=scores.get(symbol))
+                result = evaluate(strategy, history, config.parameters.get(strategy), rps=scores.get(symbol), strict_volume=strict_volume)
                 key = {'true':'matched', 'false':'rejected', 'unknown':'unknown'}[result['result']]
                 stats[strategy][key] += 1
                 if key == 'matched':

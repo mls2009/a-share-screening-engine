@@ -333,3 +333,20 @@ it('三种形态的边界线使用各自固定颜色',()=>{
     expect(lines.find(s=>s.name===kind)?.markLine?.data).toHaveLength(2);
   }
 });
+
+it("marks repeated MA support with distinct colors and arrows only on the return", () => {
+  const marks = [
+    { metric: "close", timeframe: "1d" as const, date: "2026-08-19", periods: 1, label: "均线重复支撑·MA120·首次触及" },
+    { metric: "close", timeframe: "1d" as const, date: "2026-08-20", startDate: "2026-08-19", periods: 1, label: "均线重复支撑·MA120·本次命中·双K" },
+    { metric: "close", timeframe: "1d" as const, date: "2026-08-20", periods: 1, label: "均线重复支撑·MA250·本次命中·单K" },
+  ];
+  const series = buildChartOption(bars, [], [], [], marks).series as Array<{
+    markPoint?: { itemStyle: { color: string }; data: Array<{ name: string }> };
+    markArea?: unknown;
+  }>;
+  const arrows = series.filter(s => s.markPoint);
+  expect(arrows).toHaveLength(2);
+  expect(arrows.map(s => s.markPoint!.itemStyle.color)).toEqual(["#64d8cb", "#d897ff"]);
+  expect(arrows.map(s => s.markPoint!.data[0].name)).toEqual(["半年线支撑", "年线支撑"]);
+  expect(series.filter(s => s.markArea)).toHaveLength(3);
+});

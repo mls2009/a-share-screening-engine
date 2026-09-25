@@ -107,7 +107,7 @@ def rps_scores(histories):
     return (pd.Series(returns, dtype=float).rank(method="average", pct=True) * 100).to_dict()
 
 
-def evaluate(identifier, rows, parameters=None, rps=None, issuance=None):
+def evaluate(identifier, rows, parameters=None, rps=None, issuance=None, *, strict_volume=False):
     p = defaults(identifier, parameters)
     limit_breakout = identifier == "turtle" and bool(rows) and rows[-1].get("limit_state") == "up"
     n = {
@@ -172,11 +172,12 @@ def evaluate(identifier, rows, parameters=None, rps=None, issuance=None):
         add("收盘突破前高", t["close"], "gt", max(r["high"] for r in rows[-price_window-1:-1]), window=price_window+1)
         if limit_breakout:
             add("收盘真实涨停（豁免放量及阳线，含一字板）", 1, "gte", 1)
-        else:
+        if not limit_breakout:
             baseline = mean('volume', rows[-volume_window-1:-1])
             if baseline <= 0:
                 return unknown(identifier, '此前均量为零，无法计算相对放量')
             add("当日量 / 此前均量", t['volume']/baseline, 'gte', p['volume_multiple'], 'volume', volume_window+1)
+        if not limit_breakout:
             add("收盘高于开盘", t["close"], "gt", t["open"])
         add("收盘高于昨收", t["close"], "gt", rows[-2]["close"], window=2)
     elif identifier == "ma_volume":
@@ -190,9 +191,9 @@ def evaluate(identifier, rows, parameters=None, rps=None, issuance=None):
         )
         add("今日 MA5 > MA20", mean("close", rows[-5:]), "gt", mean("close", rows[-20:]), window=20)
         add(
-            "今日量 > 含今日 20 日均量 × 倍数",
+            "今日量 ≥ 含今日 20 日均量 × 倍数" if strict_volume else "今日量 > 含今日 20 日均量 × 倍数",
             t["volume"],
-            "gt",
+            "gte" if strict_volume else "gt",
             mean("volume", rows[-20:]) * p["volume_multiple"],
             "volume",
             20,
@@ -260,9 +261,9 @@ def evaluate(identifier, rows, parameters=None, rps=None, issuance=None):
             window=2,
         )
         add(
-            "今日量 > 含今日 20 日均量 × 倍数",
+            "今日量 ≥ 含今日 20 日均量 × 倍数" if strict_volume else "今日量 > 含今日 20 日均量 × 倍数",
             t["volume"],
-            "gt",
+            "gte" if strict_volume else "gt",
             mean("volume", rows[-20:]) * p["volume_multiple"],
             "volume",
             20,

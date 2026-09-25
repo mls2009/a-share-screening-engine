@@ -7,7 +7,8 @@ from astock.domain.market import Timeframe
 from astock.screening.evaluator import TruthValue, evaluate_tree
 from astock.screening.models import ConditionNode
 from astock.features.price_action import PA_LABELS
-from astock.features.ma_pierce import MA_PIERCE_2Y_HITS, MA_PIERCE_2Y_METRIC, MA_PIERCE_METRIC
+from astock.features.ma_support import MA_SUPPORT_METRIC, MA_SUPPORT_HITS
+from astock.features.ma_pierce import MA_PIERCE_10D_METRIC, MA_PIERCE_10D_HITS, MA_PIERCE_2Y_HITS, MA_PIERCE_2Y_METRIC, MA_PIERCE_METRIC
 
 
 def entry_histories(histories: dict, mode: str, as_of, snapshot: dict) -> dict:
@@ -58,6 +59,30 @@ def condition_marks(tree: dict, explanation: dict, histories: dict) -> list[dict
                 marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
                               "date": hit["date"], "periods": 1,
                               "label": f"{title}；{hit['branch']}；开{hit['open']:.2f} 收{hit['close']:.2f} MA120 {hit['ma120']:.2f}"})
+            return
+        if metric == MA_SUPPORT_METRIC:
+            for hit in rows[0].get(MA_SUPPORT_HITS, []):
+                title = f"均线重复支撑·MA{hit['ma']}"
+                sections = []
+                for number, support in enumerate(hit['supports'], 1):
+                    sections.extend([
+                        (support['date'], support['date'], f'第{number}次有效支撑'),
+                        (support['confirmation_start'], support['confirmation_end'], f'第{number}次20日收盘站稳'),
+                    ])
+                sections.append((hit['start_date'], hit['date'], '本次命中·' + '/'.join(hit['types'])))
+                for start, end, suffix in sections:
+                    marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
+                                  "date": end, "startDate": start, "periods": 1,
+                                  "label": title + '·' + suffix})
+            return
+        if metric == MA_PIERCE_10D_METRIC:
+            for hit in rows[0].get(MA_PIERCE_10D_HITS, []):
+                marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
+                              "date": hit["end_date"], "startDate": hit["start_date"], "periods": 10,
+                              "label": "均线粘连走平·突破前10日整理（间距≤0.8%）"})
+                marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
+                              "date": hit["date"], "periods": 1,
+                              "label": f"均线粘连走平·10日版放量穿线（不含MA120） {hit['date']}"})
             return
         if metric == MA_PIERCE_2Y_METRIC:
             for hit in rows[0].get(MA_PIERCE_2Y_HITS, []):
