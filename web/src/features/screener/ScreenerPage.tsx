@@ -128,6 +128,11 @@ export function ScreenerPage({
   try { if (catalog.length) currentTree = toApiNode(tree,catalog); } catch { /* The editor shows the invalid draft until run/validate. */ }
   const signature = JSON.stringify({tree:currentTree,asOf,mode,scope,instrumentType,boards,sourceRunId});
   const stale = Boolean(result && currentTree && signature !== runSignature);
+  const currentRunIndex = runs.findIndex(item => item.run_id === result?.run_id);
+  const newerRun = result && runTree && scope === "market" && currentRunIndex > 0
+    ? runs.slice(0, currentRunIndex).find(item => item.mode === mode && item.as_of === (asOf || today())
+        && JSON.stringify(item.tree) === JSON.stringify(runTree))
+    : undefined;
   const autoColumns = runTree ? conditionEntries(runTree).flatMap(({node}) => [ `${node.timeframe}:${node.metric}`, ...(node.right?.kind === "metric" ? [`${node.right.timeframe}:${node.right.metric}`] : []) ]) : [];
   const availableColumns = [...new Set(["close", "return_20", "volume_ratio_20", "1d:em_industry", "1d:em_concept", ...autoColumns, ...extraColumns])];
   const columns = availableColumns.filter((key) => !hiddenColumns.includes(key));
@@ -361,6 +366,7 @@ export function ScreenerPage({
           {result && <div className="run-stats"><span>全市场 <b>{result.universe_size.toLocaleString("zh-CN")}</b></span><span>实时覆盖 <b>{result.realtime_covered.toLocaleString("zh-CN")}</b></span></div>}
         </div>
         {!result ? <div className="result-empty">组合条件后运行，命中股票将在这里显示。</div> : <>
+          {newerRun && <p className="stale-banner" role="status">当前显示较早的筛选结果（{result.run_id.slice(0, 8)}）。同条件已有更新记录，命中 {newerRun.match_count} 只。 <button type="button" disabled={paging} onClick={() => { void client.screenResults(newerRun.run_id, pageSize, 0).then(next => { setResult(next); setSelected(next.matches[0]); setPage(1); setNewOnly(false); setFailedOnly(false); setChecked([]); }).catch((cause: Error) => setError(cause.message)); }}>载入最新结果</button></p>}
           {stale && <p className="stale-banner" role="status">条件、日期或范围已修改，当前仍为上次筛选结果。重新运行后更新。</p>}
           <details className="column-editor"><summary>显示列设置（自动关联筛选指标）</summary><div className="scope-toolbar">{availableColumns.map(key=><label key={key}><input type="checkbox" checked={!hiddenColumns.includes(key)} onChange={()=>setHiddenColumns(values=>values.includes(key)?values.filter(value=>value!==key):[...values,key])}/>{metricLabel(key,catalog)}</label>)}</div>
             <input aria-label="搜索结果列" placeholder="搜索要添加的指标" value={columnSearch} onChange={event=>setColumnSearch(event.target.value)}/><select aria-label="新增列周期" value={columnTimeframe} onChange={event=>setColumnTimeframe(event.target.value)}>{["1d","1w","1mo","5m","15m","30m","60m"].map(value=><option key={value}>{value}</option>)}</select>
