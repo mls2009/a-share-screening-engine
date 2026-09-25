@@ -265,6 +265,10 @@ class MarketFeatureStore:
     def attach_ma_support(self, histories, end, feature_version="v1"):
         boundary = (pd.Timestamp(end) - pd.DateOffset(years=2)).date()
         start = boundary
+        recent_days = {str(row[0]) for row in self.connection.execute(
+            """select distinct feature_date from market_features
+               where timeframe = '1d' and feature_version = ? and feature_date <= ?
+               order by feature_date desc limit 5""", [feature_version, end]).fetchall()}
         symbols = [symbol for symbol, rows in histories.items() if rows]
         for offset in range(0, len(symbols), 64):
             batch = symbols[offset:offset + 64]
@@ -281,7 +285,7 @@ class MarketFeatureStore:
                 records[row.pop("symbol")].append(row)
             for symbol, rows in records.items():
                 hits = support_hits(pd.DataFrame(rows)) if rows else []
-                hits = [hit for hit in hits if str(boundary) <= hit["date"] <= str(end)]
+                hits = [hit for hit in hits if hit["date"] in recent_days]
                 histories[symbol][0].update({MA_SUPPORT_METRIC: bool(hits), MA_SUPPORT_HITS: hits})
 
     def attach_ma_pierce(

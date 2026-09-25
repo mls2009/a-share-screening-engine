@@ -52,17 +52,55 @@ def test_store_and_marks_include_both_supports_and_confirmation(tmp_path):
     db = Database(tmp_path / 'support.duckdb')
     db.migrate()
     rows = frame()
+    rows.loc[87, ['open', 'close', 'low']] = [10.3, 10.4, 10.]
     db.connection.executemany(
         "insert into market_features (symbol,timeframe,feature_date,feature_version,open,high,close,low,ma_120,ma_250) values ('000001.SZ','1d',?,'v1',?,?,?,?,?,?)",
         [(r.feature_date.date(), r.open, r.high, r.close, r.low, r.ma_120, r.ma_250) for r in rows.itertuples()])
     history = MarketFeatureStore(db).read_history('000001.SZ', Timeframe.DAY, rows.iloc[-1].feature_date.date(), 1,
                                                  enrich=False, include_ma_support=True)
     assert history[0][MA_SUPPORT_METRIC] is True
+    assert [hit['date'] for hit in history[0][MA_SUPPORT_HITS]] == ['2025-03-29']
     tree = dict(kind='condition', metric=MA_SUPPORT_METRIC, timeframe='1d', operator='eq')
     marks = condition_marks(tree, {'result': 'true'}, {Timeframe.DAY: history})
     assert len(marks) == 5 * len(history[0][MA_SUPPORT_HITS])
-    assert any('本次命中' in m['label'] and m['date'] == '2025-03-12' for m in marks)
+    assert any('本次命中' in m['label'] and m['date'] == '2025-03-29' for m in marks)
     assert any('20日收盘站稳' in m['label'] and m['startDate'] == '2025-01-22' for m in marks)
+    db.connection.close()
+
+
+def test_store_requires_support_hit_in_market_latest_five_sessions(tmp_path):
+    from astock.domain.market import Timeframe
+    from astock.features.ma_support import MA_SUPPORT_HITS, MA_SUPPORT_METRIC
+    from astock.features.store import MarketFeatureStore
+    from astock.storage.database import Database
+
+    db = Database(tmp_path / 'recent-support.duckdb')
+    db.migrate()
+    rows = frame()
+    db.connection.executemany(
+        "insert into market_features (symbol,timeframe,feature_date,feature_version,open,high,close,low,ma_120,ma_250) values ('000001.SZ','1d',?,'v1',?,?,?,?,?,?)",
+        [(r.feature_date.date(), r.open, r.high, r.close, r.low, r.ma_120, r.ma_250) for r in rows.itertuples()])
+    store = MarketFeatureStore(db)
+    last = rows.iloc[-1].feature_date.date()
+    old = store.read_history('000001.SZ', Timeframe.DAY, last, 1,
+                             enrich=False, include_ma_support=True)[0]
+    assert old[MA_SUPPORT_METRIC] is False
+    assert old[MA_SUPPORT_HITS] == []
+
+    # A later market session must not make the stock's old last bar count as recent.
+    rows.loc[87, ['open', 'close', 'low']] = [10.3, 10.4, 10.]
+    db.connection.execute(
+        "update market_features set open=10.3,close=10.4,low=10 where symbol='000001.SZ' and feature_date=?",
+        [rows.iloc[87].feature_date.date()])
+    recent = store.read_history('000001.SZ', Timeframe.DAY, last, 1,
+                                enrich=False, include_ma_support=True)[0]
+    assert recent[MA_SUPPORT_METRIC] is True
+    db.connection.executemany(
+        "insert into market_features(symbol,timeframe,feature_date,feature_version,close) values ('000002.SZ','1d',?,'v1',11)",
+        [(last + pd.Timedelta(days=offset),) for offset in range(1, 6)])
+    stale = store.read_history('000001.SZ', Timeframe.DAY, last + pd.Timedelta(days=5), 1,
+                               enrich=False, include_ma_support=True)[0]
+    assert stale[MA_SUPPORT_METRIC] is False
     db.connection.close()
 
 

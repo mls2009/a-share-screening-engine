@@ -137,7 +137,7 @@ METRICS = [
                family="ma_cluster_pierce",
                choices=(ChoiceSpec("true", "是"), ChoiceSpec("false", "否")),
                supported_modes=frozenset({"close", "backtest"})),
-    MetricSpec("ma120_250_repeat_support_2y", "近两年：MA120/250连续两次支撑后回访（排除前20日·含双K）", Unit.BOOLEAN,
+    MetricSpec("ma120_250_repeat_support_2y", "近5交易日：MA120/250两次有效支撑后再次出现下影（含双K）", Unit.BOOLEAN,
                timeframes=frozenset({Timeframe.DAY}), operators=EQUALITY_OPERATORS, group="trend",
                family="ma_support", choices=(ChoiceSpec("true", "是"), ChoiceSpec("false", "否")),
                supported_modes=frozenset({"close"})),
