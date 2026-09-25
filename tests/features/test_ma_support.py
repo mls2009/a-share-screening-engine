@@ -126,3 +126,13 @@ def test_ma120_rejects_both_second_support_and_final_visit_above_average():
     rows.loc[45, 'low'] = 10.
     rows.loc[70, 'low'] = 10.1
     assert support_hits(rows) == []
+
+
+def test_ma120_touch_uses_trade_price_precision():
+    rows = frame()
+    rows['ma_120'] = 10.0092
+    rows.loc[[20, 45], 'low'] = 10.01
+    assert any(hit['ma'] == 120 for hit in support_hits(rows))
+
+    rows.loc[45, 'low'] = 10.02
+    assert not any(hit['ma'] == 120 for hit in support_hits(rows))

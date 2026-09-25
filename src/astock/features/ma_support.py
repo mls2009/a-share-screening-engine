@@ -25,7 +25,7 @@ def support_hits(frame):
     for window in (120, 250):
         ma = frame[f'ma_{window}'].to_numpy(dtype=float)
         if window == 120:
-            touch = np.isfinite(ma) & (ma > 0) & (lows <= ma) & (highs >= ma)
+            touch = np.isfinite(ma) & (ma > 0) & (lows <= np.round(ma, 2)) & (highs >= np.round(ma, 2))
         else:
             touch = np.isfinite(ma) & (ma > 0) & (np.abs(lows / ma - 1) <= .02 + 1e-12)
         above = np.isfinite(closing) & np.isfinite(ma) & (closing > ma)
