@@ -350,3 +350,18 @@ it("marks repeated MA support with distinct colors and arrows only on the return
   expect(arrows.map(s => s.markPoint!.data[0].name)).toEqual(["半年线支撑", "年线支撑"]);
   expect(series.filter(s => s.markArea)).toHaveLength(3);
 });
+
+it('新策略无需名称白名单，初始视图包含全部历史命中区间', () => {
+  const history = Array.from({length:300}, (_,i)=>({...bars[0],timestamp:new Date(Date.UTC(2025,0,i+1)).toISOString()}));
+  const option = buildChartOption(history, [], [], [], [{metric:'close',timeframe:'1d',date:history[42].timestamp.slice(0,10),startDate:history[40].timestamp.slice(0,10),periods:3,label:'任意新增策略'}]);
+  expect((option.dataZoom as Array<{start:number}>)[0].start).toBeLessThan(40/300*100);
+});
+
+it('年线收复同时标出跌破和收复点以及整个区间', () => {
+  const option = buildChartOption(bars, [], [], [], [{metric:'close',timeframe:'1d',date:'2026-08-20',startDate:'2026-08-19',periods:2,label:'年线跌破后收复·1日收复'}]);
+  const series = option.series as Array<{markPoint?:{data:Array<{name:string;coord:unknown[]}>};markArea?:unknown}>;
+  const points = series.flatMap(s=>s.markPoint?.data ?? []);
+  expect(points.map(p=>p.name)).toEqual(expect.arrayContaining(['跌破年线','收复年线']));
+  expect(points.find(p=>p.name==='收复年线')?.coord).toEqual([bars[1].timestamp,bars[1].low]);
+  expect(series.filter(s=>s.markArea)).toHaveLength(1);
+});

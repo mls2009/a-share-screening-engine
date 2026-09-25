@@ -1,3 +1,4 @@
+import { ConditionPreview } from "../screener/ConditionPreview";
 import { useState } from "react";
 import { api } from "../../api";
 import type { MetricSpec, UiNode } from "../../types";
@@ -84,6 +85,7 @@ export function HistoryWaves({ symbol, catalog }: { symbol: string; catalog: Met
     </div>}
     <fieldset disabled={busy || importing} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <ConditionTree tree={tree} catalog={metrics} onChange={(next) => { setTree(next); setResult(undefined); setSelected(undefined); setPage(0); setMessage(""); }} />
+      <ConditionPreview tree={tree} catalog={metrics} />
     </fieldset>
     <div className="wave-controls">
       <button className="run-button" disabled={busy || importing || !metrics.length} onClick={() => void run()}>{busy ? "正在扫描历史…" : "扫描历史条件"}</button>

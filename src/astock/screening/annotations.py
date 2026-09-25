@@ -7,6 +7,7 @@ from astock.domain.market import Timeframe
 from astock.screening.evaluator import TruthValue, evaluate_tree
 from astock.screening.models import ConditionNode
 from astock.features.price_action import PA_LABELS
+from astock.features.ma250_reclaim import MA250_RECLAIM_METRIC, MA250_RECLAIM_HITS
 from astock.features.ma_support import MA_SUPPORT_METRIC, MA_SUPPORT_HITS
 from astock.features.ma_pierce import MA_PIERCE_10D_METRIC, MA_PIERCE_10D_HITS, MA_PIERCE_2Y_HITS, MA_PIERCE_2Y_METRIC, MA_PIERCE_METRIC
 
@@ -14,7 +15,7 @@ from astock.features.ma_pierce import MA_PIERCE_10D_METRIC, MA_PIERCE_10D_HITS, 
 def entry_histories(histories: dict, mode: str, as_of, snapshot: dict) -> dict:
     """Keep intraday evidence independent of subsequently downloaded closing bars."""
     if mode != "live":
-        evidence_keys = (*SEQUOIA_HIT_KEYS.values(), MA_SUPPORT_HITS)
+        evidence_keys = (*SEQUOIA_HIT_KEYS.values(), MA_SUPPORT_HITS, MA250_RECLAIM_HITS)
         evidence = {key: snapshot[key] for key in evidence_keys if key in snapshot}
         if evidence:
             rows = histories.get(Timeframe.DAY, [])
@@ -60,6 +61,13 @@ def condition_marks(tree: dict, explanation: dict, histories: dict) -> list[dict
                 marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
                               "date": hit["date"], "periods": 1,
                               "label": f"{title}；{hit['branch']}；开{hit['open']:.2f} 收{hit['close']:.2f} MA120 {hit['ma120']:.2f}"})
+            return
+        if metric == MA250_RECLAIM_METRIC:
+            for hit in rows[0].get(MA250_RECLAIM_HITS, []):
+                marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
+                              "date": hit["date"], "startDate": hit["start_date"],
+                              "periods": hit["recovery_days"] + 1,
+                              "label": f"年线跌破后收复·{hit['recovery_days']}日收复；跌破日收盘{hit['break_close']:.2f}<MA250 {hit['break_ma250']:.2f}；收复日收盘{hit['close']:.2f}>MA250 {hit['ma250']:.2f}"})
             return
         if metric == MA_SUPPORT_METRIC:
             for hit in rows[0].get(MA_SUPPORT_HITS, []):

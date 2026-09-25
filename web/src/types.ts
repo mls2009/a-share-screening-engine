@@ -126,9 +126,13 @@ export interface BenchmarkComparisonPoint {
   stock_return_pct: number;
   benchmark_return_pct: number;
   relative_pct: number;
+  stock_period_pct?: number | null;
+  benchmark_period_pct?: number | null;
+  relative_period_pct?: number | null;
 }
 
 export interface BenchmarkComparison {
+  timeframe?: Timeframe;
   stock_symbol: string;
   stock_name: string;
   benchmark_symbol: string;
@@ -291,3 +295,6 @@ export interface MonitorSignal {
   comparator: PriceComparator;
   triggered_at: string;
 }
+
+export interface AmplitudeAverage { value: number | null; count: number; start: string | null; end: string | null }
+export interface AmplitudeSummary { data_date: string | null; days20: AmplitudeAverage; days120: AmplitudeAverage; two_years: AmplitudeAverage }

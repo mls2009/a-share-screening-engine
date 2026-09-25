@@ -1,3 +1,4 @@
+import { ConditionPreview } from "../screener/ConditionPreview";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import type { MetricSpec, ScreenRunResult, UiNode } from "../../types";
@@ -33,6 +34,7 @@ export function WatchlistConditions({ catalog, group, onResult }: { catalog: Met
     <fieldset disabled={busy}><label>数据模式<select aria-label="自选筛选数据模式" value={mode} onChange={event => { setMode(event.target.value as "live" | "close"); clear(); }}><option value="live">实时行情</option><option value="close">本地收盘数据</option></select></label>
       <ConditionJsonImport label="自选筛选" catalog={catalog} onImport={value => { setTree(value); clear(); }} />
       <ConditionTree tree={tree} catalog={catalog} onChange={value => { setTree(value); clear(); }} />
+      <ConditionPreview tree={tree} catalog={catalog} />
       <div className="watch-row-actions"><button className="run-button" disabled={!catalog.length} onClick={() => void run()}>{busy ? "筛选中…" : "筛选当前分组"}</button><button onClick={clear}>清除筛选</button></div>
     </fieldset>
     {message && <p className="error-banner" role="alert">{message}</p>}

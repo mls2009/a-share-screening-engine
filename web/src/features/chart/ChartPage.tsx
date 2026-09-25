@@ -1,3 +1,4 @@
+import type { AmplitudeSummary } from "../../types";
 import { DataDateInput } from "../../components/DataDateInput";
 import { ArrowLeft, GitCompareArrows, Maximize2, Minimize2, RefreshCw, Search, Trash2 } from "lucide-react";
 import { type ComponentType, useEffect, useRef, useState } from "react";
@@ -16,6 +17,7 @@ import { type ConditionMark, sourceMarks } from "../watchlist/model";
 import { TimeframeToolbar } from "./TimeframeToolbar";
 
 export interface ChartClient {
+  amplitudeSummary?(symbol: string, asOf: string): Promise<AmplitudeSummary>;
   chartShapes?(symbol:string, asOf:string, signal?:AbortSignal):Promise<{marks:ConditionMark[];data_date:string|null}>;
   searchSymbols(query: string): Promise<SymbolSearchResult[]>;
   bars(symbol: string, timeframe: Timeframe, start: string, end: string): Promise<Bar[]>;
@@ -81,6 +83,8 @@ export function ChartPage({
   const [suggestions, setSuggestions] = useState<SymbolSearchResult[]>([]);
   const [searchActive, setSearchActive] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>(focusMark?.timeframe ?? (watchSource ? sourceMarks(watchSource)[0]?.timeframe ?? "1d" : "1d"));
+  const [amplitude, setAmplitude] = useState<AmplitudeSummary>();
+  const [amplitudeError, setAmplitudeError] = useState(false);
   const [bars, setBars] = useState<Bar[]>([]);
   const [indicators, setIndicators] = useState<ChartIndicatorPoint[]>([]);
   const [selectedIndicators, setSelectedIndicators] = useState<ChartIndicator[]>(["ma"]);
@@ -116,6 +120,15 @@ export function ChartPage({
   const requestEnd = activeWindow?.end ?? (dataDate || defaultEnd);
   const requestStartAt = activeWindow?.startAt;
   const requestEndAt = activeWindow?.endAt;
+
+  useEffect(() => {
+    let active = true;
+    setAmplitude(undefined); setAmplitudeError(false);
+    client.amplitudeSummary?.(symbol, requestEnd)
+      .then(value => { if (active) setAmplitude(value); })
+      .catch(() => { if (active) setAmplitudeError(true); });
+    return () => { active = false; };
+  }, [client, symbol, requestEnd, reloadVersion]);
 
   const shapesEnabled = shapeKinds.length > 0 && timeframe === "1d";
   const shapeKey = `${symbol}:${requestEnd}:${reloadVersion}`;
@@ -430,6 +443,17 @@ export function ChartPage({
         </div>}
         {!benchmarkEnabled && <div className="indicator-toolbar">
           <DataDateInput label="K线数据日期" value={dataDate} onChange={value=>{setDataDate(value);setDrillStack([]);}} />
+          <div className="amplitude-summary" aria-label="日线平均振幅">
+            <span>日线平均振幅</span>
+            {([["days20", "近20日", 20], ["days120", "近120日", 120], ["two_years", "近两年", 0]] as const).map(([key, label, required]) => {
+              const item = amplitude?.[key];
+              return <span key={key} title={`日振幅＝（最高价－最低价）÷前收盘价；取算术平均。数字按固定色阶显示，振幅越大橙色越深（2%、3%、5%、8%分档）。${item ? `有效样本${item.count}天，${item.start ?? "—"}至${item.end ?? "—"}。停牌不计入。` : "正在读取日线"}`}>
+                {label} <strong data-intensity={item?.value == null ? "missing" : item.value < 2 ? "1" : item.value < 3 ? "2" : item.value < 5 ? "3" : item.value < 8 ? "4" : "5"}>{item?.value != null ? `${item.value.toFixed(2)}%` : "—"}</strong>
+                {item && (required ? item.count < required : true) && <small>（{item.count}天{required && item.count < required ? "，不足" : ""}）</small>}
+              </span>;
+            })}
+            <small>{amplitudeError ? "读取失败" : amplitude ? `截至 ${amplitude.data_date ?? "暂无数据"}` : "加载中…"}</small>
+          </div>
           <span>技术指标</span>
           {selectedIndicators.map((indicator) => {
             const option = indicatorOptions.find((item) => item.value === indicator);

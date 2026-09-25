@@ -80,6 +80,7 @@ export const api = {
     request<Bar[]>(
       `/api/symbols/${encodeURIComponent(symbol)}/bars?${new URLSearchParams({ timeframe, start, end })}`,
     ),
+  amplitudeSummary: (symbol: string, asOf: string) => request<import("./types").AmplitudeSummary>(`/api/symbols/${encodeURIComponent(symbol)}/amplitude-summary?${new URLSearchParams({as_of: asOf})}`),
   indicators: (symbol: string, timeframe: Timeframe, start: string, end: string) =>
     request<ChartIndicatorPoint[]>(
       `/api/symbols/${encodeURIComponent(symbol)}/indicators?${new URLSearchParams({ timeframe, start, end })}`,

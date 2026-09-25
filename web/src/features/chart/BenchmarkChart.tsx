@@ -35,5 +35,5 @@ export function BenchmarkChart({ comparison }: { comparison: BenchmarkComparison
     };
   }, [comparison]);
 
-  return <div ref={element} className="benchmark-chart" role="img" aria-label="大盘走势对比图" />;
+  return <section><p>两条曲线表示股票与大盘从同一起点开始的累计涨跌幅；悬停查看{comparison.timeframe && comparison.timeframe !== "1d" ? "本根K线" : "当日"}涨跌幅及跑赢／跑输大盘的百分点。</p><div ref={element} className="benchmark-chart" role="img" aria-label="大盘走势对比图" /></section>;
 }

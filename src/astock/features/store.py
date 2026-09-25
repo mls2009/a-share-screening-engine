@@ -6,6 +6,7 @@ import pandas as pd
 from astock.data.periods import final_session, period_end
 from astock.domain.market import Timeframe
 from astock.features.chart_shapes import chart_shape_features
+from astock.features.ma250_reclaim import MA250_RECLAIM_METRIC, MA250_RECLAIM_HITS, reclaim_hits
 from astock.features.ma_support import MA_SUPPORT_METRIC, MA_SUPPORT_HITS, support_hits
 from astock.features.ma_pierce import (
     MA_PIERCE_2Y_HITS, MA_PIERCE_10D_METRIC, MA_PIERCE_10D_HITS,
@@ -184,6 +185,7 @@ class MarketFeatureStore:
         include_shapes: bool = False,
         include_ma_pierce: bool = False,
         include_ma_support: bool = False,
+        include_ma250_reclaim: bool = False,
     ) -> list[dict]:
         period_filter, period_args = self._period_filter(timeframe, end)
         cursor = self.connection.execute(
@@ -201,6 +203,8 @@ class MarketFeatureStore:
             self.attach_vacuum({symbol: rows}, end, feature_version)
         if include_shapes and timeframe == Timeframe.DAY:
             self.attach_shapes({symbol: rows}, end, feature_version)
+        if include_ma250_reclaim and timeframe == Timeframe.DAY:
+            self.attach_ma250_reclaim({symbol: rows}, end, feature_version)
         if include_ma_support and timeframe == Timeframe.DAY:
             self.attach_ma_support({symbol: rows}, end, feature_version)
         if include_ma_pierce and timeframe == Timeframe.DAY:
@@ -223,6 +227,7 @@ class MarketFeatureStore:
         include_shapes: bool = False,
         include_ma_pierce: bool = False,
         include_ma_support: bool = False,
+        include_ma250_reclaim: bool = False,
         progress=None,
     ) -> dict[str, list[dict]]:
         if not symbols:
@@ -254,6 +259,8 @@ class MarketFeatureStore:
             self.attach_vacuum(histories, end, feature_version, progress=progress)
         if include_shapes and timeframe == Timeframe.DAY:
             self.attach_shapes(histories, end, feature_version, progress=progress)
+        if include_ma250_reclaim and timeframe == Timeframe.DAY:
+            self.attach_ma250_reclaim(histories, end, feature_version)
         if include_ma_support and timeframe == Timeframe.DAY:
             self.attach_ma_support(histories, end, feature_version)
         if include_ma_pierce and timeframe == Timeframe.DAY:
@@ -261,6 +268,28 @@ class MarketFeatureStore:
         if include_price_action and timeframe in {Timeframe.DAY, Timeframe.WEEK}:
             self.attach_price_action(histories, end, feature_version, timeframe, progress=progress)
         return histories
+
+    def attach_ma250_reclaim(self, histories, end, feature_version="v1"):
+        boundary = (pd.Timestamp(end) - pd.DateOffset(years=2)).date()
+        symbols = [symbol for symbol, rows in histories.items() if rows]
+        for offset in range(0, len(symbols), 64):
+            batch = symbols[offset:offset + 64]
+            cursor = self.connection.execute(
+                """with bars as (
+                       select symbol, feature_date, close, ma_250,
+                              lead(feature_date) over (partition by symbol order by feature_date) next_date
+                       from market_features
+                       where symbol in (select unnest(?)) and timeframe = '1d'
+                         and feature_version = ? and feature_date <= ?
+                   ) select symbol, feature_date, close, ma_250 from bars
+                   where feature_date >= ? or next_date >= ?
+                   order by symbol, feature_date""", [batch, feature_version, end, boundary, boundary])
+            records = {symbol: [] for symbol in batch}
+            for symbol, day, closing, average in cursor.fetchall():
+                records[symbol].append({'feature_date': day, 'close': closing, 'ma_250': average})
+            for symbol, rows in records.items():
+                hits = reclaim_hits(pd.DataFrame(rows), boundary)
+                histories[symbol][0].update({MA250_RECLAIM_METRIC: bool(hits), MA250_RECLAIM_HITS: hits})
 
     def attach_ma_support(self, histories, end, feature_version="v1"):
         boundary = (pd.Timestamp(end) - pd.DateOffset(years=2)).date()

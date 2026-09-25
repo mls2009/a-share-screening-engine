@@ -41,11 +41,15 @@ class ComparisonPoint(BaseModel):
     stock_return_pct: float
     benchmark_return_pct: float
     relative_pct: float
+    stock_period_pct: float | None = None
+    benchmark_period_pct: float | None = None
+    relative_period_pct: float | None = None
 
 
 class BenchmarkComparison(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    timeframe: Timeframe = Timeframe.DAY
     stock_symbol: str
     stock_name: str
     benchmark_symbol: str
@@ -145,7 +149,7 @@ class BenchmarkService:
         stock_name, _, _, _ = self._security(symbol)
         benchmark = self.benchmark_for(symbol)
         stock = self._read(
-            symbol, timeframe, Adjustment.QFQ, start, end, start_at, end_at
+            symbol, timeframe, Adjustment.QFQ, date.min, end, None, end_at
         )
         if not stock:
             raise BenchmarkDataError("stock_data_missing", "当前时段股票行情尚未同步")
@@ -153,9 +157,9 @@ class BenchmarkService:
             benchmark.symbol,
             timeframe,
             Adjustment.NONE,
-            start,
+            date.min,
             end,
-            start_at,
+            None,
             end_at,
         )
         if not market:
@@ -163,7 +167,13 @@ class BenchmarkService:
 
         stock_by_time = {bar.timestamp: bar for bar in stock}
         market_by_time = {bar.timestamp: bar for bar in market}
-        timestamps = sorted(stock_by_time.keys() & market_by_time.keys())
+        timestamps = sorted(stamp for stamp in stock_by_time.keys() & market_by_time.keys()
+                            if start <= stamp.date() <= end and self._in_window(stock_by_time[stamp], start_at, end_at))
+        def period_changes(bars):
+            return {current.timestamp: ((current.close / previous.close - 1) * 100, previous.timestamp)
+                    for previous, current in zip(bars, bars[1:]) if previous.close > 0}
+        stock_changes = period_changes(stock)
+        market_changes = period_changes(market)
         if not timestamps:
             raise BenchmarkDataError(
                 "no_aligned_data", "股票与大盘在该时段没有可对齐行情"
@@ -181,9 +191,15 @@ class BenchmarkService:
                     stock_return_pct=stock_return,
                     benchmark_return_pct=market_return,
                     relative_pct=stock_return - market_return,
+                    stock_period_pct=stock_changes.get(timestamp, (None, None))[0],
+                    benchmark_period_pct=market_changes.get(timestamp, (None, None))[0],
+                    relative_period_pct=(stock_changes[timestamp][0] - market_changes[timestamp][0])
+                    if timestamp in stock_changes and timestamp in market_changes
+                    and stock_changes[timestamp][1] == market_changes[timestamp][1] else None,
                 )
             )
         return BenchmarkComparison(
+            timeframe=timeframe,
             stock_symbol=symbol,
             stock_name=stock_name,
             benchmark_symbol=benchmark.symbol,

@@ -3,7 +3,6 @@ import type { EChartsOption } from "echarts";
 import type { BenchmarkComparison } from "../../types";
 
 const percent = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
-const points = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({
@@ -16,14 +15,18 @@ export function buildBenchmarkOption(comparison: BenchmarkComparison): EChartsOp
     if (!Array.isArray(params) || typeof params[0]?.dataIndex !== "number") return "";
     const point = comparison.points[params[0].dataIndex];
     if (!point) return "";
-    const relative = point.relative_pct >= 0
-      ? `跑赢 ${points(point.relative_pct)} 个百分点`
-      : `跑输 ${points(Math.abs(point.relative_pct))} 个百分点`;
+    const period = comparison.timeframe && comparison.timeframe !== "1d" ? "本根K线" : "当日";
+    const change = (value: number | null | undefined) => value == null ? "数据不足" : percent(value);
+    const relative = point.relative_period_pct == null ? "相对强弱：数据不足或前一周期未对齐"
+      : Math.abs(point.relative_period_pct) < 0.000001 ? `${period}与大盘持平`
+      : `${period}${point.relative_period_pct > 0 ? "跑赢" : "跑输"}大盘 ${Math.abs(point.relative_period_pct).toFixed(2)} 个百分点`;
     return [
       escapeHtml(new Date(point.timestamp).toLocaleString("zh-CN")),
-      `${escapeHtml(comparison.stock_name)} ${percent(point.stock_return_pct)}`,
-      `${escapeHtml(comparison.benchmark_name)} ${percent(point.benchmark_return_pct)}`,
-      relative,
+      `${escapeHtml(comparison.stock_name)} ${period}涨跌：${change(point.stock_period_pct)}`,
+      `${escapeHtml(comparison.benchmark_name)} ${period}涨跌：${change(point.benchmark_period_pct)}`,
+      `<b>${relative}</b>`,
+      `区间累计（起点 ${escapeHtml(comparison.points[0]?.timestamp.slice(0, 10) ?? "—")}）`,
+      `${escapeHtml(comparison.stock_name)}累计 ${percent(point.stock_return_pct)}；${escapeHtml(comparison.benchmark_name)}累计 ${percent(point.benchmark_return_pct)}`,
     ].join("<br/>");
   };
 

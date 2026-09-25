@@ -1,3 +1,4 @@
+import { ConditionPreview } from "../screener/ConditionPreview";
 import { useEffect, useState } from "react";
 import { api } from "../../api";
 import { MarketSearch } from "./MarketSearch";
@@ -6,7 +7,6 @@ import { StockOverview } from "../stock/StockOverview";
 import { ChartPage } from "../chart/ChartPage";
 import { HistoryWaves } from "./HistoryWaves";
 import { sourceMarks, type WatchItem, type SourceNode, type WatchGroup } from "./model";
-import { describe } from "../screener/presentation";
 import type { Evaluation, MetricSpec } from "../../types";
 
 function SourceExplanation({ node, result, catalog }: { node: SourceNode; result: Evaluation; catalog: MetricSpec[] }) {
@@ -129,7 +129,7 @@ export function WatchlistPage() {
               <td><button className="watch-stock-name" onClick={() => open(entry)}><strong>{entry.name}</strong><span>{entry.symbol}</span></button></td>
               <td className="watch-number">{quote?.close?.toFixed(2) ?? "—"}<small>{entry.current_quote ? `行情 ${entry.current_quote.timestamp.slice(0, 19).replace("T", " ")}` : entry.quote ? `最近成交 ${entry.quote.date}` : "暂无行情"}</small></td>
               <td className={`watch-number ${change == null || change === 0 ? "" : change > 0 ? "watch-up" : "watch-down"}`}>{suspended ? "停牌" : change == null ? "—" : `${change > 0 ? "+" : ""}${change.toFixed(2)}%`}{!suspended && <small>{entry.current_quote ? `相对昨收 · ${entry.current_quote.date}` : "历史涨跌幅 · 非实时"}</small>}{entry.trading_status && <small>状态截至 {entry.trading_status.date}</small>}</td>
-              <td className="watch-reason">{latest ? <><p>{describe(latest.tree, catalog)}</p><small>{latest.as_of} · {entry.sources.length} 次入选记录</small></> : <span>手动加入</span>}</td>
+              <td className="watch-reason">{latest ? <><ConditionPreview tree={latest.tree} catalog={catalog} title="入选条件" /><small>{latest.as_of} · {entry.sources.length} 次入选记录</small></> : <span>手动加入</span>}</td>
               <td><div className="watch-tags">{entry.groups?.length ? entry.groups.map((group) => <span key={group.id}>{group.name}</span>) : <span>未分组</span>}</div>
                 <details className="watch-membership"><summary>设置分组</summary>{groups.length ? groups.map((group) => <label key={group.id}><input type="checkbox" disabled={busy} checked={entry.groups?.some((value) => value.id === group.id) ?? false} onChange={(event) => {
                   const ids = entry.groups?.map((value) => value.id) ?? [];

@@ -192,3 +192,37 @@ def test_unknown_symbol_has_explicit_error(tmp_path: Path) -> None:
         service.benchmark_for("999999.SH")
 
     assert error.value.code == "symbol_not_found"
+
+
+def test_daily_returns_use_previous_session_outside_display_window(tmp_path):
+    service, _, store = make_service(tmp_path)
+    store.upsert([
+        make_bar('600001.SH', 18, 10, Adjustment.QFQ),
+        make_bar('600001.SH', 19, 9, Adjustment.QFQ),
+        make_bar('600001.SH', 20, 9.45, Adjustment.QFQ),
+        make_bar('000001.SH', 18, 100, Adjustment.NONE),
+        make_bar('000001.SH', 19, 92, Adjustment.NONE),
+        make_bar('000001.SH', 20, 92, Adjustment.NONE),
+    ])
+    result = service.compare('600001.SH', Timeframe.DAY, START, END)
+    assert result.points[0].stock_period_pct == pytest.approx(-10)
+    assert result.points[0].benchmark_period_pct == pytest.approx(-8)
+    assert result.points[0].relative_period_pct == pytest.approx(-2)
+    assert result.points[1].stock_period_pct == pytest.approx(5)
+    assert result.points[1].relative_period_pct == pytest.approx(5)
+    short = service.compare('600001.SH', Timeframe.DAY, END, END)
+    assert short.points[0].stock_period_pct == result.points[1].stock_period_pct
+
+
+def test_missing_previous_bar_does_not_become_zero_or_multiday_relative(tmp_path):
+    service, _, store = make_service(tmp_path)
+    store.upsert([
+        make_bar('600001.SH', 18, 10, Adjustment.QFQ),
+        make_bar('600001.SH', 20, 11, Adjustment.QFQ),
+        make_bar('000001.SH', 18, 100, Adjustment.NONE),
+        make_bar('000001.SH', 19, 101, Adjustment.NONE),
+        make_bar('000001.SH', 20, 102, Adjustment.NONE),
+    ])
+    result = service.compare('600001.SH', Timeframe.DAY, date(2026,8,18), END)
+    assert result.points[0].stock_period_pct is None
+    assert result.points[-1].relative_period_pct is None

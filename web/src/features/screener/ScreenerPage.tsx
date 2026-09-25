@@ -1,3 +1,4 @@
+import { ConditionPreview } from "./ConditionPreview";
 import { useResultReviews } from "../reviews/useResultReviews";
 import { DataDateInput } from "../../components/DataDateInput";
 import { FileJson, FolderOpen, Play, Radio, Save, SlidersHorizontal, Trash2, Upload } from "lucide-react";
@@ -358,7 +359,7 @@ export function ScreenerPage({
           </div>
         </div>}
         {catalog.length ? <ConditionTree tree={tree} catalog={catalog} onChange={(next: UiNode) => setTree(next as UiGroupNode)} /> : <div className="loading-strip">正在读取指标目录…</div>}
-        <section className="condition-preview" aria-label="中文条件预览"><strong>你正在表达：</strong><p>{describe(tree,catalog)}</p><small>“计算周期”是指标使用的K线根数；“周期”决定每根K线代表日、周或分钟；“回看周期”决定检查多少次。可将条件拖到目标分组标题上。</small></section>
+        <ConditionPreview tree={tree} catalog={catalog} />
       </section>
       <section className="screen-results">
         <div className="section-title">

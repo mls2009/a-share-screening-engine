@@ -98,7 +98,8 @@ export function candleTooltip(bars: Bar[], params: unknown): string {
   return `${bar.timestamp.slice(0, 19).replace("T", " ")}${bar.limit_state === "up" ? " · 收盘涨停" : bar.limit_state === "down" ? " · 收盘跌停" : ""}<br/>`
     + `开 ${bar.open.toFixed(2)}（${signed(percent(previous, bar.open))}）　收 ${bar.close.toFixed(2)}（${signed(change)}）<br/>高 ${bar.high.toFixed(2)}（${signed(percent(previous, bar.high))}）　低 ${bar.low.toFixed(2)}（${signed(percent(previous, bar.low))}）<br/>`
     + `<span style="color:${color}">涨跌幅（相对上一根收盘）：${signed(change)}</span><br/>`
-    + `开收变化：${signed(percent(bar.open))}<br/>成交量：${bar.volume_shares.toLocaleString("zh-CN")} 股<br/>成交额：${bar.amount_cny.toLocaleString("zh-CN")} 元` + (indicators.length ? `<br/>${indicators.join("<br/>")}` : "");
+    + `振幅（高低价差÷上一根收盘）：${previous && previous > 0 ? ((bar.high - bar.low) / previous * 100).toFixed(2) + "%" : "暂无（缺少上一根）"}<br/>`
+    + `实体涨跌幅（开收变化）：${signed(percent(bar.open))}<br/>成交量：${bar.volume_shares.toLocaleString("zh-CN")} 股<br/>成交额：${bar.amount_cny.toLocaleString("zh-CN")} 元` + (indicators.length ? `<br/>${indicators.join("<br/>")}` : "");
 }
 
 function trendTooltip(
@@ -215,8 +216,8 @@ export function buildChartOption(
   marks: ConditionMark[] = [],
 ): EChartsOption {
   const dates = bars.map((bar) => bar.timestamp);
-  const pinbarDates = new Set(marks.filter(mark => (mark.label.startsWith("裸K") && mark.label.includes("Pinbar")) || mark.label.startsWith("海龟突破 · 首次满足") || mark.label.startsWith("海龟突破＋均线金叉放量；") || mark.label.startsWith("海龟突破＋均线金叉放量＋RPS强势近高点；") || mark.label.startsWith("均线重复支撑·") || mark.label.startsWith("均线粘连走平·") || mark.label.startsWith("阳线实体上穿除年线外全部均线") || Boolean(mark.strategyId && mark.label.includes(" · 命中 "))).map(mark => mark.referenceStartDate ?? mark.date));
-  const firstSignal = bars.findIndex(bar => pinbarDates.has(bar.timestamp.slice(0, 10)));
+  const signalDates = new Set(marks.flatMap(mark => [mark.referenceStartDate, mark.startDate, mark.date].filter((day): day is string => Boolean(day))));
+  const firstSignal = bars.findIndex(bar => signalDates.has(bar.timestamp.slice(0, 10)));
   const initialStart = firstSignal >= 0 ? Math.min(Math.max(0, bars.length - 120), Math.max(0, firstSignal - 10)) : Math.max(0, bars.length - 120);
   const candleData = bars.map((bar) => {
     const color = bar.limit_state === "up" ? "#ffca45" : bar.limit_state === "down" ? "#a78bfa" : undefined;
@@ -344,6 +345,22 @@ export function buildChartOption(
     const isCandle = ["open", "high", "low", "close", "pattern_type", "pattern_strength", "is_limit_up"].includes(metric);
     if (isCandle) {
       const section = bars.slice(firstIndex, endIndex + 1);
+      if (mark.label.startsWith("年线跌破后收复·")) {
+        for (const [index, name, bullish, color] of [
+          [firstIndex, "跌破年线", false, "#ff9c6e"],
+          [endIndex, "收复年线", true, "#64d8cb"],
+        ] as const) {
+          chartSeries.push({ name, type: "line", data: [], z: 20,
+            markPoint: { symbol: "triangle", symbolRotate: bullish ? 0 : 180, symbolSize: 15,
+              symbolOffset: [0, bullish ? 14 : -14], itemStyle: { color },
+              label: { show: true, formatter: "{b}", position: bullish ? "bottom" : "top",
+                color, backgroundColor: "#111517", padding: [4, 6], borderRadius: 3 },
+              tooltip: { formatter: mark.label },
+              data: [{ name, coord: [dates[index], bullish ? bars[index].low : bars[index].high] }],
+            },
+          });
+        }
+      }
       const pinbar = mark.label.includes("Pinbar") && mark.label.startsWith("裸K");
       const turtle = mark.label.startsWith("海龟突破 · 首次满足");
       const confluence = mark.label.startsWith("海龟突破＋均线金叉放量；") || mark.label.startsWith("海龟突破＋均线金叉放量＋RPS强势近高点；");
