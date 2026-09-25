@@ -1,7 +1,23 @@
 from datetime import date, timedelta
 
 from astock.domain.market import Timeframe
-from astock.screening.annotations import condition_marks
+from astock.screening.annotations import condition_marks, entry_histories
+
+
+def test_saved_ma_support_marks_use_saved_hits_after_rule_changes():
+    hit = {"date": "2025-08-19", "start_date": "2025-08-18", "ma": 120,
+           "supports": [
+               {"date": "2025-04-14", "confirmation_start": "2025-04-15", "confirmation_end": "2025-05-15"},
+               {"date": "2025-07-15", "confirmation_start": "2025-07-16", "confirmation_end": "2025-08-12"}],
+           "types": ["双K"]}
+    histories = {Timeframe.DAY: [{"feature_date": date(2026, 9, 24),
+                                 "ma120_250_repeat_support_hits": []}]}
+    saved = {"ma120_250_repeat_support_hits": [hit]}
+    frozen = entry_histories(histories, "close", date(2026, 9, 25), saved)
+    tree = {"kind": "condition", "metric": "ma120_250_repeat_support_2y", "timeframe": "1d"}
+    marks = condition_marks(tree, {"result": "true"}, frozen)
+    assert len(marks) == 5
+    assert marks[-1]["date"] == "2025-08-19"
 
 
 def test_window_marks_respect_less_than_comparison():

@@ -14,7 +14,8 @@ from astock.features.ma_pierce import MA_PIERCE_10D_METRIC, MA_PIERCE_10D_HITS, 
 def entry_histories(histories: dict, mode: str, as_of, snapshot: dict) -> dict:
     """Keep intraday evidence independent of subsequently downloaded closing bars."""
     if mode != "live":
-        evidence = {key: snapshot[key] for key in SEQUOIA_HIT_KEYS.values() if key in snapshot}
+        evidence_keys = (*SEQUOIA_HIT_KEYS.values(), MA_SUPPORT_HITS)
+        evidence = {key: snapshot[key] for key in evidence_keys if key in snapshot}
         if evidence:
             rows = histories.get(Timeframe.DAY, [])
             return {**histories, Timeframe.DAY: [
