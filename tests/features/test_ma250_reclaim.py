@@ -38,6 +38,7 @@ def test_original_and_extended_metrics_are_separate_catalog_conditions():
     assert MA250_RECLAIM_EXTENDED_METRIC in metrics
     assert '1～2' in metrics[MA250_RECLAIM_METRIC].label
     assert '1～3' in metrics[MA250_RECLAIM_EXTENDED_METRIC].label
+    assert metrics[MA250_RECLAIM_METRIC].family != metrics[MA250_RECLAIM_EXTENDED_METRIC].family
     for metric in (MA250_RECLAIM_METRIC, MA250_RECLAIM_EXTENDED_METRIC):
         assert uses_ma250_reclaim({'kind':'condition','metric':metric})
 

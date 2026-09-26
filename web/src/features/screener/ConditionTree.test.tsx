@@ -26,6 +26,22 @@ function Harness() {
 }
 
 describe("ConditionTree", () => {
+  it("年线旧策略与最近5交易日新策略各有独立选项", async () => {
+    const annual = [
+      { key: "ma250_reclaim_2d_2y", label: "近两年：收盘跌破年线后1～2日内收复", family: "ma250_reclaim" },
+      { key: "ma250_reclaim_3d_shadow_recent5_2y", label: "近5交易日：年线1～3日内收复或单K/双K下影支撑", family: "ma250_reclaim_recent5" },
+    ].map((item): MetricSpec => ({ ...item, unit: "boolean", timeframes: ["1d"], operators: ["eq"], group: "trend", choices: [{ value: "true", label: "是" }] }));
+    function AnnualHarness() {
+      const [tree, setTree] = useState<UiGroupNode>(() => createGroup());
+      return <><output data-testid="selected-metric">{JSON.stringify(tree.children[0])}</output><ConditionTree tree={tree} catalog={[...catalog, ...annual]} onChange={(next) => setTree(next as UiGroupNode)} /></>;
+    }
+    render(<AnnualHarness />);
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "指标分类" }), "trend");
+    expect(screen.getByRole("option", { name: annual[0].label })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: annual[1].label })).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "指标" }), "ma250_reclaim_recent5");
+    expect(screen.getByTestId("selected-metric")).toHaveTextContent("ma250_reclaim_3d_shadow_recent5_2y");
+  });
   it("多选板块可以搜索，保留已选项", async () => {
     render(<Harness />);
     await userEvent.selectOptions(screen.getByRole("combobox",{name:"指标分类"}),"attributes");

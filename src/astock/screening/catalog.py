@@ -143,7 +143,7 @@ METRICS = [
                supported_modes=frozenset({"close"})),
     MetricSpec("ma250_reclaim_3d_shadow_recent5_2y", "近5交易日：年线1～3日内收复或单K/双K下影支撑", Unit.BOOLEAN,
                timeframes=frozenset({Timeframe.DAY}), operators=EQUALITY_OPERATORS, group="trend",
-               family="ma250_reclaim", choices=(ChoiceSpec("true", "是"), ChoiceSpec("false", "否")),
+               family="ma250_reclaim_recent5", choices=(ChoiceSpec("true", "是"), ChoiceSpec("false", "否")),
                supported_modes=frozenset({"close"})),
     MetricSpec("ma120_250_repeat_support_2y", "近5交易日：MA120/250两次有效支撑后再次出现下影（含双K）", Unit.BOOLEAN,
                timeframes=frozenset({Timeframe.DAY}), operators=EQUALITY_OPERATORS, group="trend",
