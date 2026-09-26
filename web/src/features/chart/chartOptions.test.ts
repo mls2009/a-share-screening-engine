@@ -250,6 +250,21 @@ it("uses dedicated limit colors for candles and matching volume bars", () => {
   expect(series[1].data[1].itemStyle.color).toBe("#a78bfa");
 });
 
+it("年线放量与涨停突破在各自命中K线上显示不同文字标记", () => {
+  const marks = bars.map((bar, index) => ({ metric: "close", timeframe: "1d" as const,
+    date: bar.timestamp.slice(0, 10), periods: 1,
+    label: `年线放量／涨停突破·${index === 0 ? "放量突破" : "涨停突破"}` }));
+  const series = buildChartOption(bars, [], [], [], marks).series as Array<{
+    markPoint?: { label: { show: boolean }; data: Array<{ name: string; coord: unknown[] }> };
+  }>;
+  const points = series.flatMap(item => item.markPoint?.data ?? []);
+  expect(points).toEqual([
+    { name: "年线放量突破", coord: [bars[0].timestamp, bars[0].low] },
+    { name: "年线涨停突破", coord: [bars[1].timestamp, bars[1].low] },
+  ]);
+  expect(series.filter(item => item.markPoint).every(item => item.markPoint?.label.show)).toBe(true);
+});
+
 
 it("指标提示文字使用对应线条和柱状图颜色", () => {
   const option = buildChartOption(bars, [], [], ["ma", "boll", "macd", "kdj", "rsi", "obv", "atr", "volume_ma"]);

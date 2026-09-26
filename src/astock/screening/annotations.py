@@ -7,6 +7,7 @@ from astock.domain.market import Timeframe
 from astock.screening.evaluator import TruthValue, evaluate_tree
 from astock.screening.models import ConditionNode
 from astock.features.price_action import PA_LABELS
+from astock.features.ma250_breakout import METRIC as MA250_BREAKOUT_METRIC, HITS as MA250_BREAKOUT_HITS
 from astock.features.ma250_reclaim import MA250_RECLAIM_METRIC, MA250_RECLAIM_HITS, MA250_RECLAIM_EXTENDED_METRIC, MA250_RECLAIM_EXTENDED_HITS
 from astock.features.ma_support import MA_SUPPORT_METRIC, MA_SUPPORT_HITS
 from astock.features.ma_pierce import MA_PIERCE_10D_METRIC, MA_PIERCE_10D_HITS, MA_PIERCE_2Y_HITS, MA_PIERCE_2Y_METRIC, MA_PIERCE_METRIC
@@ -15,7 +16,7 @@ from astock.features.ma_pierce import MA_PIERCE_10D_METRIC, MA_PIERCE_10D_HITS, 
 def entry_histories(histories: dict, mode: str, as_of, snapshot: dict) -> dict:
     """Keep intraday evidence independent of subsequently downloaded closing bars."""
     if mode != "live":
-        evidence_keys = (*SEQUOIA_HIT_KEYS.values(), MA_SUPPORT_HITS, MA250_RECLAIM_HITS, MA250_RECLAIM_EXTENDED_HITS)
+        evidence_keys = (*SEQUOIA_HIT_KEYS.values(), MA_SUPPORT_HITS, MA250_RECLAIM_HITS, MA250_RECLAIM_EXTENDED_HITS, MA250_BREAKOUT_HITS)
         evidence = {key: snapshot[key] for key in evidence_keys if key in snapshot}
         if evidence:
             rows = histories.get(Timeframe.DAY, [])
@@ -61,6 +62,14 @@ def condition_marks(tree: dict, explanation: dict, histories: dict) -> list[dict
                 marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
                               "date": hit["date"], "periods": 1,
                               "label": f"{title}；{hit['branch']}；开{hit['open']:.2f} 收{hit['close']:.2f} MA120 {hit['ma120']:.2f}"})
+            return
+        if metric == MA250_BREAKOUT_METRIC:
+            for hit in rows[0].get(MA250_BREAKOUT_HITS, []):
+                evidence = ('收盘涨停，豁免量能与振幅' if hit['branch'] == '涨停突破' else
+                            f"成交量/前20日均量{hit['volume_ratio']:.2f}倍；振幅{hit['amplitude']:.2f}%")
+                marks.append({'metric': 'close', 'timeframe': timeframe, 'path': active_path,
+                              'date': hit['date'], 'startDate': hit['date'], 'periods': 1,
+                              'label': f"年线放量／涨停突破·{hit['branch']}；{evidence}；收盘{hit['close']:.2f}>MA250 {hit['ma250']:.2f}"})
             return
         if metric in {MA250_RECLAIM_METRIC, MA250_RECLAIM_EXTENDED_METRIC}:
             hit_key = MA250_RECLAIM_HITS if metric == MA250_RECLAIM_METRIC else MA250_RECLAIM_EXTENDED_HITS

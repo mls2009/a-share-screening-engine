@@ -35,6 +35,7 @@ from astock.features.benchmark import BenchmarkDataError, BenchmarkService
 from astock.features.builder import FeatureBuilder, chart_base_timeframe
 from astock.features.chart_shapes import uses_shapes
 from astock.features.ma250_reclaim import uses_ma250_reclaim
+from astock.features.ma250_breakout import uses_ma250_breakout
 from astock.features.ma_support import uses_ma_support
 from astock.features.ma_pierce import uses_ma_pierce
 from astock.features.price_action import uses_price_action
@@ -331,7 +332,7 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
             if not any(item["run_id"] == str(payload.run_id) for item in sources):
                 stored_tree, stored_result = json.loads(source[1]), json.loads(source[2])
                 histories = {timeframe: MarketFeatureStore(context.database).read_history(
-                    payload.symbol, timeframe, source[0], 1000, enrich=False, include_vacuum=uses_vacuum(stored_tree), include_shapes=uses_shapes(stored_tree), include_price_action=uses_price_action(stored_tree), include_ma_support=uses_ma_support(stored_tree), include_ma250_reclaim=uses_ma250_reclaim(stored_tree), include_ma_pierce=uses_ma_pierce(stored_tree)
+                    payload.symbol, timeframe, source[0], 1000, enrich=False, include_vacuum=uses_vacuum(stored_tree), include_shapes=uses_shapes(stored_tree), include_price_action=uses_price_action(stored_tree), include_ma_support=uses_ma_support(stored_tree), include_ma250_reclaim=uses_ma250_reclaim(stored_tree), include_ma250_breakout=uses_ma250_breakout(stored_tree), include_ma_pierce=uses_ma_pierce(stored_tree)
                 ) for timeframe in Timeframe}
                 histories = entry_histories(histories, source[3], source[0], json.loads(source[4]))
                 sources.append({"run_id": str(payload.run_id), "as_of": source[0].isoformat(),

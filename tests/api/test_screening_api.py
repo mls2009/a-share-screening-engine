@@ -1320,6 +1320,54 @@ def test_original_and_extended_annual_ma_reclaim_screen_separately(tmp_path):
     assert extended.json()['match_count'] == 1
 
 
+def test_annual_ma_volume_breakout_json_history_limit_exemption_and_chart(tmp_path):
+    import pandas as pd
+    from astock.features.ma250_breakout import METRIC, HITS
+
+    client, database = _client(tmp_path)
+    con = database.connection
+    con.execute("update market_features set ma_250=10 where symbol='600001.SH'")
+    # The twenty volume observations before the two-year boundary must be loaded.
+    days = pd.bdate_range(end='2024-08-20', periods=21)
+    con.executemany(
+        "insert into market_features(symbol,timeframe,feature_date,feature_version,high,low,close,volume,ma_250) values ('600001.SH','1d',?,'v1',?,?,?,?,10)",
+        [(day.date(), 10.7 if i == 20 else 9.2, 9.6 if i == 20 else 8.8,
+          10.5 if i == 20 else 9, 200 if i == 20 else 100) for i, day in enumerate(days)],
+    )
+    con.executemany(
+        "insert into market_features(symbol,timeframe,feature_date,feature_version,high,low,close,volume,ma_250) values ('600001.SH','1d',?,'v1',?,?,?,?,10)",
+        [('2025-01-01', 9.2, 8.8, 9, 100), ('2025-01-02', 10.5, 10.5, 10.5, 1)],
+    )
+    raw = Bar(symbol='600001.SH', timestamp='2025-01-02T15:00:00+08:00', timeframe=Timeframe.DAY,
+              adjustment=Adjustment.NONE, open=11, high=11, low=11, close=11,
+              volume_shares=1, amount_cny=11, source='test', is_final=True)
+    client.app.state.context.bar_store.upsert([raw])
+    con.execute("insert into security_status values ('600001.SH','2025-01-02','main',false,false,10,11,9)")
+    tree = {'kind':'condition','metric':METRIC,'timeframe':'1d','operator':'eq',
+            'right':{'kind':'constant','value':True,'unit':'boolean'}}
+    response = client.post('/api/screens/run', json={'tree':tree,'as_of':'2026-08-20'})
+    assert response.status_code == 200
+    run = response.json()
+    assert run['match_count'] == 1
+    hits = run['matches'][0]['features'][HITS]
+    assert [(h['date'], h['branch']) for h in hits] == [('2024-08-20','放量突破'), ('2025-01-02','涨停突破')]
+    assert hits[0]['volume_ratio'] == 2
+    assert hits[1]['amplitude'] == 0
+    detail = client.get(f"/api/workbench/runs/{run['run_id']}/detail/600001.SH")
+    assert detail.status_code == 200
+    assert [m['date'] for m in detail.json()['source']['marks']] == [h['date'] for h in hits]
+    assert '豁免量能与振幅' in detail.json()['source']['marks'][1]['label']
+    added = client.post('/api/watchlist', json={'symbol':'600001.SH','run_id':run['run_id']})
+    assert added.status_code == 200
+    assert METRIC in client.get('/api/watchlist').text
+    # A near-limit close is not eligible for the exemption; saved evidence stays frozen.
+    client.app.state.context.bar_store.upsert([raw.model_copy(update={'close':10.99})])
+    rerun = client.post('/api/screens/run', json={'tree':tree,'as_of':'2026-08-20'}).json()
+    assert [h['date'] for h in rerun['matches'][0]['features'][HITS]] == ['2024-08-20']
+    frozen = client.get(f"/api/workbench/runs/{run['run_id']}/detail/600001.SH").json()
+    assert len(frozen['source']['marks']) == 2
+
+
 def test_chart_bars_defers_external_limit_data(tmp_path):
     from fastapi import BackgroundTasks
     from unittest.mock import Mock

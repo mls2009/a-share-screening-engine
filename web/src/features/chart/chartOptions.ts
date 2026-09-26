@@ -345,6 +345,18 @@ export function buildChartOption(
     const isCandle = ["open", "high", "low", "close", "pattern_type", "pattern_strength", "is_limit_up"].includes(metric);
     if (isCandle) {
       const section = bars.slice(firstIndex, endIndex + 1);
+      if (mark.label.startsWith("年线放量／涨停突破·")) {
+        const name = mark.label.includes("·涨停突破") ? "年线涨停突破" : "年线放量突破";
+        chartSeries.push({ name, type: "line", data: [], z: 20,
+          markPoint: { symbol: "triangle", symbolSize: 15, symbolOffset: [0, 14],
+            itemStyle: { color: markColor },
+            label: { show: true, formatter: "{b}", position: "bottom", color: markColor,
+              backgroundColor: "#111517", padding: [4, 6], borderRadius: 3 },
+            tooltip: { formatter: mark.label },
+            data: [{ name, coord: [dates[endIndex], bars[endIndex].low] }],
+          },
+        });
+      }
       if (mark.label.startsWith("年线跌破后收复·")) {
         for (const [index, name, bullish, color] of [
           [firstIndex, "跌破年线", false, "#ff9c6e"],

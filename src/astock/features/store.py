@@ -6,6 +6,7 @@ import pandas as pd
 from astock.data.periods import final_session, period_end
 from astock.domain.market import Timeframe
 from astock.features.chart_shapes import chart_shape_features
+from astock.features.ma250_breakout import attach_breakouts
 from astock.features.ma250_reclaim import MA250_RECLAIM_METRIC, MA250_RECLAIM_HITS, MA250_RECLAIM_EXTENDED_METRIC, MA250_RECLAIM_EXTENDED_HITS, reclaim_hits, shadow_support_hits
 from astock.features.ma_support import MA_SUPPORT_METRIC, MA_SUPPORT_HITS, support_hits
 from astock.features.ma_pierce import (
@@ -186,6 +187,7 @@ class MarketFeatureStore:
         include_ma_pierce: bool = False,
         include_ma_support: bool = False,
         include_ma250_reclaim: bool = False,
+        include_ma250_breakout: bool = False,
     ) -> list[dict]:
         period_filter, period_args = self._period_filter(timeframe, end)
         cursor = self.connection.execute(
@@ -205,6 +207,8 @@ class MarketFeatureStore:
             self.attach_shapes({symbol: rows}, end, feature_version)
         if include_ma250_reclaim and timeframe == Timeframe.DAY:
             self.attach_ma250_reclaim({symbol: rows}, end, feature_version)
+        if include_ma250_breakout and timeframe == Timeframe.DAY:
+            attach_breakouts(self.connection, {symbol: rows}, end, feature_version)
         if include_ma_support and timeframe == Timeframe.DAY:
             self.attach_ma_support({symbol: rows}, end, feature_version)
         if include_ma_pierce and timeframe == Timeframe.DAY:
@@ -228,6 +232,7 @@ class MarketFeatureStore:
         include_ma_pierce: bool = False,
         include_ma_support: bool = False,
         include_ma250_reclaim: bool = False,
+        include_ma250_breakout: bool = False,
         progress=None,
     ) -> dict[str, list[dict]]:
         if not symbols:
@@ -261,6 +266,8 @@ class MarketFeatureStore:
             self.attach_shapes(histories, end, feature_version, progress=progress)
         if include_ma250_reclaim and timeframe == Timeframe.DAY:
             self.attach_ma250_reclaim(histories, end, feature_version)
+        if include_ma250_breakout and timeframe == Timeframe.DAY:
+            attach_breakouts(self.connection, histories, end, feature_version, progress=progress)
         if include_ma_support and timeframe == Timeframe.DAY:
             self.attach_ma_support(histories, end, feature_version)
         if include_ma_pierce and timeframe == Timeframe.DAY:

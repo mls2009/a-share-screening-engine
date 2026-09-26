@@ -9,6 +9,7 @@ from astock.data.sectors import SECTOR_KEYS, SectorStore
 from astock.data.snapshots import overlay_snapshot
 from astock.domain.market import Timeframe
 from astock.features.chart_shapes import SHAPE_LABELS
+from astock.features.ma250_breakout import METRIC as MA250_BREAKOUT_METRIC
 from astock.features.ma250_reclaim import MA250_RECLAIM_METRICS
 from astock.features.ma_support import MA_SUPPORT_METRIC
 from astock.features.ma_pierce import MA_PIERCE_METRICS
@@ -271,6 +272,7 @@ class ScreeningService:
                 include_ma_pierce=bool(metrics & MA_PIERCE_METRICS),
                 include_ma_support=MA_SUPPORT_METRIC in metrics,
                 include_ma250_reclaim=bool(MA250_RECLAIM_METRICS & metrics),
+                include_ma250_breakout=MA250_BREAKOUT_METRIC in metrics,
                 progress=lambda message, done, total: report(10 + int(50*done/max(1,total)), message, done, total),
             )
             for timeframe in timeframes
@@ -307,6 +309,7 @@ class ScreeningService:
                 include_ma_pierce=bool(metrics & MA_PIERCE_METRICS),
                 include_ma_support=MA_SUPPORT_METRIC in metrics,
                 include_ma250_reclaim=bool(MA250_RECLAIM_METRICS & metrics),
+                include_ma250_breakout=MA250_BREAKOUT_METRIC in metrics,
                 progress=lambda message, done, total: report(10 + int(50*done/max(1,total)), message, done, total),
             )
         for metric in sorted(metrics & SEQUOIA_METRICS.keys()):
