@@ -59,6 +59,25 @@ const comparison: BenchmarkComparison = {
   ],
 };
 
+it("后台补齐涨跌停数据后重新读取并更新 K 线颜色", async () => {
+  let requests = 0;
+  const client: ChartClient = {
+    searchSymbols: async () => [],
+    bars: async () => {
+      requests++;
+      return [{ ...bars[0], limit_state: requests > 1 ? "up" : null, limit_data_pending: requests === 1 }];
+    },
+    zones: async () => [],
+    createManualZone: async () => manual,
+    deleteZone: async () => undefined,
+  };
+  const LimitChart = ({ bars: chartBars }: StockChartProps) => <div>{chartBars[0]?.limit_state === "up" ? "涨停已着色" : "涨停未着色"}</div>;
+  render(<ChartPage initialSymbol="600001.SH" client={client} Chart={LimitChart} showOverview={false} />);
+  expect(await screen.findByText("涨停未着色")).toBeVisible();
+  expect(await screen.findByText("涨停已着色", {}, { timeout: 5000 })).toBeVisible();
+  expect(requests).toBe(2);
+});
+
 it("点击日 K 后选择15分钟并可返回日线", async () => {
   const requests: Array<[string, string, string, string]> = [];
   const client: ChartClient = {

@@ -171,23 +171,31 @@ export function ChartPage({
 
   useEffect(() => {
     let current = true;
+    let retryTimer: number | undefined;
     setLoading(true); setError("");
     setBars([]);
     setZones([]);
     setIndicators([]);
-    client.bars(symbol, timeframe, requestStart, requestEnd)
-      .then((nextBars) => {
-        if (current) setBars(activeWindow ? filterWindowBars(nextBars, activeWindow) : nextBars);
-      })
-      .catch((cause: Error) => { if (current) setError(cause.message); })
-      .finally(() => { if (current) setLoading(false); });
+    const loadBars = (attempt = 0) => {
+      client.bars(symbol, timeframe, requestStart, requestEnd)
+        .then((nextBars) => {
+          if (!current) return;
+          setBars(activeWindow ? filterWindowBars(nextBars, activeWindow) : nextBars);
+          if (timeframe === "1d" && nextBars.some(bar => bar.limit_data_pending) && attempt < 24) {
+            retryTimer = window.setTimeout(() => loadBars(attempt + 1), 2500);
+          }
+        })
+        .catch((cause: Error) => { if (current) setError(cause.message); })
+        .finally(() => { if (current) setLoading(false); });
+    };
+    loadBars();
     client.zones(symbol, timeframe, requestEnd)
       .then((nextZones) => { if (current) setZones(nextZones); })
       .catch((cause: Error) => { if (current) setError(`支撑阻力加载失败：${cause.message}`); });
     (client.indicators?.(symbol, timeframe, requestStart, requestEnd) ?? Promise.resolve([]))
       .then((nextIndicators) => { if (current) setIndicators(nextIndicators); })
       .catch((cause: Error) => { if (current) setError(`技术指标加载失败：${cause.message}`); });
-    return () => { current = false; };
+    return () => { current = false; window.clearTimeout(retryTimer); };
   }, [client, reloadVersion, requestEnd, requestEndAt, requestStart, requestStartAt, symbol, timeframe]);
 
   useEffect(() => {

@@ -111,6 +111,7 @@ export interface ScreenTemplate {
 
 export interface Bar {
   limit_state?: "up" | "down" | null;
+  limit_data_pending?: boolean;
   symbol: string;
   timestamp: string;
   open: number;

@@ -1313,8 +1313,18 @@ def test_chart_bars_defers_external_limit_data(tmp_path):
     result = endpoint(background_tasks=tasks, symbol='600001.SH', timeframe=Timeframe.DAY,
                       start=date(2026, 8, 20), end=date(2026, 8, 20))
     assert result[0]['close'] == 12
+    assert result[0]['limit_data_pending'] is True
     market_data.history.assert_not_called()
     assert len(tasks.tasks) == 1
+    market_data.history.return_value = [context.bar_store.read('600001.SH', Timeframe.DAY, Adjustment.QFQ)[0].model_copy(update={'adjustment': Adjustment.NONE, 'close': 11})]
+    market_data.reference_provider.security_status.return_value = [dict(symbol='600001.SH', trade_date=date(2026, 8, 20), board='main', is_st=False, is_suspended=False, previous_close=10, limit_up=11, limit_down=9)]
+    tasks.tasks[0].func(*tasks.tasks[0].args, **tasks.tasks[0].kwargs)
+    ready_tasks = BackgroundTasks()
+    ready = endpoint(background_tasks=ready_tasks, symbol='600001.SH', timeframe=Timeframe.DAY,
+                     start=date(2026, 8, 20), end=date(2026, 8, 20))
+    assert ready[0]['limit_data_pending'] is False
+    assert ready[0]['limit_state'] == 'up'
+    assert len(ready_tasks.tasks) == 0
 
 
 def test_vacuum_screen_history_backtest_and_saved_evidence_agree(tmp_path):

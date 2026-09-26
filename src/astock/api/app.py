@@ -762,7 +762,9 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         market_data = getattr(context.market_sync, "market_data", None)
         if market_data is not None and BAOSTOCK_SESSION_LOCK.acquire(blocking=False):
             try:
-                market_data.history(symbol, Timeframe.DAY, start, end, Adjustment.NONE)
+                raw_bars = market_data.history(symbol, Timeframe.DAY, start, end, Adjustment.NONE)
+                if raw_bars:
+                    context.bar_store.upsert(raw_bars)
                 reference = market_data.reference_provider
                 if reference is not None:
                     statuses = reference.security_status(symbol, start, end)
@@ -790,12 +792,15 @@ def create_app(context: ApiContext, frontend_dir: Path | None = None) -> FastAPI
         bars = source if timeframe == base else MarketDataService.derive(source, timeframe)
         identity = context.database.connection.execute("select instrument_type from symbols where symbol = ?", [symbol]).fetchone()
         if timeframe == Timeframe.DAY and identity and identity[0] == "stock":
-            background_tasks.add_task(refresh_chart_limits, symbol, start, end)
             raw = context.bar_store.read_range(symbol, Timeframe.DAY, Adjustment.NONE, start, end)
             statuses = {row[0]: row[1:] for row in context.database.connection.execute(
                 "select trade_date,is_suspended,limit_up,limit_down from security_status where symbol = ? and trade_date between ? and ?", [symbol,start,end]
             ).fetchall()}
-            return annotate_limits(bars, raw, statuses)
+            result = annotate_limits(bars, raw, statuses)
+            missing_dates = [bar.timestamp.date() for bar, row in zip(bars, result, strict=True) if row['limit_data_pending']]
+            if missing_dates:
+                background_tasks.add_task(refresh_chart_limits, symbol, min(missing_dates), max(missing_dates))
+            return result
         return [bar.model_dump(mode="json") for bar in bars]
 
     @app.get("/api/symbols/{symbol}/zones")

@@ -21,6 +21,7 @@ def annotate_limits(bars: Iterable[Bar], raw_bars: Iterable[Bar], statuses: dict
         row['limit_state'] = None
         status = statuses.get(bar.timestamp.date())
         actual = raw.get(bar.timestamp)
+        row['limit_data_pending'] = actual is None or status is None
         if actual and status and not status[0]:
             row['limit_state'] = limit_state(actual.close, status[1], status[2])
         result.append(row)
