@@ -294,8 +294,9 @@ class MarketFeatureStore:
             for symbol, rows in records.items():
                 frame = pd.DataFrame(rows)
                 original_hits = reclaim_hits(frame, boundary)
-                extended_hits = sorted(reclaim_hits(frame, boundary, max_days=3) + shadow_support_hits(frame, boundary), key=lambda hit: hit["date"])
-                extended_hits = [hit for hit in extended_hits if hit["date"] in recent_days]
+                recent_start = max(str(boundary), min(recent_days, default=str(end)))
+                extended_hits = sorted(reclaim_hits(frame, boundary, max_days=3) + shadow_support_hits(frame, recent_start), key=lambda hit: hit["date"])
+                extended_hits = [hit for hit in extended_hits if hit["start_date"] in recent_days and hit["date"] in recent_days]
                 histories[symbol][0].update({MA250_RECLAIM_METRIC: bool(original_hits), MA250_RECLAIM_HITS: original_hits,
                                              MA250_RECLAIM_EXTENDED_METRIC: bool(extended_hits), MA250_RECLAIM_EXTENDED_HITS: extended_hits})
 

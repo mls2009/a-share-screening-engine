@@ -88,6 +88,35 @@ def test_store_boundary_asof_and_chart_evidence(tmp_path):
     db.connection.close()
 
 
+def test_recent_five_sessions_contain_both_start_and_finish(tmp_path):
+    from astock.storage.database import Database
+    from astock.features.store import MarketFeatureStore
+    from astock.domain.market import Timeframe
+
+    db = Database(tmp_path / 'recent-reclaim.duckdb')
+    db.migrate()
+    days = [day.date() for day in pd.bdate_range('2026-09-14', periods=7)]
+    for symbol, closes in [('000001.SZ', [11, 9, 9, 9, 11, 11, 11]),
+                           ('000002.SZ', [11, 11, 11, 9, 9, 9, 11])]:
+        db.connection.executemany(
+            "insert into market_features(symbol,timeframe,feature_date,feature_version,close,ma_250) values (?,'1d',?,'v1',?,10)",
+            [(symbol, day, close) for day, close in zip(days, closes, strict=True)],
+        )
+    db.connection.executemany(
+        "insert into market_features(symbol,timeframe,feature_date,feature_version,open,low,close,ma_250) values ('000003.SZ','1d',?,'v1',?,?,?,10)",
+        [(day, 10.4 if index in (1, 2) else 11, 10.04 if index == 1 else 10 if index == 2 else 10.5,
+          10.45 if index in (1, 2) else 11) for index, day in enumerate(days)],
+    )
+    rows = MarketFeatureStore(db).read_histories(['000001.SZ', '000002.SZ', '000003.SZ'], Timeframe.DAY, days[-1], 1,
+                                                  enrich=False, include_ma250_reclaim=True)
+    assert rows['000001.SZ'][0][MA250_RECLAIM_EXTENDED_METRIC] is False
+    assert rows['000002.SZ'][0][MA250_RECLAIM_EXTENDED_METRIC] is True
+    assert rows['000003.SZ'][0][MA250_RECLAIM_EXTENDED_METRIC] is True
+    first_recent_hit = next(hit for hit in rows['000003.SZ'][0]['ma250_reclaim_3d_shadow_recent5_hits'] if hit['date'] == str(days[2]))
+    assert first_recent_hit['types'] == ['单K']
+    db.connection.close()
+
+
 def test_single_and_double_shadow_support_without_prior_supports():
     from astock.features.ma250_reclaim import shadow_support_hits
     rows = frame([10.4, 10.45])
