@@ -6,7 +6,7 @@ import pandas as pd
 from astock.data.periods import final_session, period_end
 from astock.domain.market import Timeframe
 from astock.features.chart_shapes import chart_shape_features
-from astock.features.ma250_reclaim import MA250_RECLAIM_METRIC, MA250_RECLAIM_HITS, reclaim_hits, shadow_support_hits
+from astock.features.ma250_reclaim import MA250_RECLAIM_METRIC, MA250_RECLAIM_HITS, MA250_RECLAIM_EXTENDED_METRIC, MA250_RECLAIM_EXTENDED_HITS, reclaim_hits, shadow_support_hits
 from astock.features.ma_support import MA_SUPPORT_METRIC, MA_SUPPORT_HITS, support_hits
 from astock.features.ma_pierce import (
     MA_PIERCE_2Y_HITS, MA_PIERCE_10D_METRIC, MA_PIERCE_10D_HITS,
@@ -293,9 +293,11 @@ class MarketFeatureStore:
                 records[symbol].append({'feature_date': day, 'open': opening, 'low': low, 'close': closing, 'ma_250': average})
             for symbol, rows in records.items():
                 frame = pd.DataFrame(rows)
-                hits = sorted(reclaim_hits(frame, boundary) + shadow_support_hits(frame, boundary), key=lambda hit: hit["date"])
-                hits = [hit for hit in hits if hit["date"] in recent_days]
-                histories[symbol][0].update({MA250_RECLAIM_METRIC: bool(hits), MA250_RECLAIM_HITS: hits})
+                original_hits = reclaim_hits(frame, boundary)
+                extended_hits = sorted(reclaim_hits(frame, boundary, max_days=3) + shadow_support_hits(frame, boundary), key=lambda hit: hit["date"])
+                extended_hits = [hit for hit in extended_hits if hit["date"] in recent_days]
+                histories[symbol][0].update({MA250_RECLAIM_METRIC: bool(original_hits), MA250_RECLAIM_HITS: original_hits,
+                                             MA250_RECLAIM_EXTENDED_METRIC: bool(extended_hits), MA250_RECLAIM_EXTENDED_HITS: extended_hits})
 
     def attach_ma_support(self, histories, end, feature_version="v1"):
         boundary = (pd.Timestamp(end) - pd.DateOffset(years=2)).date()

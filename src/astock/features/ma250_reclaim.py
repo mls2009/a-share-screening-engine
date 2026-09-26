@@ -1,20 +1,23 @@
-"""日线收盘跌破年线后，在随后一至三个交易日内收复。"""
+"""日线收盘跌破年线后的收复与下影支撑。"""
 import numpy as np
 import pandas as pd
 
 MA250_RECLAIM_METRIC = 'ma250_reclaim_2d_2y'
 MA250_RECLAIM_HITS = 'ma250_reclaim_2d_hits'
+MA250_RECLAIM_EXTENDED_METRIC = 'ma250_reclaim_3d_shadow_recent5_2y'
+MA250_RECLAIM_EXTENDED_HITS = 'ma250_reclaim_3d_shadow_recent5_hits'
+MA250_RECLAIM_METRICS = {MA250_RECLAIM_METRIC, MA250_RECLAIM_EXTENDED_METRIC}
 
 
 def uses_ma250_reclaim(value):
     if hasattr(value, 'model_dump'):
         value = value.model_dump(mode='json')
     if isinstance(value, dict):
-        return value.get('metric') == MA250_RECLAIM_METRIC or any(uses_ma250_reclaim(v) for v in value.values())
+        return value.get('metric') in MA250_RECLAIM_METRICS or any(uses_ma250_reclaim(v) for v in value.values())
     return isinstance(value, list) and any(uses_ma250_reclaim(v) for v in value)
 
 
-def reclaim_hits(frame, boundary):
+def reclaim_hits(frame, boundary, max_days=2):
     """升序日线，跌破日在两年范围内；允许读取边界前一根确认跌破。"""
     if frame.empty:
         return []
@@ -28,7 +31,7 @@ def reclaim_hits(frame, boundary):
             continue
         if not (closing[start-1] > average[start-1] and closing[start] < average[start]):
             continue
-        for end in range(start + 1, min(start + 4, len(frame))):
+        for end in range(start + 1, min(start + max_days + 1, len(frame))):
             if not valid[end]:
                 break
             if closing[end] > average[end]:

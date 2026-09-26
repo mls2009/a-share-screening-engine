@@ -1300,6 +1300,26 @@ def test_candle_limit_color_uses_unadjusted_close(tmp_path):
     assert response.json()[0]['limit_state'] == 'up'
 
 
+def test_original_and_extended_annual_ma_reclaim_screen_separately(tmp_path):
+    from astock.features.ma250_reclaim import MA250_RECLAIM_METRIC, MA250_RECLAIM_EXTENDED_METRIC
+
+    client, database = _client(tmp_path)
+    database.connection.execute("update market_features set close=11, ma_250=10 where symbol='600001.SH' and feature_date='2026-08-20'")
+    database.connection.executemany(
+        "insert into market_features(symbol,timeframe,feature_date,feature_version,close,ma_250) values ('600001.SH','1d',?,'v1',?,10)",
+        [('2026-08-21', 9), ('2026-08-24', 9), ('2026-08-25', 9), ('2026-08-26', 11)],
+    )
+    def run(metric):
+        tree = {'kind':'condition','metric':metric,'timeframe':'1d','operator':'eq',
+                'right':{'kind':'constant','value':True,'unit':'boolean'}}
+        return client.post('/api/screens/run', json={'tree':tree,'mode':'close','as_of':'2026-08-26'})
+    original = run(MA250_RECLAIM_METRIC)
+    extended = run(MA250_RECLAIM_EXTENDED_METRIC)
+    assert original.status_code == extended.status_code == 200
+    assert original.json()['match_count'] == 0
+    assert extended.json()['match_count'] == 1
+
+
 def test_chart_bars_defers_external_limit_data(tmp_path):
     from fastapi import BackgroundTasks
     from unittest.mock import Mock
