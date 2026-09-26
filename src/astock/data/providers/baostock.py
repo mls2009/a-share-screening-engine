@@ -21,6 +21,12 @@ ADJUST_FLAGS = {
 }
 DAILY_FIELDS = "date,code,open,high,low,close,volume,amount,adjustflag"
 MINUTE_FIELDS = "date,time,code,open,high,low,close,volume,amount,adjustflag"
+# 沪深交易所修订《交易规则》自 2026-07-06 起施行：
+# 主板风险警示股票（ST/*ST）价格涨跌幅限制比例由 5% 调整为 10%，与主板普通股票一致。
+# 科创板/创业板（20%）与北交所（30%）的风险警示股票维持原比例不变。
+MAIN_ST_LIMIT_WIDENED_ON = date(2026, 7, 6)
+
+
 SH_ETF_PREFIXES = (
     "510",
     "511",
@@ -39,6 +45,19 @@ SH_ETF_PREFIXES = (
     "588",
     "589",
 )
+
+
+def limit_rate(is_st: bool, board: str, trade_date: date) -> Decimal:
+    if is_st and board == "main" and trade_date < MAIN_ST_LIMIT_WIDENED_ON:
+        return Decimal("0.05")
+    if board == "chinext" and trade_date < date(2020, 8, 24):
+        return Decimal("0.05") if is_st else Decimal("0.10")
+    return {
+        "main": Decimal("0.10"),
+        "chinext": Decimal("0.20"),
+        "star": Decimal("0.20"),
+        "beijing": Decimal("0.30"),
+    }[board]
 
 
 class BaoStockError(RuntimeError):
@@ -346,12 +365,7 @@ class BaoStockProvider:
         for row in rows:
             is_st = row["isST"] == "1"
             trade_date = date.fromisoformat(row["date"])
-            rate = Decimal("0.05") if is_st and board == "main" else {
-                "main": Decimal("0.10"),
-                "chinext": Decimal("0.20"),
-                "star": Decimal("0.20"),
-                "beijing": Decimal("0.30"),
-            }[board]
+            rate = limit_rate(is_st, board, trade_date)
             if board == "chinext" and trade_date < date(2020, 8, 24):
                 rate = Decimal("0.05") if is_st else Decimal("0.10")
             previous_close = float(row["preclose"]) if row["preclose"] else None

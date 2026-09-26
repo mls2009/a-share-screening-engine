@@ -319,8 +319,8 @@ def test_baostock_builds_point_in_time_security_status() -> None:
             "is_st": True,
             "is_suspended": True,
             "previous_close": 10.0,
-            "limit_up": 10.5,
-            "limit_down": 9.5,
+            "limit_up": 11.0,
+            "limit_down": 9.0,
         }
     ]
 
@@ -396,3 +396,48 @@ def test_history_checks_error_after_result_iteration():
     fake.query_history_k_data_plus = lambda **kw: Interrupted(kw['fields'].split(','), [])
     with pytest.raises(BaoStockError, match='interrupted'):
         BaoStockProvider(fake).history('600519.SH', Timeframe.DAY, date(2026,8,20), date(2026,8,20))
+
+
+def test_limit_rate_main_st_widened_to_ten_percent_from_2026_07_06() -> None:
+    from decimal import Decimal
+
+    from astock.data.providers.baostock import limit_rate
+
+    # 沪深交易所 2026-07-06 起，主板 ST/*ST 涨跌幅由 5% 调整为 10%
+    assert limit_rate(True, "main", date(2026, 7, 3)) == Decimal("0.05")
+    assert limit_rate(True, "main", date(2026, 7, 6)) == Decimal("0.10")
+    assert limit_rate(True, "main", date(2026, 9, 18)) == Decimal("0.10")
+    # 非风险警示主板一直是 10%
+    assert limit_rate(False, "main", date(2026, 7, 3)) == Decimal("0.10")
+    # 创业板 2020-08-24 注册制改革前后
+    assert limit_rate(True, "chinext", date(2020, 8, 21)) == Decimal("0.05")
+    assert limit_rate(True, "chinext", date(2020, 8, 24)) == Decimal("0.20")
+    # 科创板/北交所维持不变
+    assert limit_rate(True, "star", date(2026, 9, 18)) == Decimal("0.20")
+    assert limit_rate(True, "beijing", date(2026, 9, 18)) == Decimal("0.30")
+
+
+def test_price_limit_rounds_half_up() -> None:
+    from decimal import Decimal
+
+    from astock.data.providers.baostock import BaoStockProvider
+
+    # *ST中迪 2026-09-18：前收 9.38。旧 5% 规则误算出 9.85 假涨停价，
+    # 真实 10% 规则涨停价应为 10.32。
+    assert BaoStockProvider._price_limit(9.38, Decimal("0.05")) == (9.85, 8.91)
+    assert BaoStockProvider._price_limit(9.38, Decimal("0.10")) == (10.32, 8.44)
+
+
+def test_security_status_uses_widened_st_limit() -> None:
+    fake = FakeBaoStock()
+    fake.history_rows = [
+        ["2026-07-03", "sh.600001", "9.62", "1", "1"],
+        ["2026-07-06", "sh.600001", "9.62", "1", "1"],
+    ]
+    statuses = BaoStockProvider(fake).security_status(
+        "600001.SH", date(2026, 7, 3), date(2026, 7, 6)
+    )
+    by_date = {str(row["trade_date"]): row for row in statuses}
+    assert by_date["2026-07-03"]["limit_up"] == 10.10  # 旧规则 5%
+    assert by_date["2026-07-06"]["limit_up"] == 10.58  # 新规则 10%
+    assert by_date["2026-07-06"]["limit_down"] == 8.66
