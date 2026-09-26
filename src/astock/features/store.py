@@ -271,6 +271,10 @@ class MarketFeatureStore:
 
     def attach_ma250_reclaim(self, histories, end, feature_version="v1"):
         boundary = (pd.Timestamp(end) - pd.DateOffset(years=2)).date()
+        recent_days = {str(row[0]) for row in self.connection.execute(
+            """select distinct feature_date from market_features
+               where timeframe = '1d' and feature_version = ? and feature_date <= ?
+               order by feature_date desc limit 5""", [feature_version, end]).fetchall()}
         symbols = [symbol for symbol, rows in histories.items() if rows]
         for offset in range(0, len(symbols), 64):
             batch = symbols[offset:offset + 64]
@@ -289,6 +293,7 @@ class MarketFeatureStore:
                 records[symbol].append({'feature_date': day, 'close': closing, 'ma_250': average})
             for symbol, rows in records.items():
                 hits = reclaim_hits(pd.DataFrame(rows), boundary)
+                hits = [hit for hit in hits if hit["date"] in recent_days]
                 histories[symbol][0].update({MA250_RECLAIM_METRIC: bool(hits), MA250_RECLAIM_HITS: hits})
 
     def attach_ma_support(self, histories, end, feature_version="v1"):

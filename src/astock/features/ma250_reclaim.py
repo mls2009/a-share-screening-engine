@@ -1,4 +1,4 @@
-"""日线收盘跌破年线后，在随后一至两个交易日内收复。"""
+"""日线收盘跌破年线后，在随后一至三个交易日内收复。"""
 import numpy as np
 import pandas as pd
 
@@ -28,7 +28,7 @@ def reclaim_hits(frame, boundary):
             continue
         if not (closing[start-1] > average[start-1] and closing[start] < average[start]):
             continue
-        for end in range(start + 1, min(start + 3, len(frame))):
+        for end in range(start + 1, min(start + 4, len(frame))):
             if not valid[end]:
                 break
             if closing[end] > average[end]:

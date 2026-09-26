@@ -11,15 +11,15 @@ def frame(closes, averages=None):
                          'close': closes, 'ma_250': averages or [10.] * len(closes)})
 
 
-@pytest.mark.parametrize('closes,days', [([11, 9, 11, 12], 1), ([11, 9, 9, 11], 2), ([11, 9, 10, 11], 2)])
-def test_first_recovery_within_two_sessions(closes, days):
+@pytest.mark.parametrize('closes,days', [([11, 9, 11, 12], 1), ([11, 9, 9, 11], 2), ([11, 9, 10, 11], 2), ([11, 9, 9, 9, 11], 3)])
+def test_first_recovery_within_three_sessions(closes, days):
     hits = reclaim_hits(frame(closes), date(2025, 1, 1))
     assert len(hits) == 1
     assert hits[0]['recovery_days'] == days
     assert hits[0]['start_date'] == '2025-01-02'
 
 
-@pytest.mark.parametrize('closes', [[9, 9, 11], [10, 9, 11], [11, 10, 11], [11, 9, 9, 9, 11], [11, 9, 10], [11, 9], [None, 9, 11]])
+@pytest.mark.parametrize('closes', [[9, 9, 11], [10, 9, 11], [11, 10, 11], [11, 9, 9, 9, 9, 11], [11, 9, 10], [11, 9], [None, 9, 11]])
 def test_no_false_breaks_or_late_recovery(closes):
     assert reclaim_hits(frame(closes), date(2025, 1, 1)) == []
 
@@ -57,4 +57,11 @@ def test_store_boundary_asof_and_chart_evidence(tmp_path):
     assert earlier['000001.SZ'][0][MA250_RECLAIM_METRIC] is False
     later = store.read_history('000001.SZ', Timeframe.DAY, date(2025, 1, 4), 1, enrich=False, include_ma250_reclaim=True)
     assert later[0][MA250_RECLAIM_METRIC] is False
+    # Five newer market sessions exclude an old hit even if this stock has no new rows.
+    db.connection.executemany(
+        "insert into market_features(symbol,timeframe,feature_date,feature_version,close,ma_250) values ('000002.SZ','1d',?,'v1',12,10)",
+        [(day.date(),) for day in pd.bdate_range('2023-01-05', periods=5)])
+    stale = store.read_history('000001.SZ', Timeframe.DAY, date(2025, 1, 3), 1, enrich=False, include_ma250_reclaim=True)
+    assert stale[0][MA250_RECLAIM_METRIC] is False
+    assert stale[0][MA250_RECLAIM_HITS] == []
     db.connection.close()
