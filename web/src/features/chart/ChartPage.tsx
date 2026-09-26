@@ -447,8 +447,8 @@ export function ChartPage({
             <span>日线平均振幅</span>
             {([["days20", "近20日", 20], ["days120", "近120日", 120], ["two_years", "近两年", 0]] as const).map(([key, label, required]) => {
               const item = amplitude?.[key];
-              return <span key={key} title={`日振幅＝（最高价－最低价）÷前收盘价；取算术平均。数字按固定色阶显示，振幅越大橙色越深（2%、3%、5%、8%分档）。${item ? `有效样本${item.count}天，${item.start ?? "—"}至${item.end ?? "—"}。停牌不计入。` : "正在读取日线"}`}>
-                {label} <strong data-intensity={item?.value == null ? "missing" : item.value < 2 ? "1" : item.value < 3 ? "2" : item.value < 5 ? "3" : item.value < 8 ? "4" : "5"}>{item?.value != null ? `${item.value.toFixed(2)}%` : "—"}</strong>
+              return <span key={key} title={`日振幅＝（最高价－最低价）÷前收盘价；取算术平均。数字按固定色阶显示：低于2%灰色、2%～3%浅黄、3%～4%金黄、4%～5%橙色、5%～6%红色、6%以上深红。${item ? `有效样本${item.count}天，${item.start ?? "—"}至${item.end ?? "—"}。停牌不计入。` : "正在读取日线"}`}>
+                {label} <strong data-intensity={item?.value == null ? "missing" : item.value < 2 ? "1" : item.value < 3 ? "2" : item.value < 4 ? "3" : item.value < 5 ? "4" : item.value < 6 ? "5" : "6"}>{item?.value != null ? `${item.value.toFixed(2)}%` : "—"}</strong>
                 {item && (required ? item.count < required : true) && <small>（{item.count}天{required && item.count < required ? "，不足" : ""}）</small>}
               </span>;
             })}
