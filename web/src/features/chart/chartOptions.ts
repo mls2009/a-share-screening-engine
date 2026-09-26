@@ -364,7 +364,7 @@ export function buildChartOption(
       const pinbar = mark.label.includes("Pinbar") && mark.label.startsWith("裸K");
       const turtle = mark.label.startsWith("海龟突破 · 首次满足");
       const confluence = mark.label.startsWith("海龟突破＋均线金叉放量；") || mark.label.startsWith("海龟突破＋均线金叉放量＋RPS强势近高点；");
-      const maSupport = mark.label.startsWith("均线重复支撑·") && mark.label.includes("本次命中");
+      const maSupport = (mark.label.startsWith("均线重复支撑·") && mark.label.includes("本次命中")) || mark.label.startsWith("年线下影支撑·");
       const maPierce = (mark.label.startsWith("均线粘连走平·") && !mark.label.includes("突破前10日整理")) || mark.label.startsWith("阳线实体上穿除年线外全部均线");
       if (pinbar || turtle || confluence || maPierce || maSupport || mark.label.startsWith("实体低点回访：")) {
         const bullish = !pinbar || mark.label.includes("看涨");
@@ -375,7 +375,7 @@ export function buildChartOption(
             label: { show: true, formatter: "{b}", position: bullish ? "bottom" : "top",
               color: markColor, backgroundColor: "#111517", padding: [4, 6], borderRadius: 3 },
             tooltip: { formatter: mark.label },
-            data: [{ name: maSupport ? (mark.label.includes("MA250") ? "年线支撑" : "半年线支撑") : maPierce ? "均线穿线" : confluence ? "组合命中" : turtle ? "海龟突破" : !pinbar ? "实体低点回访" : `${mark.label.includes("双K合成") ? "双K·" : ""}${bullish ? "看涨Pinbar" : "看跌Pinbar"}`, coord: [dates[endIndex], bullish ? bars[endIndex].low : bars[endIndex].high] }],
+            data: [{ name: maSupport ? ((mark.label.includes("MA250") || mark.label.startsWith("年线下影支撑·")) ? "年线支撑" : "半年线支撑") : maPierce ? "均线穿线" : confluence ? "组合命中" : turtle ? "海龟突破" : !pinbar ? "实体低点回访" : `${mark.label.includes("双K合成") ? "双K·" : ""}${bullish ? "看涨Pinbar" : "看跌Pinbar"}`, coord: [dates[endIndex], bullish ? bars[endIndex].low : bars[endIndex].high] }],
           },
         });
       }

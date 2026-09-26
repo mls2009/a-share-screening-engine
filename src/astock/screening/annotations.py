@@ -64,6 +64,11 @@ def condition_marks(tree: dict, explanation: dict, histories: dict) -> list[dict
             return
         if metric == MA250_RECLAIM_METRIC:
             for hit in rows[0].get(MA250_RECLAIM_HITS, []):
+                if hit.get("kind") == "shadow_support":
+                    marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
+                                  "date": hit["date"], "startDate": hit["start_date"], "periods": hit["periods"],
+                                  "label": f"年线下影支撑·{'/'.join(hit['types'])}；收盘{hit['close']:.2f}>MA250 {hit['ma250']:.2f}"})
+                    continue
                 marks.append({"metric": "close", "timeframe": timeframe, "path": active_path,
                               "date": hit["date"], "startDate": hit["start_date"],
                               "periods": hit["recovery_days"] + 1,

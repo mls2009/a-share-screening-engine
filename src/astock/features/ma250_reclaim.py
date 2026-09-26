@@ -38,3 +38,38 @@ def reclaim_hits(frame, boundary):
                              'ma250': float(average[end])})
                 break
     return hits
+
+
+def shadow_support_hits(frame, boundary):
+    """沿用年线宽松下影规则；无需此前两次支撑，同日单K/双K合并记录。"""
+    if frame.empty:
+        return []
+    dates = [str(pd.Timestamp(d).date()) for d in frame['feature_date']]
+    opening = frame['open'].to_numpy(dtype=float)
+    closing = frame['close'].to_numpy(dtype=float)
+    lows = frame['low'].to_numpy(dtype=float)
+    average = frame['ma_250'].to_numpy(dtype=float)
+    hits = []
+    for end in range(len(frame)):
+        if not (np.isfinite(average[end]) and average[end] > 0 and closing[end] > average[end]):
+            continue
+        matches = []
+        for size in (1, 2):
+            start = end - size + 1
+            if start < 0 or dates[start] < str(boundary):
+                continue
+            if not np.isfinite(lows[start:end+1]).all() or not np.isfinite(opening[start]) or not np.isfinite(closing[end]):
+                continue
+            low_index = start + int(np.argmin(lows[start:end+1]))
+            ma = average[low_index]
+            lower = min(opening[start], closing[end]) - lows[low_index]
+            body = abs(closing[end] - opening[start])
+            if np.isfinite(ma) and ma > 0 and abs(lows[low_index] / ma - 1) <= .02 + 1e-12 and lower > 0 and lower + 1e-12 >= body:
+                matches.append((size, start))
+        if matches:
+            hits.append({'kind': 'shadow_support', 'date': dates[end],
+                         'start_date': dates[min(start for _, start in matches)],
+                         'types': ['单K' if size == 1 else '双K' for size, _ in matches],
+                         'periods': max(size for size, _ in matches),
+                         'close': float(closing[end]), 'ma250': float(average[end])})
+    return hits

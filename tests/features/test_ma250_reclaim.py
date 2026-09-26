@@ -65,3 +65,34 @@ def test_store_boundary_asof_and_chart_evidence(tmp_path):
     assert stale[0][MA250_RECLAIM_METRIC] is False
     assert stale[0][MA250_RECLAIM_HITS] == []
     db.connection.close()
+
+
+def test_single_and_double_shadow_support_without_prior_supports():
+    from astock.features.ma250_reclaim import shadow_support_hits
+    rows = frame([10.4, 10.45])
+    rows['open'] = [10.4, 10.05]
+    rows['low'] = [10., 10.04]
+    hits = shadow_support_hits(rows, date(2025,1,1))
+    assert hits[0]['types'] == ['单K']
+    assert hits[1]['types'] == ['双K']
+    assert hits[1]['start_date'] == '2025-01-01'
+    rows['low'] = 10.3
+    assert shadow_support_hits(rows, date(2025,1,1)) == []
+    rows['close'] = 9.9
+    assert shadow_support_hits(rows, date(2025,1,1)) == []
+
+
+def test_shadow_support_marks_its_actual_two_candle_span():
+    from astock.screening.annotations import condition_marks
+    from astock.domain.market import Timeframe
+    from astock.features.ma250_reclaim import MA250_RECLAIM_METRIC, MA250_RECLAIM_HITS, shadow_support_hits
+    rows = frame([10.05,10.45])
+    rows['open'] = [10.4,10.05]
+    rows['low'] = [10.,10.04]
+    hits = shadow_support_hits(rows,date(2025,1,1))
+    marks = condition_marks({'kind':'condition','metric':MA250_RECLAIM_METRIC,'timeframe':'1d'},
+                            {'result':'true'}, {Timeframe.DAY:[{MA250_RECLAIM_HITS:hits}]})
+    assert len(marks) == 1
+    assert marks[0]['startDate'] == '2025-01-01'
+    assert marks[0]['date'] == '2025-01-02'
+    assert '年线下影支撑·双K' in marks[0]['label']

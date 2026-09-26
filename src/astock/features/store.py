@@ -6,7 +6,7 @@ import pandas as pd
 from astock.data.periods import final_session, period_end
 from astock.domain.market import Timeframe
 from astock.features.chart_shapes import chart_shape_features
-from astock.features.ma250_reclaim import MA250_RECLAIM_METRIC, MA250_RECLAIM_HITS, reclaim_hits
+from astock.features.ma250_reclaim import MA250_RECLAIM_METRIC, MA250_RECLAIM_HITS, reclaim_hits, shadow_support_hits
 from astock.features.ma_support import MA_SUPPORT_METRIC, MA_SUPPORT_HITS, support_hits
 from astock.features.ma_pierce import (
     MA_PIERCE_2Y_HITS, MA_PIERCE_10D_METRIC, MA_PIERCE_10D_HITS,
@@ -280,19 +280,20 @@ class MarketFeatureStore:
             batch = symbols[offset:offset + 64]
             cursor = self.connection.execute(
                 """with bars as (
-                       select symbol, feature_date, close, ma_250,
+                       select symbol, feature_date, open, low, close, ma_250,
                               lead(feature_date) over (partition by symbol order by feature_date) next_date
                        from market_features
                        where symbol in (select unnest(?)) and timeframe = '1d'
                          and feature_version = ? and feature_date <= ?
-                   ) select symbol, feature_date, close, ma_250 from bars
+                   ) select symbol, feature_date, open, low, close, ma_250 from bars
                    where feature_date >= ? or next_date >= ?
                    order by symbol, feature_date""", [batch, feature_version, end, boundary, boundary])
             records = {symbol: [] for symbol in batch}
-            for symbol, day, closing, average in cursor.fetchall():
-                records[symbol].append({'feature_date': day, 'close': closing, 'ma_250': average})
+            for symbol, day, opening, low, closing, average in cursor.fetchall():
+                records[symbol].append({'feature_date': day, 'open': opening, 'low': low, 'close': closing, 'ma_250': average})
             for symbol, rows in records.items():
-                hits = reclaim_hits(pd.DataFrame(rows), boundary)
+                frame = pd.DataFrame(rows)
+                hits = sorted(reclaim_hits(frame, boundary) + shadow_support_hits(frame, boundary), key=lambda hit: hit["date"])
                 hits = [hit for hit in hits if hit["date"] in recent_days]
                 histories[symbol][0].update({MA250_RECLAIM_METRIC: bool(hits), MA250_RECLAIM_HITS: hits})
 

@@ -137,7 +137,7 @@ METRICS = [
                family="ma_cluster_pierce",
                choices=(ChoiceSpec("true", "是"), ChoiceSpec("false", "否")),
                supported_modes=frozenset({"close", "backtest"})),
-    MetricSpec("ma250_reclaim_2d_2y", "近5交易日：年线跌破后1～3日内收复", Unit.BOOLEAN,
+    MetricSpec("ma250_reclaim_2d_2y", "近5交易日：年线3日内收复或单K/双K下影支撑", Unit.BOOLEAN,
                timeframes=frozenset({Timeframe.DAY}), operators=EQUALITY_OPERATORS, group="trend",
                family="ma250_reclaim", choices=(ChoiceSpec("true", "是"), ChoiceSpec("false", "否")),
                supported_modes=frozenset({"close"})),
